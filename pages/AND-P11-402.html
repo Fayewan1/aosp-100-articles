@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>从 AOSP 到产品：工程化清单</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>从 AOSP 到产品：工程化清单</h1>
+<div class="kv"><span>ID：AND-P11-402</span><span>卷：P11</span><span>章：11.4</span><span>难度：3</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/envsetup.sh ；build/make/core/main.mk ；cts/tests ；test/vts ；build/release/release_configs ；developers/build</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>「AOSP 到产品」不是一条单向流水线，而是一组可核入口的串联：<code>lunch()</code> 定产品与变体，<code>make()</code> 把 Android.bp 交给 Soong，releasetools 生成 target files 与 OTA，update_engine 消费 payload。</p>
+<p>本篇不做机制复述，只做清单式收口：每个阶段给出一个树内可核的入口、一个产物路径、一条判据。判据都是静态可核的，不含实测耗时与体积。</p>
+<p>一次交付是否「做完了」，可以用五步判据串起来查：版本锚点 → 构建 → 测试 → 发布配置 → 更新资产。</p>
+<p>本篇是 P11 卷收卷篇，逐条指向 P0–P11 的承接篇，本身不引入新机制。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P11-401</code>，构建系统内部的 Android.bp 解析与 ninja 生成在那里展开，本篇只引用其入口。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/envsetup.sh</code></li><li><code>build/make/core/main.mk</code></li><li><code>cts/tests</code></li><li><code>test/vts</code></li><li><code>build/release/release_configs</code></li><li><code>developers/build</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>产品线交付到第三次，团队开始问同一个问题：这次改动到底经过了哪几道门？</p>
+<p>有人拿出 <code>out/</code> 目录说构建过了，有人拿出 CTS 报告说测过了，有人说 OTA 包在别人的机器上。三份证据互相对不上，因为没有共同的判据。</p>
+<p>更麻烦的是版本锚点。manifest 的默认 revision 是 <code>android17-release</code>（<code>.repo/manifests/default.xml</code> :7），只有 <code>platform/superproject</code>（:11）另标 <code>android-latest-release</code>——镜像到底出自哪个 release config、哪一次同步，事后查不清。</p>
+<p>本篇要解决的就是这个：把「做没做」从口头确认变成树内可核的路径与入口。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>五个概念。<strong>版本锚点</strong>：manifest 的默认 revision（<code>android17-release</code>），决定所有仓的基线。<strong>构建入口</strong>：<code>lunch()</code> 按 <code>&lt;product&gt;-&lt;release&gt;-&lt;variant&gt;</code> 三元组选产品、release config 与变体（三者独立：<code>TARGET_RELEASE</code> 决定取哪份 release config，<code>TARGET_BUILD_VARIANT</code> 决定 user/userdebug/eng），<code>make()</code> 转 Soong。<strong>测试门</strong>：CTS 与 VTS 各自的目录与套件。<strong>发布配置</strong>：<code>build/release/release_configs/</code> 下的 textproto。<strong>更新资产</strong>：releasetools 的产物与 update_engine 的 payload。</p>
+<p>图 1：五步判据与各自的可核入口</p>
+<pre><code>[版本锚点] -&gt; [构建] -&gt; [测试] -&gt; [发布配置] -&gt; [更新资产]
+ manifest      lunch     cts/       release_      releasetools
+ 默认 revision +make     test/vts   configs/      +update_engine</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>五步之间是单向依赖：锚点不定，构建无从对账；构建不出，测试无对象；发布配置未选，target files 无变体；payload 生成不在链上，OTA 无法验签。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>各阶段的可核入口与判据，一张表收口。每行的说明列指向承接篇，不重复机制细节。</p>
+<table><thead><tr><th>阶段</th><th>可核入口</th><th>判据</th><th>承接篇</th></tr></thead><tbody><tr><td>版本锚点</td><td>manifest 默认 revision</td><td>默认 <code>android17-release</code>（:7），仅 superproject（:11）另标 <code>android-latest-release</code>；1087 个 <code>&lt;project&gt;</code> 继承默认</td><td><code>AND-P11-101</code></td></tr><tr><td>构建入口</td><td><code>build/envsetup.sh</code> 的 <code>lunch()</code> :535、<code>make()</code> :1033</td><td><code>make()</code> 转 <code>build/soong/soong_ui.bash --make-mode</code></td><td><code>AND-P11-102</code></td></tr><tr><td>模块组</td><td><code>tapas()</code> :674、<code>banchan()</code> :747</td><td>按模块组构建，不走整包</td><td><code>AND-P11-102</code></td></tr><tr><td>刷机</td><td><code>flashall()</code> :881、<code>fastboot()</code> :871</td><td>走 <code>system/core/fastboot/</code></td><td><code>AND-P11-202</code></td></tr><tr><td>测试</td><td><code>cts/</code> 下 12 个目录；<code>test/vts</code></td><td>CTS 与 VTS 分属不同顶层目录</td><td>无本卷承接篇（判据见本篇 §5）</td></tr><tr><td>发布配置</td><td><code>build/release/release_configs/</code> 17 个 textproto</td><td><code>ap2a</code>–<code>ap4a</code>、<code>bp1a</code>–<code>bp4a</code>、<code>cp1a</code>–<code>cp2a</code>、<code>trunk_staging</code>、<code>mainline_2026_01</code>–<code>mainline_2026_04</code>；另有 <code>eng</code>、<code>user</code>、<code>userdebug</code> 三份——它们<strong>与 build_type 同名但是独立的 release config</strong>，由 <code>TARGET_RELEASE</code> 而非变体选中</td><td><code>AND-P11-102</code></td></tr><tr><td>更新资产</td><td><code>build/make/tools/releasetools/</code>、<code>system/update_engine/</code></td><td>target files 与 payload 分属两仓</td><td><code>AND-P11-202</code></td></tr></tbody></table>
+<p>同族的三个入口命令必须一起看：<code>tapas()</code> 与 <code>banchan()</code> 都在 <code>build/envsetup.sh</code> 内，<code>:674</code> 与 <code>:747</code> 相邻区间，配 <code>make()</code> 的 <code>:1033</code> 构成「模块组 → 整包」的两档构建粒度。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>拿一次「只改一个模块」的交付走一遍判据链。</p>
+<p>版本锚点：查 manifest，确认在 <code>android17-release</code> 组内，树内 1087 个项目。构建：<code>lunch()</code> :535 选产品与变体，再用 <code>tapas()</code> :674 指定模块组，不触发整包。测试：改动落在 frameworks 侧则跑 <code>cts/tests</code>，落在 HAL 侧则跑 <code>test/vts</code>。发布配置：若变体是 user，对应 <code>release_configs/</code> 里的 <code>user</code> textproto。更新资产：<code>build/make/tools/releasetools/</code> 生成 target files，<code>system/update_engine/</code> 侧消费 payload。</p>
+<p>每一步的产物都是文件系统上的一条路径，不是一句口头结论。任一环缺路径，这次交付就不成立。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P11-102</code> 讲构建入口与三条构建路线，本篇只在入口层引用其 <code>lunch</code>+<code>make</code> 结论。<code>AND-P11-201</code> 讲产品变体与分区配置，本篇只给目录判据。<code>AND-P11-202</code> 讲镜像与 OTA 机制，本篇只标出产物归属的两仓。</p>
+<p>边界：本篇不做实施建议汇总，不评价哪一步该加人、哪一步该自动化。P0–P10 的机制细节留在各卷。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>构建入口</td><td><code>build/envsetup.sh</code></td><td><code>lunch()</code> :535、<code>make()</code> :1033、<code>tapas()</code> :674、<code>banchan()</code> :747、<code>flashall()</code> :881、<code>fastboot()</code> :871</td><td>指向 <code>make/envsetup.sh</code> 的符号链接，1210 行</td></tr><tr><td>构建主控</td><td><code>build/make/core/main.mk</code></td><td>主 Makefile 入口</td><td>与 Soong 协同的起点</td></tr><tr><td>CTS</td><td><code>cts/tests</code></td><td>12 个目录之一</td><td><code>tests</code>、<code>hostsidetests</code>、<code>libs</code>、<code>suite</code> 等同级</td></tr><tr><td>VTS</td><td><code>test/vts</code></td><td>VTS 与 <code>vts-testcase</code> 并列</td><td>与 <code>cts-root</code>、<code>suite_harness</code> 等同级</td></tr><tr><td>发布配置</td><td><code>build/release/release_configs</code></td><td>17 个 textproto</td><td>含 <code>eng</code>/<code>user</code>/<code>userdebug</code> 与 <code>mainline_2026_01</code>–<code>mainline_2026_04</code></td></tr><tr><td>文档样例</td><td><code>developers/build</code></td><td>Gradle 工程：<code>build.gradle</code>、<code>gradlew</code>、<code>buildSrc</code>、<code>templates</code>、<code>sample-create</code></td><td>与 <code>samples</code> 并列</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/soong:6722dd8833db</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. envsetup.sh 是符号链接，指向 make/envsetup.sh
+ls -l build/envsetup.sh
+# 期望：显示符号链接指向 make/envsetup.sh
+
+# 2. 入口函数与其行号
+grep -n '^function lunch()\|^function make()\|^function tapas()\|^function banchan()\|^function flashall()\|^function fastboot()' build/envsetup.sh
+# 期望：lunch :535、make :1033、tapas :674、banchan :747、flashall :881、fastboot :871
+
+# 3. 行数与 make() 的转接目标
+wc -l build/envsetup.sh; grep -n 'soong_ui.bash --make-mode' build/envsetup.sh
+# 期望：1210 行；make() 转 build/soong/soong_ui.bash --make-mode
+
+# 4. manifest 项目数与默认 revision
+grep -c '&lt;project' .repo/manifests/default.xml
+grep -o 'revision=&quot;[^&quot;]*&quot;' .repo/manifests/default.xml | sort -u
+# 期望：1087；默认 revision 为 android17-release，另有一个 superproject 标 android-latest-release
+
+# 5. 测试目录与发布配置数量
+ls -d cts/*/ | wc -l; ls test/ | head -20
+ls build/release/release_configs/*.textproto | wc -l
+# 期望：cts 下 12 个可见目录；test/ 下含 vts、vts-testcase、cts-root、suite_harness、dittosuite、mlts、app_compat；17 个 textproto</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<p>V4 声明：本篇不执行整包构建与 OTA 生成——本机 32GB 内存不足以支撑整包构建。上面所有判据均来自静态可核入口，不含实测耗时与体积。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>「out/ 目录有产物就等于构建通过」</strong>。产物存在只说明某次 <code>make()</code> 跑到了收尾，不说明对应哪个锚点、哪个变体。判据要落到 manifest revision 与 <code>lunch()</code> 的产品变体上。</p>
+<p><strong>「CTS 和 VTS 都在跑测试，随便报一份即可」</strong>。两者分属 <code>cts/</code> 与 <code>test/vts</code> 两个顶层位置，覆盖面向不同。报错目录，等于报错门。</p>
+<p><strong>「`lunch()` 只是设环境变量，选错不影响产物」</strong>。<code>lunch()</code> :535 同时定产品与变体，变体直接决定 <code>release_configs/</code> 里取哪份 textproto。看起来只是环境变量，实际改了发布配置的输入。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：一次交付最少要核几个入口？<strong>答</strong>：五步各一个：manifest revision、<code>lunch()</code>+<code>make()</code>、<code>cts/</code> 或 <code>test/vts</code>、<code>release_configs/</code> 的 textproto、releasetools 与 update_engine 的产物路径。<strong>追问</strong>：能少核吗？<strong>答</strong>：能少核，但要明说欠哪一步，不要用别的步骤的结论顶上。</p>
+<p><strong>问</strong>：<code>tapas()</code>/<code>banchan()</code> 和 <code>make()</code> 什么关系？<strong>答</strong>：同一文件内的两档粒度，<code>:674</code>/<code>:747</code> 构模块组，<code>:1033</code> 转 <code>soong_ui.bash --make-mode</code> 走整包。<strong>追问</strong>：只改一个模块可以不走整包吗？<strong>答</strong>：可以，走模块组入口，但测试门的判据不变。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>产物对不上基线</td><td><code>grep -o 'revision=&quot;[^&quot;]*&quot;' .repo/manifests/default.xml | sort -u</code></td><td>是否只有一组 revision</td><td>两组并存时确认目标仓属哪组</td></tr><tr><td>选错 release config</td><td><code>ls build/release/release_configs/*.textproto</code>；<code>grep -n 'TARGET_RELEASE ?=' build/make/core/release_config.mk</code></td><td>所选 <code>TARGET_RELEASE</code> 是否在 <code>ALL_RELEASE_CONFIGS_FOR_PRODUCT</code> 内（<code>release_config.mk</code> :166-170 会对不在清单里的取值报错）</td><td>按 <code>lunch &lt;product&gt;-&lt;release&gt;-&lt;variant&gt;</code> 三元组重选；产物文件名是 <code>release_config-$(TARGET_PRODUCT)-$(TARGET_RELEASE).vars</code>（:113），据此反查实际用了哪份</td></tr><tr><td>OTA 资产找不到</td><td><code>ls build/make/tools/releasetools/ system/update_engine/</code></td><td>两目录是否都在树内</td><td>缺一即 target files 与 payload 链路不完整</td></tr><tr><td>测试报告口径不清</td><td><code>ls -d cts/*/ | wc -l; ls test/ | head -20</code></td><td>报告取自哪个顶层目录</td><td>按测试门重新对账</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：构建系统内部的 Android.bp 解析与 ninja 生成（<code>AND-P11-101</code>）；A/B 切换与 payload 格式（<code>AND-P11-202</code>）；GMS 边界与 Mainline（<code>AND-P11-301</code>）；车载（AAOS）形态差异（<code>AND-P11-401</code>）。CTS/VTS 用例组织不在本卷范围内。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P11-401</code>。</p>
+<p><strong>本篇后继</strong>：无。本篇为 P11 卷收卷篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>manifest 收录 1087 个项目，默认 revision 为 <code>android17-release</code>（仅 superproject 另标 <code>android-latest-release</code>）—— 口径为 2026-10-23 静态核 <code>.repo/manifests</code>。</li><li><code>build/envsetup.sh</code> 1210 行 —— 源码常量，非实测。</li><li><code>release_configs/</code> 17 个 textproto —— 静态计数。</li><li><code>cts/</code> 下 12 个目录（<code>ls -d cts/*/</code>，不含隐藏的 <code>.prebuilt_info</code>）、<code>platform_testing/</code> 11 个可见条目 —— 静态计数。</li><li>构建耗时与镜像体积：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早于本树</td><td>本树未收录早期 manifest 快照，不逐版本断言</td><td>双 revision 的并存形态以本树为准</td></tr><tr><td><code>android17-release</code>（本树）</td><td>manifest 默认 revision 为 <code>android17-release</code>；<code>envsetup.sh</code> 指 <code>make/envsetup.sh</code>，构建主控在 <code>build/make/core/main.mk</code></td><td>五步判据按本节 §4.2 表取入口</td></tr><tr><td>本树工作区（<code>build/blueprint</code>）</td><td><code>7f2058de8155</code>，工作区空</td><td>对账时不纳入未提交改动</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>soong</code>、站内检索 <code>ota</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>release_config</code>、<code>soong_ui</code>、<code>update_engine</code>。</li><li>本仓关键路径：<code>build/envsetup.sh</code>、<code>build/make/core/main.mk</code>、<code>build/release/release_configs</code>。</li><li>承接篇：<code>AND-P11-401</code>、<code>AND-P11-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

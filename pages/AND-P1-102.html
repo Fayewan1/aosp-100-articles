@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>组件生命周期：Activity/Service 的状态机与配置变更</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>组件生命周期：Activity/Service 的状态机与配置变更</h1>
+<div class="kv"><span>ID：AND-P1-102</span><span>卷：P1</span><span>章：1.1</span><span>难度：3</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/Activity.java ；frameworks/base/core/java/android/app/ActivityThread.java ；frameworks/base/core/java/android/app/Service.java ；frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>组件生命周期不是「系统会按顺序回调那几个方法」这么简单，它是一条被系统服务驱动、由应用进程执行的状态机。AMS 决定目标状态，通过 <code>ClientTransaction</code> 把一系列事务下发到应用进程，<code>TransactionExecutor</code> 负责把当前状态补到目标状态，再逐个执行回调。配置变更（如旋转）不是特殊事件，而是「销毁重建」这条固定路径：系统保存状态、走完销毁回调、用新配置重建组件，再把状态还回去。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-101（进程如何被创建）、AND-P0-401（术语基准）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/app/Activity.java</code></li><li><code>frameworks/base/core/java/android/app/ActivityThread.java</code></li><li><code>frameworks/base/core/java/android/app/Service.java</code></li><li><code>frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「<code>onPause</code> 一定先于 <code>onStop</code>」「配置变更会重建 Activity」这类说法人人会背，但一遇到具体故障就失效：为什么 A 界面 <code>onStop</code> 迟迟不来？为什么旋转屏幕后数据丢了？为什么 <code>Application</code> 没重建而 <code>Activity</code> 重建了？这些问题的答案不在回调方法本身，而在「谁决定状态迁移」。这一篇把驱动方与执行方的分工讲清。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：目标状态（AMS 想让组件到哪）、事务（一个 <code>ClientTransaction</code>，内含若干待执行项）、执行器（<code>TransactionExecutor</code>，把状态补到位）。</p>
+<p>图 1：AMS 经 ClientTransaction 把目标状态送进应用进程</p>
+<pre><code>  AMS ──ClientTransaction──▶ ActivityThread
+        (目标状态)              │
+                    TransactionExecutor
+                          │
+                    回调序列 ▶ 应用代码</code></pre>
+<p>关键点：应用代码里的 <code>onCreate</code>/<code>onResume</code> 等只是<strong>回调</strong>，不是状态本身。状态的真相在系统服务侧。</p>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>Activity 的合法状态序列是一条链，禁止跳步：</p>
+<p>图 2：Activity 生命周期状态机与回调的对应</p>
+<pre><code>  未创建 ─onCreate─▶ CREATED ─onStart─▶ STARTED ─onResume─▶ RESUMED
+        ◀─onDestroy─        ◀──onStop──        ◀──onPause──</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>以「Activity 从不可见到可见」为例。AMS 组装一个 <code>ClientTransaction</code>，把目标状态定义为 RESUMED。<code>TransactionExecutor.execute</code> 按 <code>items</code> 列表<strong>顺序逐项执行</strong>：对每一项，若它声明了前置状态要求，就先调 <code>cycleToPath</code> 把记录补到该前置状态，再执行该项本身，之后按需补到它的后置状态。所以从 STARTED 补到 RESUMED，路径上只走 <code>onResume</code>；从 STOPPED 补过去，则会先 <code>onStart</code> 再 <code>onResume</code>。事务若另给了最终目标状态，全部项处理完后再统一补到该状态。这套「补路径」的设计保证状态机不会跳步。</p>
+<p>Service 的生命周期更简单：创建时 <code>onCreate</code> 只调一次，之后每次 <code>startService</code> 都进 <code>onStartCommand</code>，绑定服务走 <code>onBind</code>，最终 <code>onDestroy</code>。它与 Activity 共用同一套下发机制。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>旋转屏幕触发配置变更。AMS 判定该组件需要重建，于是：先让应用保存实例状态（走 <code>onPause</code>、<code>onStop</code> 一侧），再销毁旧实例（<code>onDestroy</code>）；随后以新配置重新 <code>performLaunchActivity</code>，等价于新建一个实例，并把之前存下的状态通过 <code>onCreate</code> 的 <code>Bundle</code> 与 <code>onRestoreInstanceState</code> 还回去。整个过程里进程并没有换，被换掉的只是组件实例。</p>
+<p>反过来，若清单里声明组件自行处理该配置变更，系统就改调 <code>onConfigurationChanged</code>，不重建实例。这就是「有时重建、有时不重建」的分叉点。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>进程如何被创建见 AND-P1-101；AMS 侧的启动编排与 <code>ClientTransaction</code> 的下发机关见 AND-P2-201；窗口在重建时如何跟着换见 AND-P1-202。本篇只讲应用进程内这条状态机的执行侧。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>执行原语</td><td><code>frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java</code></td><td><code>execute</code>（约 72 行）</td><td>事务执行入口</td></tr><tr><td>状态补路径</td><td>同上</td><td><code>cycleToPath</code>（约 184 行）</td><td>把当前状态补到目标状态</td></tr><tr><td>实例创建</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>performLaunchActivity</code>（约 4414 行）</td><td>反射建实例并回调 onCreate</td></tr><tr><td>配置变更</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>handleConfigurationChanged</code>（约 7292 行）</td><td>同文件入口，随即委派 <code>ConfigurationController</code> 分发</td></tr><tr><td>生命周期声明</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td><code>onCreate</code>（约 1893 行）等</td><td>回调定义处</td></tr><tr><td>服务回调</td><td><code>frameworks/base/core/java/android/app/Service.java</code></td><td><code>onCreate</code>（约 365 行）等</td><td>无界面组件回调</td></tr></tbody></table>
+<p>Activity 的六个核心回调同族集中如下：</p>
+<table><thead><tr><th>回调</th><th>语义</th><th>出处</th></tr></thead><tbody><tr><td><code>onCreate</code></td><td>实例首次创建，接收恢复状态</td><td><code>Activity.java</code> 约 1893 行</td></tr><tr><td><code>onStart</code></td><td>即将可见</td><td>约 2202 行</td></tr><tr><td><code>onResume</code></td><td>可见且可交互</td><td>约 2282 行</td></tr><tr><td><code>onPause</code></td><td>即将失去交互</td><td>约 2719 行</td></tr><tr><td><code>onStop</code></td><td>不再可见</td><td>约 2948 行</td></tr><tr><td><code>onDestroy</code></td><td>实例销毁</td><td>约 2991 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. Activity 六个回调的定义位置
+grep -n &quot;protected void on\(Create\|Start\|Resume\|Pause\|Stop\|Destroy\)(&quot; \
+  frameworks/base/core/java/android/app/Activity.java
+# 期望：命中 14 行（6 处方法定义位于约 1893/2202/2282/2719/2948/2991 行，其余为 javadoc 中的同名示例）
+
+# 2. 事务执行器与状态补路径
+grep -n &quot;public void execute\|private void cycleToPath&quot; \
+  frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java
+# 期望：命中 execute（约 72 行）与 cycleToPath（约 184 行）
+
+# 3. 配置变更的分发与重建
+grep -n &quot;handleConfigurationChanged\|handleRelaunchActivityInner&quot; \
+  frameworks/base/core/java/android/app/ActivityThread.java
+# 期望：命中配置分发（约 7292 行）与重建辅助（约 6933 行）
+
+# 4. Service 回调成对存在
+grep -n &quot;public void onCreate\|public void onDestroy&quot; \
+  frameworks/base/core/java/android/app/Service.java
+# 期望：命中约 365 行与约 536 行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为生命周期由应用代码控制。</strong> 应用只能响应回调；迁移由 AMS 决定，应用侧无法「叫停」一次 <code>onDestroy</code>。</p>
+<p><strong>误区二：以为所有配置变更都重建 Activity。</strong> 只有未声明自行处理的组件才重建；声明处理该配置的组件走 <code>onConfigurationChanged</code>，实例保留。</p>
+<p><strong>误区三（看起来对其实是错的）：以为配置变更会把整个进程杀掉重建。</strong> 进程通常不变，变的是组件实例；只有极少数场景进程才会被换掉。</p>
+<p><strong>误区四：以为 Service 每次启动都会重新 `onCreate`。</strong> <code>onCreate</code> 只在该服务实例首次创建时调一次，之后重复启动只进 <code>onStartCommand</code>。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>onSaveInstanceState</code> 之后还可能丢数据？ <strong>答</strong>：它保存的是可序列化的实例状态，且有大小约束；大对象或不可序列化数据不会被带回，需要用其它存储方式。</p>
+<p><strong>追问</strong>：那 <code>onRetainNonConfigurationInstance</code> 这类通道还有用吗？ <strong>答</strong>：用于跨重建传递非序列化的大对象，属于框架提供的另一条通路，和 Bundle 通道互补。</p>
+<p><strong>问</strong>：<code>TransactionExecutor</code> 为什么要「补路径」？ <strong>答</strong>：为了不让状态机跳步。若目标状态与当前状态之间隔着若干状态，就按顺序补齐，保证回调序列始终合法。</p>
+<p><strong>追问</strong>：这会导致什么问题？ <strong>答</strong>：可能导致「没被显式请求的回调」也发生，例如从 STOPPED 直接恢复到 RESUMED 时会先补 <code>onStart</code>。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>Activity <code>onStop</code> 不来</td><td><code>grep -n &quot;cycleToPath&quot; frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java</code></td><td>事务是否含 STOP 项</td><td>核对 AMS 侧目标状态</td></tr><tr><td>旋转后数据丢</td><td><code>grep -n &quot;onSaveInstanceState&quot; frameworks/base/core/java/android/app/Activity.java</code></td><td>状态通道定义</td><td>改用可序列化数据</td></tr><tr><td>Service 重复启动副作用</td><td><code>grep -n &quot;int onStartCommand&quot; frameworks/base/core/java/android/app/Service.java</code></td><td>是否每次进回调</td><td>用返回码控制重启策略</td></tr><tr><td>组件未按预期重建</td><td><code>grep -n &quot;handleConfigurationChanged&quot; frameworks/base/core/java/android/app/ActivityThread.java</code></td><td>是否走重建分支</td><td>查清单配置声明</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：进程创建（AND-P1-101）；AMS 启动编排与事务下发机关（AND-P2-201）；窗口重建（AND-P1-202）；进程回收与 LMKD（AND-P2-401）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-101</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P1-201</code>、<code>AND-P1-202</code>、<code>AND-P1-301</code>、<code>AND-P1-302</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>Activity 核心回调 6 个，口径为 <code>Activity.java</code> 定义处，2026-10-14 实测。</li><li>事务执行入口 <code>TransactionExecutor.execute</code> 位于约 72 行，口径为该文件符号位置，2026-10-14 实测。</li><li>配置变更分发点 <code>handleConfigurationChanged</code> 位于约 7292 行，口径同上。</li><li>回调的单次耗时没有跨设备统一量级，其预算约束落在帧调度上（见 AND-P1-401 的 <code>Choreographer</code> 一节）；本篇不给具体毫秒数。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>生命周期经 <code>ClientTransaction</code> 与 <code>TransactionExecutor</code> 下发</td><td>读者按本篇命令可复现</td></tr><tr><td>更早版本</td><td>早期存在直接跨进程调用回调的实现，后统一为事务机制（据官方公开资料，本树仅含 android17-release，无法回溯核验）</td><td>按类名重锚，勿依赖旧路径</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>activity lifecycle</code>、<code>configuration changes</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>TransactionExecutor</code>、<code>ClientTransaction</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/app/servertransaction/</code>。</li><li>承接篇：<code>AND-P1-101</code>、<code>AND-P2-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>窗口体系：Window、Token、动画与层级</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>窗口体系：Window、Token、动画与层级</h1>
+<div class="kv"><span>ID：AND-P6-302</span><span>卷：P6</span><span>章：6.4</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/view/WindowManager.java ；frameworks/base/core/java/android/view/WindowManagerImpl.java ；frameworks/base/core/java/android/view/WindowManagerGlobal.java ；frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java ；frameworks/base/services/core/java/com/android/server/wm/WindowState.java ；frameworks/base/services/core/java/com/android/server/wm/WindowToken.java ；frameworks/base/services/core/java/com/android/server/wm/WindowStateAnimator.java ；frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>窗口类型不是标签，而是权限与层级的双重契约：<code>1–99</code> 归应用，<code>2000</code> 起归系统，权限检查在 <code>WindowManagerService.addWindow</code> 里就完成。客户端只握 <code>WindowManagerImpl</code> 与 <code>WindowManagerGlobal</code>，服务端每个窗口由 <code>WindowState</code> 表示，由 <code>WindowToken</code> 归组，由 <code>DisplayContent</code> 排层级。窗口显示隐藏动画不在客户端推进，而在服务端的 <code>WindowStateAnimator</code> 里，<code>performShowLocked</code> 是一次状态机的起点。层级分配的落点是 <code>DisplayContent.assignWindowLayers</code>，<code>WindowToken</code> 决定同组窗口的从属关系而非 z 序。本篇只讲窗口类型体系与服务端窗口对象，Surface 分配留给 102。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P2-202</code>，窗口与 Binder 调用链的前置认知在这里建立，否则 <code>addWindow</code> 的服务端入口会显得突兀。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/android/view/WindowManager.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManagerImpl.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/WindowToken.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/WindowStateAnimator.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你写了一个悬浮窗，<code>TYPE_APPLICATION_OVERLAY</code> 在部分设备上被系统拒掉 <code>addView</code>，日志里只有权限异常没有层级信息。你给一个对话框做入场动画，<code>show</code> 之后窗口先白屏一帧再淡入，追进客户端代码找不到动画推进的地方。你想知道同一进程的两个窗口谁在上，结果发现 <code>WindowToken</code> 和 z 序根本不是一回事。这三个问题指向同一套东西：类型决定谁能加，Token 决定归属，层级与动画都在服务端算。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个服务端对象构成一条归属链。<code>DisplayContent</code> 对应一块逻辑显示，持有 <code>mDisplayId</code>。<code>WindowToken</code> 是窗口的归组单元，同属一个 Token 的 <code>WindowState</code> 在层级与可见性上被一起处理。<code>WindowState</code> 是一个窗口的服务端代表，持有 <code>mClient</code> 这个 <code>IWindow</code> 回调。<code>WindowStateAnimator</code> 挂在 <code>WindowState</code> 上，管绘制状态与动画。</p>
+<p>图 1：窗口对象的归属链与层级落点</p>
+<pre><code>DisplayContent (mDisplayId)
+  └─ WindowToken (归组)
+       └─ WindowState (单窗口, mClient)
+            └─ WindowStateAnimator (动画/绘制状态)</code></pre>
+<p>层级不在这条链的末端决定，而在 <code>DisplayContent.assignWindowLayers</code> 里按整棵容器树统一分配。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>窗口类型的三个基数是整套体系的地基。应用窗口占 <code>1–99</code>，系统窗口从 <code>2000</code> 起。区间之间的空格是刻意的：插入新类型时不必重排既有值。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>FIRST_APPLICATION_WINDOW</code></td><td>应用窗口区间下界，值 <code>1</code></td><td><code>WindowManager.java:2322</code></td></tr><tr><td><code>LAST_APPLICATION_WINDOW</code></td><td>应用窗口区间上界，值 <code>99</code></td><td><code>WindowManager.java:2358</code></td></tr><tr><td><code>FIRST_SYSTEM_WINDOW</code></td><td>系统窗口区间下界，值 <code>2000</code></td><td><code>WindowManager.java:2426</code></td></tr><tr><td><code>TYPE_TOAST</code></td><td><code>FIRST_SYSTEM_WINDOW+5</code>，即 <code>2005</code></td><td><code>WindowManager.java:2476</code></td></tr><tr><td><code>TYPE_WALLPAPER</code></td><td><code>FIRST_SYSTEM_WINDOW+13</code>，即 <code>2013</code></td><td><code>WindowManager.java:2539</code></td></tr><tr><td><code>TYPE_APPLICATION_OVERLAY</code></td><td><code>FIRST_SYSTEM_WINDOW + 38</code>，即 <code>2038</code></td><td><code>WindowManager.java:2716</code></td></tr></tbody></table>
+<p>类型落在系统区间，加窗口时就要过权限。<code>WindowManagerService.addWindow</code> 在 <code>:1672</code>，其中 <code>mPolicy.checkAddPermission</code> 在 <code>:1679</code>。检查在窗口对象落库之前，所以权限失败时服务端不会留下半成品 <code>WindowState</code>。这是「类型即权限」的具体实现位置。</p>
+<p>客户端的路径很短。<code>WindowManagerImpl</code> 在 <code>:99</code> 声明为 final 类并实现客户端窗口接口，<code>:103</code> 拿到 <code>mGlobal = WindowManagerGlobal.getInstance()</code>。真正的跨进程与视图树绑定在 <code>WindowManagerGlobal</code> 里，客户端拿不到 <code>WindowState</code> 的任何引用。</p>
+<p>窗口加进来后先挂到 Token 上。<code>WindowManagerService</code> 在 <code>:2053</code> 调用 <code>win.mToken.addWindow(win)</code>，<code>WindowToken.addWindow</code> 在 <code>WindowToken.java:284</code>。<code>WindowToken</code> 在 <code>:63</code> 声明为 <code>class WindowToken extends WindowContainer&lt;WindowState&gt;</code>，受保护构造函数在 <code>:172</code> 与 <code>:178</code> 两个重载。Token 的语义是「一组生命周期相关的窗口」，典型场景是同一个 Activity 的多个窗口，而不是 z 序分组。</p>
+<p><code>WindowState</code> 在 <code>:277</code> 声明为 <code>class WindowState extends WindowContainer&lt;WindowState&gt;</code>，构造函数在 <code>:1065</code>，<code>final IWindow mClient</code> 在 <code>:297</code>。<code>mWinAnimator</code> 字段在 <code>:634</code>，在构造流程的 <code>:1138</code> 初始化。<code>WindowStateAnimator.java</code> 全文 <code>647</code> 行。</p>
+<p>动画的推进点有几个落点值得记。<code>WindowState.java:2142</code> 写 <code>mWinAnimator.mDrawState = DRAW_PENDING</code>，但它在 <code>requestDrawIfNeeded</code>（<code>:2108</code>，javadoc 指向 <code>WindowManagerInternal#waitForAllWindowsDrawn</code>）里，是「等待绘制」路径的回写，不是显示链路本身；<code>DRAW_PENDING</code> 的另一处来源是 <code>WindowStateAnimator.resetDrawState</code>（<code>:279</code>）。显示链路的入口是 <code>performShowLocked</code>（<code>WindowState.java:4606</code>）：它在 <code>:4624</code> 要求 <code>mDrawState == READY_TO_SHOW</code> 才继续，在 <code>:4631</code> 调 <code>applyEnterAnimationLocked</code>，最后在 <code>:4641</code> 把状态置为 <code>HAS_DRAWN</code>。从 <code>DRAW_PENDING</code> 到 <code>READY_TO_SHOW</code> 的跃迁由 <code>commitFinishDrawingLocked</code>（<code>WindowStateAnimator.java:257</code>）完成：<code>:263</code> 检查前一态是 <code>COMMIT_DRAW_PENDING</code> 或 <code>READY_TO_SHOW</code>，<code>:268</code> 写 <code>READY_TO_SHOW</code>，<code>:273</code> 调起 <code>performShowLocked</code>。真正的帧间推进在 <code>WindowStateAnimator</code> 内部随事务循环发生，不在客户端主线程。</p>
+<p>层级分配的单一入口是 <code>DisplayContent.assignWindowLayers</code>，在 <code>:4549</code>。它按容器树的顺序遍历并给每个窗口写 layer 值，所以窗口谁在上不取决于加窗口的先后，而取决于这一刻树的结构。<code>DisplayContent</code> 的 <code>mDisplayId</code> 在 <code>:354</code> 声明、<code>:1278</code> 赋值，<code>getDisplayId</code> 在 <code>:1749</code>。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一个应用要加悬浮窗，用 <code>TYPE_APPLICATION_OVERLAY</code>。客户端调 <code>WindowManagerImpl.addView</code>，转到 <code>WindowManagerGlobal</code> 走跨进程。服务端进 <code>addWindow</code>（<code>:1672</code>），先过 <code>mPolicy.checkAddPermission</code>（<code>:1679</code>）。通过后构造 <code>WindowState</code>（构造函数 <code>:1065</code>），把 <code>mClient</code> 绑到应用的 <code>IWindow</code>（字段 <code>:297</code>），在 <code>:1138</code> 建出 <code>mWinAnimator</code>，然后在 <code>:2053</code> 把窗口挂进 <code>mToken</code>。窗口变为可见时走 <code>performShowLocked</code>（<code>:4606</code>）——它要求绘制状态已是 <code>READY_TO_SHOW</code>（由 <code>commitFinishDrawingLocked</code> 在 <code>WindowStateAnimator.java:268</code> 写入、<code>:273</code> 调起），通过后在 <code>:4641</code> 置 <code>HAS_DRAWN</code>，之后动画由 <code>WindowStateAnimator</code> 接管。层级最后由 <code>assignWindowLayers</code>（<code>:4549</code>）在整棵树上统一算一次。整个流程里客户端从未持有窗口的 z 值。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P2-202</code> 提供调用链与 Binder 侧的前置认知，本篇从服务端窗口对象接手。<code>AND-P6-102</code> 讲 Surface 的分配与缓冲区流转，本篇只到「窗口对象存在、层级已定」，不进 BufferQueue。<code>AND-P6-401</code> 覆盖壁纸、悬浮窗与多屏的特殊场景，本篇给的是通用机制与类型区间。输入分发不在本篇，归 P2/P5 卷。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>类型定义</td><td><code>frameworks/base/core/java/android/view/WindowManager.java</code></td><td><code>FIRST_APPLICATION_WINDOW</code>、<code>LAST_APPLICATION_WINDOW</code>、<code>FIRST_SYSTEM_WINDOW</code></td><td>全篇 7249 行，类型区间的唯一定义处</td></tr><tr><td>客户端入口</td><td><code>frameworks/base/core/java/android/view/WindowManagerImpl.java</code></td><td><code>WindowManagerImpl</code>（:99）、<code>mGlobal</code>（:103）</td><td>客户端门面，全篇 921 行</td></tr><tr><td>客户端实现</td><td><code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code></td><td>跨进程与视图树绑定</td><td>全篇 1233 行，本篇只取其定位</td></tr><tr><td>服务端入口</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td><code>addWindow</code>、<code>mPolicy.checkAddPermission</code>、<code>relayoutWindow</code></td><td>全篇 11593 行，权限与准入在此</td></tr><tr><td>窗口对象</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code></td><td><code>mClient</code>、<code>mWinAnimator</code>、<code>performShowLocked</code></td><td>全篇 6406 行，单窗口的服务端代表</td></tr><tr><td>归组单元</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowToken.java</code></td><td><code>class WindowToken</code>（:63）、<code>addWindow</code>（:284）</td><td>全篇 885 行，窗口的生命周期归组</td></tr><tr><td>动画</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowStateAnimator.java</code></td><td>绘制状态与动画推进</td><td>全篇 647 行，显示隐藏动画的执行者</td></tr><tr><td>层级</td><td><code>frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code></td><td><code>getDisplayId</code>（:1749）、<code>assignWindowLayers</code>（:4549）</td><td>全篇 7741 行，层级的唯一分配入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/core/java/android/view/WindowManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 <code>7249</code>，对应 <code>WindowManager.java</code> 的总行数口径。</p>
+<pre><code class="lang-bash">grep -n &quot;FIRST_APPLICATION_WINDOW = \|LAST_APPLICATION_WINDOW = \|FIRST_SYSTEM_WINDOW = &quot; frameworks/base/core/java/android/view/WindowManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:2322</code>、<code>:2358</code>、<code>:2426</code> 三行，即三个类型区间基数。</p>
+<pre><code class="lang-bash">grep -n &quot;TYPE_TOAST = \|TYPE_WALLPAPER = \|TYPE_APPLICATION_OVERLAY = &quot; frameworks/base/core/java/android/view/WindowManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:2476</code>、<code>:2539</code>、<code>:2716</code>，值与表一致。</p>
+<pre><code class="lang-bash">grep -n &quot;checkAddPermission\|win.mToken.addWindow&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:1679</code> 与 <code>:2053</code>，验证权限检查早于入组。</p>
+<pre><code class="lang-bash">grep -n &quot;public class WindowManagerService extends IWindowManager.Stub&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:412</code>，确认服务端入口类声明位置。</p>
+<pre><code class="lang-bash">grep -n &quot;performShowLocked\|READY_TO_SHOW\|HAS_DRAWN&quot; frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:4606</code>（performShowLocked 定义）、<code>:4624</code>（READY_TO_SHOW 门槛）、<code>:4641</code>（置 HAS_DRAWN）等行，对应显示状态机入口。</p>
+<pre><code class="lang-bash">grep -n &quot;assignWindowLayers\|int getDisplayId&quot; frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:4549</code> 与 <code>:1749</code>，确认层级分配入口。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>「类型数字越大层级越高」。</strong> 错。类型只决定区间归属与权限要求。层级由 <code>assignWindowLayers</code> 按容器树结构统一分配，同类窗口之间也可能因 Token 与容器位置换序。</p>
+<p><strong>「`WindowToken` 就是 z 序分组」。</strong> 错。Token 是生命周期归组，<code>addWindow</code> 把窗口挂进去是为了让它们一起被移除、一起被隐藏。z 序由 <code>DisplayContent</code> 算。</p>
+<p><strong>「把窗口加进 `WindowManagerGlobal` 之后它就算显示出来了」。</strong> 看起来对，其实不对。客户端只完成了跨进程登记。可见性要等服务端走 <code>performShowLocked</code> 并把绘制状态推起来，中途还受 Token 可见性与层级影响。</p>
+<p><strong>「动画是客户端 View 做的，所以服务端不管」。</strong> 错。View 层的属性动画与服务端窗口动画是两套。窗口级的显示隐藏由 <code>WindowStateAnimator</code> 在服务端推进，客户端 View 动画无法替代它。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>TYPE_APPLICATION_OVERLAY</code> 会被拒，而 <code>TYPE_TOAST</code> 有时可以？ <strong>答</strong>：两者都在系统区间，都要过 <code>mPolicy.checkAddPermission</code>（<code>WindowManagerService.java:1679</code>），但具体判定不同，取决于调用方的权限与 Token。 <strong>追问</strong>：类型值本身会不会影响权限结果？ <strong>答</strong>：类型值决定进入哪条检查分支，结果由 <code>checkAddPermission</code> 内部按类型与调用方共同判定。</p>
+<p><strong>问</strong>：一个 Token 里的多个窗口，隐藏时是一起隐藏吗？ <strong>答</strong>：<code>WindowToken</code> 作为容器，可见性在其层面被统一处理，所以同 Token 窗口通常一起隐藏。 <strong>追问</strong>：那它们能在层级里被别的窗口插到中间吗？ <strong>答</strong>：层级由 <code>DisplayContent.assignWindowLayers</code> 在整棵树上算，插入行为取决于容器结构，不取决于 Token 自身。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>悬浮窗加不上，只有权限异常</td><td><code>grep -n &quot;checkAddPermission&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td>是否命中 <code>:1679</code></td><td>核对该类型是否属于系统区间</td></tr><tr><td>窗口已加但一帧白屏</td><td><code>grep -n &quot;performShowLocked&quot; frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code></td><td>是否命中 <code>:4606</code></td><td>查该窗口是否走到显示状态迁移</td></tr><tr><td>绘制状态卡住不推进</td><td><code>grep -n &quot;commitFinishDrawingLocked&quot; frameworks/base/services/core/java/com/android/server/wm/WindowStateAnimator.java</code></td><td>命中 <code>:257</code>（<code>:268</code> 写 READY_TO_SHOW、<code>:273</code> 调 performShowLocked）</td><td>顺着 <code>mWinAnimator</code> 看动画状态机</td></tr><tr><td>两窗口层序与预期相反</td><td><code>grep -n &quot;assignWindowLayers&quot; frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code></td><td>命中 <code>:4549</code></td><td>查两窗口是否同 Token、容器位置如何</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Surface 的分配与缓冲区流转，见 <code>AND-P6-102</code>。壁纸、悬浮窗、多屏的特殊处理，见 <code>AND-P6-401</code>。输入分发，见 P2/P5 卷相关篇。</li><li><strong>本篇前置依赖</strong>：<code>AND-P2-202</code>。</li><li><strong>本篇后继</strong>：<code>AND-P6-102</code>、<code>AND-P6-401</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>应用窗口区间为 <code>1–99</code>，共 99 个可用值。来源：源码常量（<code>WindowManager.java:2322</code>、<code>:2358</code>）。</li><li>系统窗口从 <code>2000</code> 起，上界本篇不断言。来源：源码常量（<code>WindowManager.java:2426</code>）。</li><li><code>TYPE_TOAST</code> 与 <code>FIRST_SYSTEM_WINDOW</code> 的偏移为 <code>+5</code>，<code>TYPE_APPLICATION_OVERLAY</code> 为 <code>+38</code>。来源：源码常量（<code>:2476</code>、<code>:2716</code>）。</li><li><code>WindowManagerService</code> 全篇 11593 行、<code>WindowState</code> 6406 行、<code>WindowStateAnimator</code> 647 行。来源：源码实测 <code>wc -l</code>，口径为 <code>android17-release</code>。</li><li>单个窗口在服务端的常驻对象数量与内存占用暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>引入 <code>TYPE_APPLICATION_OVERLAY</code> 的版本</td><td>应用悬浮窗改用统一类型替代旧的 <code>TYPE_SYSTEM_ALERT</code> 等</td><td>权限判定收窄，旧类型的可用性下降</td></tr><tr><td><code>android17-release</code>（本树）</td><td><code>TYPE_APPLICATION_OVERLAY = FIRST_SYSTEM_WINDOW + 38</code>（<code>WindowManager.java:2716</code>）；<code>addWindow</code> 在 <code>WindowManagerService.java:1672</code>，<code>checkAddPermission</code> 在 <code>:1679</code></td><td>纯加法偏移与集中权限检查的形态在本树成立</td></tr><tr><td>本树声明口径</td><td><code>WindowManagerService</code> 在 <code>:412</code> 声明为 <code>extends IWindowManager.Stub</code></td><td>服务端入口仍走 AIDL 生成的 Stub，客户端无法直连实现类</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>window manager</code>、<code>graphics architecture</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>WindowToken</code>、<code>assignWindowLayers</code>、<code>TYPE_APPLICATION_OVERLAY</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/view/WindowManager.java</code>（类型区间）、<code>frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code>（窗口对象与显示状态机）、<code>frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code>（层级分配）。</li><li>承接篇：<code>AND-P6-102</code>、<code>AND-P6-401</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

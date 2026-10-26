@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surface 与 BufferQueue：生产消费模型与队列流转</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Surface 与 BufferQueue：生产消费模型与队列流转</h1>
+<div class="kv"><span>ID：AND-P6-102</span><span>卷：P6</span><span>章：6.1</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/gui/Surface.cpp ；frameworks/native/libs/gui/BufferQueueProducer.cpp ；frameworks/native/libs/gui/BufferQueueConsumer.cpp ；frameworks/native/libs/gui/BufferQueueCore.cpp ；frameworks/native/libs/gui/ConsumerBase.cpp ；frameworks/native/libs/gui/IGraphicBufferProducer.cpp ；frameworks/native/libs/gui/include/gui/IGraphicBufferProducer.h ；frameworks/native/libs/ui/include/ui/BufferQueueDefs.h ；frameworks/base/core/java/android/view/Surface.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一帧 buffer 的生命周期就是槽位状态机的一次循环：<code>FREE</code> → <code>DEQUEUED</code> → <code>QUEUED</code> → <code>ACQUIRED</code> → <code>FREE</code>。生产者通过 <code>dequeueBuffer</code> 取槽位、<code>queueBuffer</code> 交还，消费者通过 <code>acquireBuffer</code> 取用、<code>releaseBuffer</code> 归还。队列容量上限是 <code>NUM_BUFFER_SLOTS = 64</code>，但真正决定「dequeue 会不会卡住」的是已出队未入队数量与最大已获取数量的联合约束。判断卡死先看槽位停在哪个状态，再看是生产侧配额不够还是消费侧没 release。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P2-202</code>，先有窗口侧 Surface 从哪来的概念，再看它背后的队列契约会顺很多。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/native/libs/ui/include/ui/BufferQueueDefs.h</code></li><li><code>frameworks/native/libs/gui/BufferQueueCore.cpp</code></li><li><code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code></li><li><code>frameworks/native/libs/gui/BufferQueueConsumer.cpp</code></li><li><code>frameworks/native/libs/gui/ConsumerBase.cpp</code></li><li><code>frameworks/native/libs/gui/IGraphicBufferProducer.cpp</code></li><li><code>frameworks/native/libs/gui/Surface.cpp</code></li><li><code>frameworks/base/core/java/android/view/Surface.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你调 <code>eglSwapBuffers</code> 之后线程挂在那里不动，等几秒又自己恢复；或者反过来，帧率掉到十几，<code>dumpsys gfxinfo</code> 里全是 janky frame。两种现象都被笼统叫「渲染卡了」，但根因完全不同：一种是 dequeue 阻塞在等槽位，另一种是 queue 之后消费侧没跟上。</p>
+<p>只看上层调用栈说不清，因为 <code>queueBuffer</code> 返回成功并不代表 buffer 已经被合成，<code>dequeueBuffer</code> 返回也未必拿到的是空闲槽。要定位，得回到槽位状态机与配额约束。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个角色：<code>Surface</code> 是生产侧的句柄，<code>IGraphicBufferProducer</code> 是它的 Binder 契约，<code>BufferQueueProducer</code>／<code>BufferQueueConsumer</code> 是队列两端实现，<code>BufferQueueCore</code> 持有全部槽位与计数。三者共享同一份 <code>mCore</code>。</p>
+<p>图 1：生产消费两侧与共享核心的关系</p>
+<pre><code>  Surface (生产侧)
+        |
+        v
+  IGraphicBufferProducer  &lt;- Binder 契约
+        |
+        v
+  BufferQueueProducer ---&gt; BufferQueueCore &lt;--- BufferQueueConsumer
+                              (mSlots, 计数)         ^
+                                                     |
+                                              ConsumerBase</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>槽位是唯一的稀缺资源。五态转换如下（<code>BufferSlot.h:54-86</code>）：</p>
+<p>图 2：槽位五态与四动作</p>
+<pre><code>  FREE --dequeueBuffer--&gt; DEQUEUED --queueBuffer--&gt; QUEUED
+    ^                        |                        |
+    |                        | (attachBuffer)         | acquireBuffer
+    |                        v                        v
+    |                     QUEUED                   ACQUIRED
+    |                                                 |
+    +--------- releaseBuffer / detachBuffer ----------+</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>SHARED</code> 是第五态，用于 buffer 被多消费端共享的场景，不参与上面的主循环。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>生产侧入口在 <code>BufferQueueProducer::dequeueBuffer</code>（:462），提交入口在 <code>queueBuffer</code>（:976）。消费侧入口在 <code>BufferQueueConsumer::acquireBuffer</code>（:85）与 <code>releaseBuffer</code>（:509）。<code>ConsumerBase</code> 把后两者包成 <code>acquireBufferLocked</code>（:569）和 <code>releaseBufferLocked</code>（:666）。</p>
+<p>dequeue 能否立即返回，取决于 <code>:434-435</code> 的一段联合判定——<code>(mDequeueBufferCannotBlock || mAsyncMode) &amp;&amp; (acquiredCount &lt;= mMaxAcquiredBufferCount)</code> 成立即返回 <code>WOULD_BLOCK</code>，参与的成员是 <code>mCore-&gt;mMaxAcquiredBufferCount</code>、<code>mCore-&gt;mAsyncMode</code>、<code>mCore-&gt;mDequeueBufferCannotBlock</code> 三个。这三个成员在 <code>setAsyncMode()</code> 体内（<code>:292-302</code> 容量校验，<code>mCore-&gt;mAsyncMode = async</code> 落在 <code>:313</code>，autolock 至 <code>:320</code> 收尾）也出现，但那里管的是切异步模式时总容量是否超限，不是 dequeue 的门。约束方向不同：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>mMaxAcquiredBufferCount</code></td><td>消费者最多同时持有的已获取 buffer 数</td><td><code>BufferQueueProducer.cpp:434-435</code></td></tr><tr><td><code>mAsyncMode</code></td><td>异步模式下不等待消费者释放，允许覆盖旧帧</td><td><code>BufferQueueProducer.cpp:434-435</code></td></tr><tr><td><code>mDequeueBufferCannotBlock</code></td><td>标记当前不允许阻塞式 dequeue</td><td><code>BufferQueueProducer.cpp:434-435</code></td></tr><tr><td><code>NUM_BUFFER_SLOTS</code></td><td>槽位数组容量</td><td><code>BufferQueueDefs.h:25</code></td></tr><tr><td><code>mSlots</code></td><td>槽位数组本体，构造时按 64 分配</td><td><code>BufferQueueCore.cpp:104</code></td></tr></tbody></table>
+<p>配额是双向的。生产侧用 <code>setMaxDequeuedBufferCount</code>（:183、:189）限制「已出队未入队」的 buffer 数，消费侧用 <code>setMaxAcquiredBufferCount</code>（<code>BufferQueueConsumer.cpp:788</code>）限制「已获取未释放」的 buffer 数。两边都收紧时，可用槽位会先被其中一边吃满。</p>
+<p><code>BufferQueueCore.cpp</code> 共 523 行，构造函数在 :89，槽位数组在 :104 一次性按 64 建好，此后不再扩缩。这条决定了容量问题的性质：不是「内存不够用」，而是「64 个位置被谁占着」。</p>
+<p>Binder 侧 <code>IGraphicBufferProducer.cpp</code> 共 1745 行。<code>BpGraphicBufferProducer</code> 类在 :93，其 <code>dequeueBuffer</code> 在 :200、<code>queueBuffer</code> 在 :390，是 Bp 端 Parcel 打包（出站）；<code>HpGraphicBufferProducer</code> 类在 :873，其 :902 与 :939 是 Hp 适配层经 <code>mBase-&gt;</code> 转发，不是 Bn 实现；服务端 <code>BnGraphicBufferProducer::onTransact</code> 在 :1178 起解包，<code>case DEQUEUE_BUFFER</code> 在 :1226、<code>case QUEUE_BUFFER</code> 在 :1351。跨进程调用时这几个位置就是参数打包与解包的落点，槽位号以整型穿过 Binder 内核驱动。头文件 <code>IGraphicBufferProducer.h</code> 共 942 行，是这套契约的声明面。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一次正常的单帧生产走完四个动作：</p>
+<ol><li>生产侧调 <code>dequeueBuffer</code>，<code>mCore</code> 从 <code>mSlots</code> 里挑一个 <code>FREE</code> 槽，置为 <code>DEQUEUED</code>，把槽位号返回给 <code>Surface</code>。</li><li>生产侧渲染完，调 <code>queueBuffer</code>，槽位从 <code>DEQUEUED</code> 转 <code>QUEUED</code>，同时触发帧可用回调。</li><li>消费侧 <code>acquireBuffer</code> 拿到该槽，<code>QUEUED</code> → <code>ACQUIRED</code>，计数里已获取数加一。</li><li>消费侧用完后 <code>releaseBuffer</code>，<code>ACQUIRED</code> → <code>FREE</code>，槽位回到可被 dequeue 的池子。</li></ol>
+<p><code>detachBuffer</code> 也是一条回 <code>FREE</code> 的路，但它把 buffer 从队列里摘出去，不再是「用完了还回来」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P2-202</code> 讲窗口侧怎么拿到 Surface，本篇从拿到之后开始。<code>AND-P6-101</code> 讲一帧从应用到呈现的整体链路，本篇是其中队列这一段。SurfaceFlinger 侧如何合成归后续合成篇，HWC 提交归 <code>AND-P4-202</code>，两者都不在本篇展开。</p>
+<p><code>AND-P3-101</code> 作为前置依赖提供 Binder 侧的基础认知，读 <code>IGraphicBufferProducer</code> 的 Bn/Bp 分段时需要它。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>槽位容量</td><td><code>frameworks/native/libs/ui/include/ui/BufferQueueDefs.h</code></td><td><code>NUM_BUFFER_SLOTS</code></td><td>64 的上限来源</td></tr><tr><td>槽位状态机</td><td><code>frameworks/native/libs/gui/include/gui/BufferSlot.h</code></td><td><code>BufferState</code></td><td>五态定义与转换注释</td></tr><tr><td>共享核心</td><td><code>frameworks/native/libs/gui/BufferQueueCore.cpp</code></td><td><code>mSlots</code> 初始化</td><td>槽位数组唯一分配处</td></tr><tr><td>生产侧</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code></td><td><code>dequeueBuffer</code>、<code>queueBuffer</code></td><td>配额判定集中地</td></tr><tr><td>消费侧</td><td><code>frameworks/native/libs/gui/BufferQueueConsumer.cpp</code></td><td><code>acquireBuffer</code>、<code>releaseBuffer</code></td><td>已获取计数调整</td></tr><tr><td>消费封装</td><td><code>frameworks/native/libs/gui/ConsumerBase.cpp</code></td><td><code>acquireBufferLocked</code>、<code>releaseBufferLocked</code></td><td>加锁版本供子类调用</td></tr><tr><td>Binder 契约</td><td><code>frameworks/native/libs/gui/IGraphicBufferProducer.cpp</code></td><td>Bn/Bp 四处分段</td><td>跨进程参数落点</td></tr><tr><td>生产句柄</td><td><code>frameworks/native/libs/gui/Surface.cpp</code></td><td>构造函数、<code>connect</code></td><td>应用侧最常碰的入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git log -1 --format=%H</code></pre>
+<p>期望输出 <code>ae266dcb70</code> 开头的提交号，确认当前树与工厂事实口径一致。</p>
+<pre><code class="lang-bash">grep -n &quot;NUM_BUFFER_SLOTS&quot; frameworks/native/libs/ui/include/ui/BufferQueueDefs.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在 <code>BufferQueueDefs.h:25</code> 看到 <code>static constexpr int NUM_BUFFER_SLOTS = 64</code>。</p>
+<pre><code class="lang-bash">sed -n '104p' frameworks/native/libs/gui/BufferQueueCore.cpp</code></pre>
+<p>期望输出包含 <code>mSlots(BufferQueueDefs::NUM_BUFFER_SLOTS)</code> 的初始化行。</p>
+<pre><code class="lang-bash">grep -n &quot;BufferState&quot; frameworks/native/libs/gui/include/gui/BufferSlot.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在 :35 附近命中 <code>struct BufferState</code>，并在 :54-86 区间看到五态转换注释。</p>
+<pre><code class="lang-bash">grep -n &quot;::dequeueBuffer\|::queueBuffer&quot; frameworks/native/libs/gui/BufferQueueProducer.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :462 与 :976 两个定义位置。</p>
+<pre><code class="lang-bash">grep -n &quot;::acquireBuffer\|::releaseBuffer&quot; frameworks/native/libs/gui/BufferQueueConsumer.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :85 与 :509。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/libs/gui/BufferQueueCore.cpp \
+      frameworks/native/libs/gui/BufferQueueProducer.cpp \
+      frameworks/native/libs/gui/BufferQueueConsumer.cpp</code></pre>
+<p>期望分别为 523、2062、1011 行。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`queueBuffer` 返回成功就说明这一帧已经上屏。</strong> 它只把槽位从 <code>DEQUEUED</code> 推到 <code>QUEUED</code>，消费侧还没 <code>acquireBuffer</code>。上屏与否要看合成侧，不在队列状态里。</p>
+<p><strong>误区二：`dequeueBuffer` 卡住一定是消费侧泄漏了 buffer。</strong> 也可能是生产侧自己的「已出队未入队」配额被打满，比如渲染线程拿了多个槽却没 queue。两侧都可能堵。</p>
+<p><strong>误区三（看似对其实错）：槽位总数 64 意味着最多能挂 64 帧。</strong> <code>NUM_BUFFER_SLOTS</code> 只是数组容量，实际可同时流转的帧数被 <code>setMaxDequeuedBufferCount</code> 与 <code>setMaxAcquiredBufferCount</code> 双向收窄，远小于 64。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>dequeueBuffer</code> 在什么情况下不阻塞直接返回？ <strong>答</strong>：当 <code>mAsyncMode</code> 为真，或判定路径允许不等待消费者时，会取一个更激进的分支，宁可复用旧槽也不挂起。 <strong>追问</strong>：那为什么我开了异步还是偶尔卡？ <strong>答</strong>：异步只去掉「等消费者释放」这一环，生产侧自己的已出队配额打满时照样进不了下一轮，得看 <code>setMaxDequeuedBufferCount</code> 的值。</p>
+<p><strong>问</strong>：<code>releaseBuffer</code> 和 <code>detachBuffer</code> 都能让槽位回 <code>FREE</code>，区别在哪？ <strong>答</strong>：<code>releaseBuffer</code> 是常规归还，buffer 内容留在队列里等待下次复用；<code>detachBuffer</code> 把 buffer 从队列剥离，之后队列不再持有它。 <strong>追问</strong>：误用会怎样？ <strong>答</strong>：detach 之后该槽不再参与正常循环，后续 dequeue 能见到的槽位会变少。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>dequeue 长时间不返回</td><td><code>grep -n &quot;mMaxAcquiredBufferCount&quot; frameworks/native/libs/gui/BufferQueueProducer.cpp</code></td><td>:434-435 的联合判定分支</td><td>对照运行时的已获取计数与配额</td></tr><tr><td>帧率周期性下探</td><td><code>grep -n &quot;setMaxDequeuedBufferCount&quot; frameworks/native/libs/gui/BufferQueueProducer.cpp</code></td><td>:183、:189 的入参与校验</td><td>核对生产侧配额是否过小</td></tr><tr><td>槽位疑似泄漏</td><td><code>grep -n &quot;BufferState&quot; frameworks/native/libs/gui/include/gui/BufferSlot.h</code></td><td>:54-86 的状态转换全集</td><td>用状态机逐个比对实际停留态</td></tr><tr><td>怀疑跨进程参数错位</td><td><code>grep -n &quot;::dequeueBuffer|::queueBuffer|case DEQUEUE_BUFFER|case QUEUE_BUFFER&quot; frameworks/native/libs/gui/IGraphicBufferProducer.cpp</code></td><td>:200、:390（Bp 出站）、:902、:939（Hp 转发）、:1226、:1351（Bn case）</td><td>确认两侧字段顺序一致</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：SurfaceFlinger 侧合成流程、HWC 提交路径（<code>AND-P4-202</code>）、窗口侧 Surface 分配（<code>AND-P2-202</code>）、整帧呈现链路（<code>AND-P6-101</code>）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P2-202</code>、<code>AND-P3-101</code>。</p>
+<p><strong>本篇后继</strong>：合成与提交相关的后续篇目。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>槽位容量 <code>NUM_BUFFER_SLOTS = 64</code>，来源为源码常量 <code>BufferQueueDefs.h:25</code>。</li><li><code>BufferQueueCore</code> 523 行、<code>BufferQueueProducer</code> 2062 行、<code>BufferQueueConsumer</code> 1011 行、<code>ConsumerBase</code> 713 行，口径为 2026-10-18 于 <code>android17-release</code> 实测的 <code>wc -l</code>。</li><li><code>IGraphicBufferProducer.cpp</code> 1745 行、头文件 942 行，同口径。</li><li><code>Surface.cpp</code> 3340 行、<code>android/view/Surface.java</code> 1554 行，同口径。</li><li>实际可同时流转的 buffer 数：暂无实测，列为待补（依赖运行时配额配置）。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早于 <code>android17-release</code></td><td>BLAST 相关队列路径以 <code>BLASTBufferQueue.cpp</code> 承载，本篇未对其做跨版本比对</td><td>旧树上部分符号位置不同，按 grep 重锚</td></tr><tr><td><code>android17-release</code>（本树）</td><td><code>NUM_BUFFER_SLOTS = 64</code>；生产／消费四动作划分如上</td><td>本篇所有行号与符号以此为准</td></tr><tr><td><code>android17-release</code>（本树）</td><td><code>BufferQueueProducer.cpp:434-435</code> 集中三成员联合判定（<code>:292-313</code> 为 <code>setAsyncMode</code> 容量校验）</td><td>阻塞判定需三处一起看，单看一个会误判</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>、<code>bufferqueue</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>BufferQueue</code>、<code>IGraphicBufferProducer</code>、<code>NUM_BUFFER_SLOTS</code>。</li><li>本仓关键路径：<code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code>、<code>frameworks/native/libs/gui/BufferQueueConsumer.cpp</code>、<code>frameworks/native/libs/gui/include/gui/BufferSlot.h</code>。</li><li>承接篇：<code>AND-P2-202</code>、<code>AND-P6-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

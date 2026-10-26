@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卡顿（jank）分析：从掉帧到渲染管线归因</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卡顿（jank）分析：从掉帧到渲染管线归因</h1>
+<div class="kv"><span>ID：AND-P10-202</span><span>卷：P10</span><span>章：10.2</span><span>难度：4</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/jank/JankTracker.java ；frameworks/base/libs/hwui/JankTracker.cpp ；frameworks/base/libs/hwui/FrameInfo.h ；frameworks/base/core/java/android/view/Choreographer.java ；frameworks/base/core/java/android/view/FrameMetrics.java ；frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一次「滑动掉帧」要分清三层：应用侧是否上报了 jank、渲染线程是否判出了慢帧类型、合成侧的时间戳是否对得上。应用侧入口是 <code>android/app/jank/JankTracker.java</code>，渲染侧判定在 <code>libs/hwui/JankTracker.cpp</code>，渲染侧的判定表围绕 <code>FrameInfoIndex</code> 的时间下标展开，应用侧只做采集与统计。要归因，先读 <code>FrameInfo.h</code> 里各下标的符号名，再拿 <code>FrameMetrics.java</code> 做应用侧对账。本篇只给度量口径与归因路径；阈值全部是源码常量口径，不含任何设备实测掉帧率。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P6-301</code>（Choreographer 与帧调度机制），本篇只讲「怎么判定慢、慢在哪一段」，不讲帧调度本身。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/app/jank/JankTracker.java</code></li><li><code>frameworks/base/libs/hwui/JankTracker.cpp</code></li><li><code>frameworks/base/libs/hwui/FrameInfo.h</code></li><li><code>frameworks/base/core/java/android/view/Choreographer.java</code></li><li><code>frameworks/base/core/java/android/view/FrameMetrics.java</code></li><li><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>滑动列表时肉眼看到一次顿挫，收集 trace 一看，主线程那条轨有一帧拉长，但渲染线程也有空闲，合成侧还有自己的时间戳。三处都能解释这次掉帧，你手里的数字却互相对不上。更麻烦的是，同一帧可能被应用侧判成 jank，被渲染侧判成另一种 <code>JankType</code>，两套命名并不一一对应。先把「什么算一帧慢」的口径统一，再谈「慢在哪一段」。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个角色各自只看得见自己那一段。应用侧在 <code>android/app/jank/JankTracker.java</code> 里做采集与统计，开关是 <code>KEY_JANK_METRIC_COLLECTION_ENABLED</code>，取值走 <code>DeviceConfig.getBoolean(NAMESPACE_SYSTEM_PERFORMANCE, ...)</code>；数据落到 <code>mJankDataProcessor</code>，<code>mergeJankStats</code> 负责合并。渲染侧在 <code>libs/hwui/JankTracker.cpp</code> 里按判定表逐条比对帧的各时间下标，落到 <code>JankType</code> 枚举。两侧共同的底座是 <code>FrameInfo.h</code>：<code>FrameInfoBuffer</code> 就是 <code>std::array&lt;int64_t, NumIndexes&gt;</code>，一条时间戳数组，下标由 <code>enum class FrameInfoIndex</code> 定义，符号名由 <code>FrameInfoNames</code> 给出。</p>
+<p>图 1：三层归因与共享的帧时间下标</p>
+<pre><code>应用侧            渲染侧            合成侧
+JankTracker.java  JankTracker.cpp   SurfaceFlinger.cpp
+      |                 |                 |
+      +-------- FrameInfoIndex -----------+
+              (FrameInfo.h 时间下标)</code></pre>
+<p><code>FrameInfoIndex</code> 是唯一的对账锚点。只有 int 下标重载（:163）做完整上下界检查、越界返回 0，typed 重载（:197）仅在 <code>index == NumIndexes</code> 时返回 0——两者都可能让「下标写错」和「该阶段没有时间戳」在数值上长得一样，都是 0。判定表里 <code>JankType::kMissedVsync</code> 配的就是 <code>FrameInfoIndex::IntendedVsync</code>——比的是「我打算在哪次 vsync 出帧」与「实际出了没」。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>判定表是 <code>static const std::array&lt;Comparison, 4&gt; COMPARISONS</code>（<code>JankTracker.cpp</code>:46），共 4 条：<code>kMissedVsync</code>（:47）、<code>kSlowUI</code>（:50）、<code>kSlowSync</code>（:54）、<code>kSlowRT</code>（:58，区间 <code>IssueDrawCommandsStart</code>→<code>FrameCompleted</code>）。消费它的循环在 <code>finishFrame</code> 内（:235–:241），位于 :218 的 <code>else</code> 分支——只有错过 deadline 的帧（该分支先报 <code>kMissedDeadline</code>，:219/:220）才会进入：逐条独立比对，<code>delta</code> 落在门限与 <code>IGNORE_EXCEEDING</code> 之间即上报，<strong>循环体内无 `break`、无 `else if`、无 `return`</strong>。所以四条互不排斥，同一帧可以同时命中多个 <code>JankType</code> 并各自上报。<code>kHighInputLatency</code> 不在这个数组里，它的判定点在 :154/:155 与 :212/:213 两对上报。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>JankType::kMissedVsync</code></td><td>该出帧的 vsync 没出成</td><td><code>libs/hwui/JankTracker.cpp</code>:47</td></tr><tr><td><code>JankType::kSlowUI</code></td><td>UI 线程阶段超时</td><td><code>libs/hwui/JankTracker.cpp</code>:50</td></tr><tr><td><code>JankType::kSlowSync</code></td><td>sync 阶段超时</td><td><code>libs/hwui/JankTracker.cpp</code>:54</td></tr><tr><td><code>JankType::kSlowRT</code></td><td>RT（RenderThread）阶段超时，区间 <code>IssueDrawCommandsStart</code>→<code>FrameCompleted</code></td><td><code>libs/hwui/JankTracker.cpp</code>:58</td></tr><tr><td><code>JankType::kHighInputLatency</code></td><td>输入到呈现延迟过高，不属 <code>COMPARISONS</code> 数组，另有独立判定点</td><td><code>libs/hwui/JankTracker.cpp</code>:154/:155、:212/:213</td></tr><tr><td><code>JankType::kMissedDeadlineLegacy</code></td><td>与 deadline 判定<strong>平行</strong>的 legacy 路径：<code>finishFrame</code>（:170）在 :174 先调 <code>calculateLegacyJank</code>（定义 :102-168），该函数在 :160/:161 上报本类型</td><td><code>libs/hwui/JankTracker.cpp</code>:102-168、:174、:160/:161</td></tr></tbody></table>
+<p>时间轴的源头在 <code>Choreographer.java</code>。帧时间线取自 <code>getPreferredFrameTimeline()</code> 的 <code>getExpectedPresentationTimeNanos()</code>（:884）；<code>mLastVsyncEventData.preferredFrameTimeline()</code> 提供 <code>vsyncId</code>（:961、:964）与 <code>deadline</code>（:975）；<code>mFrameData.update(...)</code> 在 :1107 把这一帧的时间戳写进 <code>Choreographer.FrameData</code>/<code>FrameTimeline</code>（<code>update</code> 方法体 :1484-1496）；<code>FrameInfo.h</code> 那套下标数组的 Java 侧写入另在 :1183 <code>mFrameInfo.setVsync</code>（<code>android.graphics.FrameInfo</code>，经 <code>FRAME_INFO_SIZE</code> ↔ <code>UI_THREAD_FRAME_INFO_SIZE</code> 与 hwui 侧同步）——两套结构共享同一 vsync 时间轴，但不是同一份数据。</p>
+<p>回调阶段有固定编号，jank 归因时按它切分「这一帧的主线程干了哪几段」：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>CALLBACK_INPUT</code>=0</td><td>输入分发阶段</td><td><code>Choreographer.java</code>:321</td></tr><tr><td><code>CALLBACK_ANIMATION</code>=1</td><td>动画阶段</td><td><code>Choreographer.java</code>:328</td></tr><tr><td><code>CALLBACK_INSETS_ANIMATION</code>=2</td><td>insets 动画阶段</td><td><code>Choreographer.java</code>:344</td></tr><tr><td><code>CALLBACK_TRAVERSAL</code>=3</td><td>measure/layout/draw</td><td><code>Choreographer.java</code>:351</td></tr><tr><td><code>CALLBACK_COMMIT</code>=4</td><td>提交阶段</td><td><code>Choreographer.java</code>:363</td></tr></tbody></table>
+<p><code>CALLBACK_TRACE_TITLES</code> 数组（:313）是这些编号的符号名来源，trace 里看到的段名与它对齐。</p>
+<p>掉帧告警在 <code>doFrame</code>（:1074）里算，<code>skippedFrames</code> 的计算与告警在 :1131–:1133，日志文本是 <code>Skipped N frames!</code>。门限 <code>SKIPPED_FRAME_WARNING_LIMIT</code> 在 :178，由 <code>SystemProperties.getInt</code> 读取——它是源码里的属性名与默认值口径，不是任何机器上的实测结果。</p>
+<p>合成侧的对账面很薄：<code>SurfaceFlinger.cpp</code> 在 :166 引入 <code>Scheduler/FrameTimeline.h</code>，:475 初始化 <code>mFrameTimeline</code>，:820 调 <code>mFrameTimeline-&gt;onBootFinished()</code>，:2940 更新过去时间戳。它的作用是让渲染侧的 <code>vsyncId</code> 与合成侧时间戳能对上号，合成策略本身不在这里讲。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设 trace 里一帧的 UI 线程段明显拉长，你想知道渲染侧会判成哪一类。</p>
+<p>第一步，确认应用侧有没有开采集：<code>KEY_JANK_METRIC_COLLECTION_ENABLED</code>（<code>JankTracker.java</code>:48）经 <code>DeviceConfig.getBoolean(NAMESPACE_SYSTEM_PERFORMANCE, ...)</code>（:100-101）读取。没开，应用侧统计就是空的，别拿它当证据。但开关为真也不保证有数据：<code>shouldTrack()</code>（<code>JankTracker.java</code>:326，:332 返回）要求 <code>mTrackingEnabled</code> &amp;&amp; <code>mListenersRegistered</code> &amp;&amp; <code>mComponentsReady</code>（:85/:90/:332）<strong>三条件同时成立</strong>；此外 :93-95 的注释载明「Jank metric reporting is limited to 1% of devices controlled via server side configurations」——采样面本身只有 1% 的设备。开关已开却仍为空时，先查这三重门与设备是否被纳入采样，不要只盯着开关常量。</p>
+<p>第二步，在渲染侧逐条比对四条 <code>COMPARISONS</code>（:47、:50、:54、:58）。它们是并列关系，不是先后关系：<code>kMissedVsync</code>（:47）看 <code>FrameInfoIndex::IntendedVsync</code> 有没有丢；<code>kSlowUI</code>（:50）、<code>kSlowSync</code>（:54）各自看自己那段的时长；<code>kSlowRT</code>（:58）看 <code>IssueDrawCommandsStart</code>→<code>FrameCompleted</code>。你观测到的「UI 段拉长」落在 <code>kSlowUI</code> 的判定区间上，但同一帧不排除同时命中别的类型。若延迟是输入引起的，还要看 <code>kHighInputLatency</code>（:154/:155、:212/:213）。</p>
+<p>第三步，把下标翻成名字：<code>FrameInfoNames</code>（<code>FrameInfo.h</code>:76）给出每个下标对应的符号名，<code>NumIndexes</code>（:73）是上界。读到 0 先怀疑下标越界：int 重载（:163）越界返回 0，typed 重载（:197）仅在 <code>index == NumIndexes</code> 时返回 0，别急着说「这个阶段没耗时」。</p>
+<p>第四步，用 <code>FrameMetrics.java</code> 做应用侧对账——它是应用侧读取帧各阶段耗时的公开入口，字段与 <code>FrameInfoIndex</code> 的分段对应。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>Choreographer 的帧调度机制、vsync 请求与回调排队归 <code>AND-P6-301</code>，本篇只用它的回调编号与时间戳字段做归因。SurfaceFlinger 的合成策略归 <code>AND-P6-201</code>，本篇只用 <code>mFrameTimeline</code> 的对账点。BufferQueue 机制归 <code>AND-P6-102</code>，本篇不涉及缓冲区流转。本篇讲「判什么、看哪个字段」，三篇讲「机制为什么这样」。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>应用侧采集入口</td><td><code>frameworks/base/core/java/android/app/jank/JankTracker.java</code></td><td><code>KEY_JANK_METRIC_COLLECTION_ENABLED</code>、<code>mJankDataProcessor</code>、<code>mergeJankStats</code></td><td>共 408 行；开关走 <code>DeviceConfig</code></td></tr><tr><td>渲染侧判定</td><td><code>frameworks/base/libs/hwui/JankTracker.cpp</code></td><td><code>JankType::kMissedVsync</code>、<code>kSlowUI</code>、<code>kSlowSync</code>、<code>kSlowRT</code>、<code>kHighInputLatency</code></td><td>共 332 行；<code>COMPARISONS</code> 数组自 :46，4 条</td></tr><tr><td>帧数据结构</td><td><code>frameworks/base/libs/hwui/FrameInfo.h</code></td><td><code>FrameInfoIndex</code>、<code>NumIndexes</code>、<code>FrameInfoNames</code>、<code>FrameInfoBuffer</code></td><td>共 214 行；int 重载（:163）越界返回 0，typed 重载（:197）仅在 <code>index == NumIndexes</code> 时返回 0</td></tr><tr><td>调度侧常量与时间线</td><td><code>frameworks/base/core/java/android/view/Choreographer.java</code></td><td><code>CALLBACK_*</code>、<code>SKIPPED_FRAME_WARNING_LIMIT</code>、<code>getExpectedPresentationTimeNanos()</code></td><td>共 1741 行；<code>doFrame</code> 在 :1074</td></tr><tr><td>应用侧阶段耗时入口</td><td><code>frameworks/base/core/java/android/view/FrameMetrics.java</code></td><td>各阶段耗时字段</td><td>共 378 行</td></tr><tr><td>合成侧对账点</td><td><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></td><td><code>mFrameTimeline</code>、<code>onBootFinished()</code></td><td>共 11072 行；引入于 :166</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令均在 <code>frameworks/base</code> 目录内执行（与首条一致，路径相对于该目录）。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; git rev-parse HEAD</code></pre>
+<p>期望输出 <code>94b4c163b7df</code> 开头的提交号，与本篇锚点一致（另三仓：frameworks/native <code>ae266dcb706d</code>、system/core <code>545d2487e381</code>、external/perfetto <code>ece669757380</code>）。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; wc -l core/java/android/app/jank/JankTracker.java libs/hwui/JankTracker.cpp libs/hwui/FrameInfo.h core/java/android/view/Choreographer.java core/java/android/view/FrameMetrics.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 408、332、214、1741、378 五行，对上 §5 的行数口径。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; sed -n '46,61p' libs/hwui/JankTracker.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>std::array&lt;Comparison, 4&gt; COMPARISONS</code>，以及 <code>JankType::kMissedVsync</code>、<code>JankType::kSlowUI</code>、<code>JankType::kSlowSync</code>、<code>JankType::kSlowRT</code> 依次出现。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; sed -n '235,242p' libs/hwui/JankTracker.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>for (auto&amp; comparison : COMPARISONS)</code> 的循环体内只有条件与 <code>reportJankType</code>，没有 <code>break</code>/<code>return</code>——即四条独立比对、可同时上报。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; grep -n 'KEY_JANK_METRIC_COLLECTION_ENABLED\|NAMESPACE_SYSTEM_PERFORMANCE' core/java/android/app/jank/JankTracker.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>:47</code>/<code>:48</code> 命中命名空间与开关常量、<code>:100-101</code> 命中 <code>DeviceConfig</code> 读取。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; grep -n 'SKIPPED_FRAME_WARNING_LIMIT\|Skipped' core/java/android/view/Choreographer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:177</code>/<code>:178</code>（注释与门限定义）与 :1132–:1133（门限使用处与告警文本；:1131 的 <code>skippedFrames</code> 为小写，不命中该式）。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; grep -n 'NumIndexes\|FrameInfoNames\|FrameInfoBuffer' libs/hwui/FrameInfo.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :73、:76、:87、:158、:163、:197、:207 共 7 行（<code>:73</code> 枚举项、:76 名字数组、:87 缓冲区别名、:158/:163/:197 访问器、:207 成员声明）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：主线程那条轨拉长就一定判 `kSlowUI`。</strong> 四条 <code>COMPARISONS</code> 是并列独立比对（循环体 :235–:241，无 <code>break</code>），一帧可同时上报 <code>kMissedVsync</code>（:47）、<code>kSlowUI</code>（:50）、<code>kSlowSync</code>（:54）、<code>kSlowRT</code>（:58）中的任意组合。看到 <code>kSlowUI</code> 不等于没有 <code>kMissedVsync</code>，反之亦然——要按四条分别核对。</p>
+<p><strong>误区二：`FrameInfoIndex` 某个下标读到 0，说明这一阶段不耗时。</strong> int 下标重载（:163）越界返回 0，typed 重载（:197）只在 <code>index == NumIndexes</code> 时返回 0。0 是「没读到」的同义词，先查 <code>NumIndexes</code>（:73）上界。</p>
+<p><strong>误区三（看起来对其实是错的）：看到 `Skipped N frames!` 就知道掉了几帧。</strong> 这条日志的门限是 <code>SKIPPED_FRAME_WARNING_LIMIT</code>（<code>Choreographer.java</code>:178），只在该门限之上触发；低于门限的掉帧不会打这条日志。它是告警，不是全量计数。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：应用侧 jank 统计为什么在有的机器上是空的？ <strong>答</strong>：先看 <code>KEY_JANK_METRIC_COLLECTION_ENABLED</code>（:48）是否被 <code>DeviceConfig</code> 置为真（读取在 :100-101）。开关关着，<code>mJankDataProcessor</code>（:59、:143）就收不到数据；开关开着却仍为空，则查 <code>shouldTrack()</code>（:326-333）的 <code>mTrackingEnabled</code>/<code>mListenersRegistered</code>/<code>mComponentsReady</code> 三重门，以及该设备是否在 :93-95 所述 1% 采样面内。 <strong>追问</strong>：开关开着就一定和渲染侧判得一样吗？ <strong>答</strong>：不会。两侧是两套口径：应用侧走 <code>mergeJankStats</code>（:181）聚合，渲染侧按 <code>JankType</code> 枚举逐条独立判定、可同时命中多个，同一个慢帧可以两边结论不同名。</p>
+<p><strong>问</strong>：归因到底先看哪个字段？ <strong>答</strong>：先看 <code>FrameInfoIndex::IntendedVsync</code>——它是 <code>kMissedVsync</code>（:47）的判定依据，也是四条里唯一回答「这帧到底出没出」的那条；其余三条都是时长比较。 <strong>追问</strong>：trace 里想抓渲染管线，开哪个类别？ <strong>答</strong>：<code>atrace</code> 的 <code>gfx</code> 类别（<code>frameworks/native/cmds/atrace/atrace.cpp</code>:103，对应 <code>ATRACE_TAG_GRAPHICS</code>）。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>应用侧统计为空</td><td><code>grep -n 'KEY_JANK_METRIC_COLLECTION_ENABLED' frameworks/base/core/java/android/app/jank/JankTracker.java</code></td><td>开关常量位置与读取调用的 <code>DeviceConfig</code> 命名空间</td><td>核对设备上该命名空间的值是否开启</td></tr><tr><td>判定类型与预期不符</td><td><code>sed -n '46,61p' frameworks/base/libs/hwui/JankTracker.cpp</code></td><td><code>COMPARISONS</code> 的 4 条条目与其区间端点</td><td>按四条分别核对，别当成互斥单选</td></tr><tr><td>一帧报了多个类型</td><td><code>sed -n '235,242p' frameworks/base/libs/hwui/JankTracker.cpp</code></td><td>循环体内无 <code>break</code>，逐条独立上报</td><td>属预期行为，按类型分别定位阶段</td></tr><tr><td>时间下标全是 0</td><td><code>grep -n 'NumIndexes|std::array' frameworks/base/libs/hwui/FrameInfo.h</code></td><td><code>NumIndexes</code> 上界与 <code>FrameInfoBuffer</code> 定义</td><td>核对读下标的代码是否越界</td></tr><tr><td>只见告警不见计数</td><td><code>grep -n 'SKIPPED_FRAME_WARNING_LIMIT' frameworks/base/core/java/android/view/Choreographer.java</code></td><td>门限常量的读取方式（<code>SystemProperties.getInt</code>）</td><td>改用 trace 全量统计，别依赖这条日志</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Choreographer 帧调度机制（<code>AND-P6-301</code>）、SurfaceFlinger 合成策略（<code>AND-P6-201</code>）、BufferQueue 机制（<code>AND-P6-102</code>）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P6-301</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P10-402</code>（trace 采集工具链方向）、<code>AND-P10-403</code>（ANR 判定与 native 崩溃 tombstone 取证方向）。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>SKIPPED_FRAME_WARNING_LIMIT</code> 的定义位置为 <code>Choreographer.java</code>:178，由 <code>SystemProperties.getInt</code> 读取——源码常量／属性口径，具体数值以树内默认为准。</li><li><code>FrameInfoBuffer</code> 长度等于 <code>NumIndexes</code>（<code>FrameInfo.h</code>:73、:87）——源码常量口径。</li><li><code>COMPARISONS</code> 条目数为 4（<code>:46</code>），即 <code>kMissedVsync</code>、<code>kSlowUI</code>、<code>kSlowSync</code>、<code>kSlowRT</code>；另 <code>kHighInputLatency</code> 在 :154/:155 与 :212/:213 两对上报——源码静态口径。</li><li>四条判定在循环中逐一独立比对、无短路，单帧可上报多个 <code>JankType</code>——源码静态口径。</li><li>各 <code>JankType</code> 的判定阈值：源码给的是<strong>相对 `frameInterval` 的比例</strong>而非固定毫秒——<code>kMissedVsync</code> 恒为 1ns（:47-48，只要 intended vsync 与 vsync 不等即命中）、<code>kSlowUI</code> 为 .5×（:51）、<code>kSlowSync</code> 为 .2×（:55）、<code>kSlowRT</code> 为 .75×（:59）；另有 <code>IGNORE_EXCEEDING = seconds_to_nanoseconds(10)</code>（:65）作上界，超过 10 秒的事件直接丢弃、按 ANR 处理。具体毫秒数随设备刷新率变化，故本篇不给出单一数值。</li><li>设备实测掉帧率与各阶段耗时分布：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release</td><td><code>android/app/jank/JankTracker.java</code> 为 408 行，开关常量在 :48，<code>mJankDataProcessor</code> 在 :59、:143，<code>mergeJankStats</code> 在 :181；<code>libs/hwui/JankTracker.cpp</code> 为 332 行，<code>COMPARISONS</code> 数组自 :46、共 4 条（第四条 <code>kSlowRT</code> 在 :58），上报循环在 :235–:241；<code>FrameInfo.h</code> 为 214 行，<code>NumIndexes</code> 在 :73；<code>Choreographer.java</code> 为 1741 行，五个 <code>CALLBACK_*</code> 在 :321–:363</td><td>本树实测状态，本篇所有行号以此为准</td></tr><tr><td>更早版本</td><td>本篇依据的清单未给出版本史，故不断言具体引入版本与旧位置</td><td>跨版本核对时按符号 grep 重锚，勿照搬行号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>perfetto</code>、<code>atrace</code>、<code>FrameMetrics</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>JankTracker</code>、<code>FrameTimeline</code>、<code>JankType</code>。</li><li>本仓关键路径：<code>frameworks/base/libs/hwui/FrameInfo.h</code>、<code>frameworks/base/libs/hwui/JankTracker.cpp</code>、<code>frameworks/base/core/java/android/view/Choreographer.java</code>。</li><li>承接篇：<code>AND-P6-301</code>、<code>AND-P6-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

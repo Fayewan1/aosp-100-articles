@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oneway、死亡通知与 Binder 的失败形状</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>oneway、死亡通知与 Binder 的失败形状</h1>
+<div class="kv"><span>ID：AND-P2-102</span><span>卷：P2</span><span>章：2.1</span><span>难度：4</span><span>核验：2026-10-15</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/BpBinder.cpp ；frameworks/native/libs/binder/IPCThreadState.cpp ；frameworks/native/libs/binder/Binder.cpp ；frameworks/native/libs/binder/ProcessState.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>oneway 事务的「成功」只到驱动入队为止：<code>waitForResponse</code> 等的是 <code>BR_TRANSACTION_COMPLETE</code>，服务端是否执行、是否成功，调用方一无所知。Binder 的失败形状因此分三层：同步事务的失败码（<code>DEAD_OBJECT</code>、<code>FAILED_TRANSACTION</code>、<code>FROZEN_OBJECT</code>）、reply 里暗藏的 <code>TF_STATUS_CODE</code>、以及异步的死亡通知回调。死亡通知的派发线程既不是注册者线程也不是调用方线程，回调在 Binder 线程上同步执行。oneway 打到被冻结的进程会在客户端侧被拦下并打日志，不再静默堆积。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读｜路径 C 只读 §4/§6</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P2-101。同步事务主干、<code>mAlive</code> 置 0 不可复活都在那一篇；本篇只展开 oneway 分支、死亡通知与失败码，不重讲主干。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></li><li><code>frameworks/native/libs/binder/BpBinder.cpp</code></li><li><code>frameworks/native/libs/binder/Binder.cpp</code></li><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你调用一个 oneway 接口，返回 <code>OK</code>，日志干净，于是认为服务端收到了。几秒后服务端进程崩了，调用方毫无察觉——没有任何异常、没有任何回调。另一种现象：注册了死亡通知，服务重启后回调只来一次，再注册返回 <code>DEAD_OBJECT</code>，你怀疑是自己代码写错。更常见的是双向都注册了死亡通知，结果一端崩了另一端收到 <code>INVALID_OPERATION</code>。这些都不是玄学，是 Binder 在设计上就把「事务成功」和「业务成功」拆成了两件事。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：事务完成（command 已入队）、业务结果（服务端真正执行的结果）、生命期信号（对方进程死没死）。oneway 只保证第一件；同步事务能拿到第二件，但要靠返回值编码；第三件完全走另一条路——死亡通知。</p>
+<p>图 1：oneway 与同步事务的返回路径差异</p>
+<pre><code>调用方 transact
+   |
+   +-- flags &amp; TF_ONE_WAY == 0  --&gt; 等 reply
+   |        收到 BR_REPLY
+   |        +-- TF_STATUS_CODE --&gt; 返回值即 status_t
+   |        +-- 否则           --&gt; 正常返回
+   |
+   +-- flags &amp; TF_ONE_WAY != 0  --&gt; 等 BR_TRANSACTION_COMPLETE
+            命令已入队，服务端执行与否不可知</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>waitForResponse</code> 是唯一收口点：同步分支等 reply，oneway 分支同样调它，但传的是空指针（<code>IPCThreadState.cpp</code> 里 <code>waitForResponse(nullptr, nullptr)</code>，992 行附近），等的只是 <code>BR_TRANSACTION_COMPLETE</code>。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>oneway 分叉点。</strong> <code>IPCThreadState::transact</code>（<code>IPCThreadState.cpp:921–996</code>）在约 948 行判断 <code>if ((flags &amp; TF_ONE_WAY) == 0)</code>。同步分支阻塞等 reply；oneway 分支调用 <code>waitForResponse(nullptr, nullptr)</code>（992 行附近），等到 <code>BR_TRANSACTION_COMPLETE</code> 即返回。这个确认的含义是「驱动已把命令入队」，不保证服务端执行、不保证执行成功。</p>
+<p><strong>默认带 FD。</strong> 同一函数里 <code>flags |= TF_ACCEPT_FDS</code>（<code>IPCThreadState.cpp:929</code>）：默认允许随事务传递文件描述符。</p>
+<p><strong>oneway 滥用检测。</strong> 驱动发现某进程 oneway 发得太多，回 <code>BR_ONEWAY_SPAM_SUSPECT</code>（<code>IPCThreadState.cpp:1174</code>）。客户端侧触发 <code>ALOGE(&quot;Process seems to be sending too many oneway calls.&quot;)</code>，并打调用栈：<code>CallStack::logStack(&quot;oneway spamming&quot;, CallStack::getCurrent().get(), ANDROID_LOG_ERROR)</code>（1175–1176）。</p>
+<p><strong>目标被冻结。</strong> 给处于冻结状态的进程发 oneway，客户端收到 <code>BR_TRANSACTION_PENDING_FROZEN</code>（<code>IPCThreadState.cpp:1181</code>），打 <code>ALOGW(&quot;Sending oneway calls to frozen process.&quot;)</code> 后结束等待。oneway 不会一直挂在冻结进程上。</p>
+<p><strong>失败返回码在客户端侧统一映射。</strong> 映射全部发生在 <code>waitForResponse</code> 内，客户端拿到的返回值如下表。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>DEAD_OBJECT</code></td><td>对端已死，<code>BR_DEAD_REPLY</code> 映射而来</td><td><code>IPCThreadState.cpp:1186–1188</code></td></tr><tr><td><code>FAILED_TRANSACTION</code></td><td>事务失败，<code>BR_FAILED_REPLY</code> 映射而来</td><td><code>IPCThreadState.cpp:1191–1193</code></td></tr><tr><td><code>FROZEN_OBJECT</code></td><td>对端被冻结，<code>BR_FROZEN_REPLY</code> 且 <code>enableFrozenObjectErrorCode()</code> 为真时使用</td><td><code>IPCThreadState.cpp:1195–1197</code></td></tr><tr><td><code>UNKNOWN_TRANSACTION</code></td><td>事务码对端不认</td><td><code>Binder.cpp:1155</code>；<code>IPCThreadState.cpp:1557–1560</code></td></tr></tbody></table>
+<p><code>BR_FROZEN_REPLY</code> 是条件映射：<code>enableFrozenObjectErrorCode()</code> 为真才是 <code>FROZEN_OBJECT</code>，否则退回 <code>FAILED_TRANSACTION</code>（1195–1197）。</p>
+<p><strong>reply 里可以藏状态码。</strong> 收到 <code>BR_REPLY</code> 且 <code>tr.flags &amp; TF_STATUS_CODE</code>（<code>IPCThreadState.cpp:1219–1228</code>）时，reply 缓冲内容就是一个 <code>status_t</code>；<code>freeBuffer</code> 之后直接把它作为返回值。所以传输层可以「成功返回」而业务其实是失败——错误码被服务端写进了 reply 缓冲。</p>
+<p><strong>死亡通知注册。</strong> <code>BpBinder::linkToDeath</code>（<code>BpBinder.cpp:449</code>）。要点依次是：线程池上限为 0 时 <code>ALOGW</code> 提醒先起线程池（456–463，提示语含 <code>setThreadPoolMaxThreadCount</code>）；<code>LOG_ALWAYS_FATAL_IF(recipient == nullptr, &quot;linkToDeath(): recipient must be non-NULL&quot;)</code>（477–478）；首次注册新建 <code>Vector&lt;Obituary&gt;</code>，并经 <code>requestDeathNotification(binderHandle(), this)</code> + <code>flushCommands()</code> 向驱动登记（493–499）；若 <code>mObitsSent</code> 已置位（死讯已发过），再注册返回 <code>DEAD_OBJECT</code>（504）。</p>
+<p><strong>注销。</strong> <code>BpBinder::unlinkToDeath</code>（<code>BpBinder.cpp:508</code>），<code>mObitsSent</code> 已置位同样返回 <code>DEAD_OBJECT</code>（519–520）。</p>
+<p><strong>死讯派发。</strong> 驱动发 <code>BR_DEAD_BINDER</code>，在某个 Binder 线程的 <code>executeCommand</code> 里（<code>IPCThreadState.cpp:1631–1637</code>）调 <code>proxy-&gt;sendObituary()</code>，然后回写 <code>BC_DEAD_BINDER_DONE</code>。派发线程既不是注册者线程，也不是当初的调用方线程。</p>
+<p><strong>sendObituary。</strong> <code>BpBinder::sendObituary</code>（<code>BpBinder.cpp:551</code>）先置 <code>mAlive = 0</code>（562），用 <code>mObitsSent</code> 去重（563），再 <code>clearDeathNotification</code> + <code>flushCommands</code> 撤掉驱动登记（568–573）。</p>
+<p><strong>回调在哪执行。</strong> <code>BpBinder::reportOneDeath</code>（<code>BpBinder.cpp:754</code>）调 <code>recipient-&gt;binderDied(wp&lt;BpBinder&gt;::fromExisting(this))</code>：回调在派发线程上同步执行。应用侧要主线程得自己 post。</p>
+<p><strong>反向注册无效。</strong> <code>BBinder::linkToDeath</code>（<code>Binder.cpp:590</code>）对本进程持有的 binder 一律返回 <code>INVALID_OPERATION</code>。注释写明：DeathRecipient 是在持有 binder 的进程死亡时对 BpBinder 回调的。</p>
+<p><strong>线程池基数。</strong> <code>DEFAULT_MAX_BINDER_THREADS = 15</code>（<code>ProcessState.cpp:49</code>）。容量策略归 AND-P2-301，本篇只用它解释 456–463 的告警含义。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>场景：客户端 <code>linkToDeath</code> 后服务端进程死亡。</p>
+<ol><li>客户端首次注册，<code>BpBinder::linkToDeath</code> 新建 <code>Vector&lt;Obituary&gt;</code>，<code>requestDeathNotification</code> + <code>flushCommands</code> 向驱动登记（<code>BpBinder.cpp:493–499</code>）。这一步要求已经起过 Binder 线程池，否则 <code>BpBinder.cpp:456–463</code> 先 <code>ALOGW</code> 提醒。</li><li>服务端进程死亡，驱动发 <code>BR_DEAD_BINDER</code>。某个 Binder 线程在 <code>executeCommand</code> 里拿到它（<code>IPCThreadState.cpp:1631–1637</code>），调 <code>proxy-&gt;sendObituary()</code>。</li><li><code>sendObituary</code> 置 <code>mAlive = 0</code>（<code>BpBinder.cpp:562</code>），<code>mObitsSent</code> 去重（563），撤掉驱动登记（568–573）。</li><li><code>reportOneDeath</code> 调 <code>binderDied(...)</code>（<code>BpBinder.cpp:754</code>）。回调在这个 Binder 线程上跑完。</li><li>应用再调 <code>linkToDeath</code>，因为 <code>mObitsSent</code> 已置位，返回 <code>DEAD_OBJECT</code>（<code>BpBinder.cpp:504</code>）。这不是 bug，是「死讯已发过」的显式表达。</li></ol>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>AND-P2-101：同步事务主干、<code>mAlive</code> 置 0 不可复活（<code>BpBinder.cpp:440</code>）在那边。本篇只展开 oneway 分支、死亡通知与失败码。</li><li>AND-P2-301：线程池容量策略（含 <code>DEFAULT_MAX_BINDER_THREADS = 15</code> 的调优）归那边。本篇只引用它解释 <code>linkToDeath</code> 的线程池告警。</li><li>P5 卷（驱动侧）：入队、唤醒、冻结的驱动实现归 P5。本篇只讲客户端侧的 <code>BR_TRANSACTION_PENDING_FROZEN</code> 处理。</li><li>Java 侧 <code>android.os.IBinder.linkToDeath</code> 经 JNI 到 <code>BpBinder::linkToDeath</code>，与 101 同口径，本篇不展开。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>oneway 分叉与失败码映射</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>transact</code>、<code>waitForResponse</code>、<code>BR_TRANSACTION_COMPLETE</code>、<code>BR_ONEWAY_SPAM_SUSPECT</code>、<code>BR_TRANSACTION_PENDING_FROZEN</code></td><td>客户端侧唯一收口</td></tr><tr><td>死讯接收与派发</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>executeCommand</code>、<code>BR_DEAD_BINDER</code>、<code>BC_DEAD_BINDER_DONE</code></td><td>派发线程在此</td></tr><tr><td>死亡通知注册/注销/撤登记</td><td><code>frameworks/native/libs/binder/BpBinder.cpp</code></td><td><code>linkToDeath</code>、<code>unlinkToDeath</code>、<code>sendObituary</code>、<code>reportOneDeath</code></td><td><code>Obituary</code> 容器与 <code>mObitsSent</code> 去重</td></tr><tr><td>反向注册拒绝与非本地事务码</td><td><code>frameworks/native/libs/binder/Binder.cpp</code></td><td><code>BBinder::linkToDeath</code>、<code>BBinder::onTransact</code> 的 <code>default</code></td><td><code>INVALID_OPERATION</code>、<code>UNKNOWN_TRANSACTION</code></td></tr><tr><td>线程池基数</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>DEFAULT_MAX_BINDER_THREADS</code></td><td>解释 <code>linkToDeath</code> 告警</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash"># 1. oneway 分叉点与 waitForResponse(nullptr, nullptr)
+grep -n &quot;TF_ONE_WAY\|waitForResponse(nullptr&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：在 <code>transact</code> 内看到 <code>(flags &amp; TF_ONE_WAY) == 0</code> 的判断，以及 oneway 分支传空指针调用 <code>waitForResponse</code>。</p>
+<pre><code class="lang-bash"># 2. 默认允许传 FD
+grep -n &quot;TF_ACCEPT_FDS&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>transact</code> 内出现 <code>flags |= TF_ACCEPT_FDS</code>。</p>
+<pre><code class="lang-bash"># 3. oneway 滥用与被冻结目标的处理
+grep -n &quot;BR_ONEWAY_SPAM_SUSPECT\|oneway spamming\|BR_TRANSACTION_PENDING_FROZEN\|frozen process&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：命中 <code>ALOGE(&quot;Process seems to be sending too many oneway calls.&quot;)</code>、<code>CallStack::logStack(&quot;oneway spamming&quot;, ...)</code>、<code>ALOGW(&quot;Sending oneway calls to frozen process.&quot;)</code>。</p>
+<pre><code class="lang-bash"># 4. 失败码映射
+grep -n &quot;BR_DEAD_REPLY\|BR_FAILED_REPLY\|BR_FROZEN_REPLY\|enableFrozenObjectErrorCode&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：看到三个 <code>BR_*</code> 到 <code>DEAD_OBJECT</code>/<code>FAILED_TRANSACTION</code>/<code>FROZEN_OBJECT</code> 的分支。</p>
+<pre><code class="lang-bash"># 5. reply 内藏状态码
+grep -n &quot;TF_STATUS_CODE&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>BR_REPLY</code> 处理里出现 <code>tr.flags &amp; TF_STATUS_CODE</code>，其分支把 reply 缓冲当 <code>status_t</code> 返回。</p>
+<pre><code class="lang-bash"># 6. 死亡通知注册与派发
+grep -n &quot;linkToDeath\|unlinkToDeath\|sendObituary\|reportOneDeath\|mObitsSent\|setThreadPoolMaxThreadCount&quot; frameworks/native/libs/binder/BpBinder.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：命中 <code>mObitsSent</code> 去重、<code>Vector&lt;Obituary&gt;</code>、<code>requestDeathNotification</code>、<code>clearDeathNotification</code> 与线程池告警提示语。</p>
+<pre><code class="lang-bash"># 7. 死讯的接收与回执
+grep -n &quot;BR_DEAD_BINDER\|BC_DEAD_BINDER_DONE\|sendObituary&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>executeCommand</code> 内命中 <code>BR_DEAD_BINDER</code>、<code>proxy-&gt;sendObituary()</code> 与 <code>BC_DEAD_BINDER_DONE</code> 回写。</p>
+<pre><code class="lang-bash"># 8. 反向注册与非本地事务码
+grep -n &quot;INVALID_OPERATION\|UNKNOWN_TRANSACTION&quot; frameworks/native/libs/binder/Binder.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>BBinder::linkToDeath</code> 返回 <code>INVALID_OPERATION</code>；<code>BBinder::onTransact</code> 的 <code>default</code> 返回 <code>UNKNOWN_TRANSACTION</code>。</p>
+<pre><code class="lang-bash"># 9. 线程池基数
+grep -rn &quot;DEFAULT_MAX_BINDER_THREADS&quot; frameworks/native/libs/binder/ProcessState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：命中定义，值为 15。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：oneway 返回 `OK` 就代表服务端收到了。</strong> 错。oneway 等到的是 <code>BR_TRANSACTION_COMPLETE</code>，含义只是驱动确认命令已入队。服务端是否执行、是否成功，调用方拿不到任何信息。</p>
+<p><strong>误区二：注册过死亡通知，第二次注册失败是框架 bug。</strong> 错，这是设计。<code>mObitsSent</code> 置位后表示死讯已发过，再注册 <code>linkToDeath</code> 返回 <code>DEAD_OBJECT</code>（<code>BpBinder.cpp:504</code>），<code>unlinkToDeath</code> 同理（519–520）。看起来像是接口失灵，实际是「死讯不会重复发」的显式编码。</p>
+<p><strong>误区三：给本进程持有的 binder 注册死亡通知应该也有效。</strong> 错。<code>BBinder::linkToDeath</code>（<code>Binder.cpp:590</code>）对本进程持有的 binder 一律返回 <code>INVALID_OPERATION</code>。DeathRecipient 的语义是「持有 binder 的那个进程死时」对 BpBinder 回调，同一进程内不存在这个场景。</p>
+<p><strong>误区四：`binderDied` 回调在注册它的线程上执行。</strong> 错。回调在派发线程上同步执行（<code>BpBinder.cpp:754</code> 的 <code>reportOneDeath</code>），那个线程是某个 Binder 线程，既不是注册者线程也不是当初的调用方线程。要回主线程得自己 post。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：oneway 打到被冻结的进程会怎样？ <strong>答</strong>：客户端收到 <code>BR_TRANSACTION_PENDING_FROZEN</code>（<code>IPCThreadState.cpp:1181</code>），打 <code>ALOGW(&quot;Sending oneway calls to frozen process.&quot;)</code> 后结束等待。 <strong>追问</strong>：还会静默堆积吗？ <strong>答</strong>：客户端侧不会一直挂着；这条日志就是排查「oneway 发了但没反应」的第一落点。</p>
+<p><strong>问</strong>：同步事务返回值是 <code>OK</code>，但业务其实失败了，可能吗？ <strong>答</strong>：可能。<code>waitForResponse</code> 看到 <code>BR_REPLY</code> 且 <code>tr.flags &amp; TF_STATUS_CODE</code>（<code>IPCThreadState.cpp:1219–1228</code>）时，把 reply 缓冲内容当 <code>status_t</code> 返回；服务端把错误码写进缓冲，传输层照常成功。 <strong>追问</strong>：怎么区分？ <strong>答</strong>：看服务端有没有用 <code>TF_STATUS_CODE</code> 的写法；这是服务端侧约定，不是传输层的通用行为。</p>
+<p><strong>问</strong>：<code>UNKNOWN_TRANSACTION</code> 有两个来源？ <strong>答</strong>：有。一是 <code>BBinder::onTransact</code> 的 <code>default</code> 分支（<code>Binder.cpp:1155</code>）；二是服务端处理 <code>BR_TRANSACTION</code> 时 <code>attemptIncStrong</code> 失败（<code>IPCThreadState.cpp:1557–1560</code>）。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>oneway 调用后对端毫无反应</td><td><code>grep -n &quot;BR_TRANSACTION_PENDING_FROZEN&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>客户端有没有处理「目标被冻结」分支</td><td>若日志出现 <code>Sending oneway calls to frozen process.</code>，确认目标进程冻结状态</td></tr><tr><td>日志刷 <code>too many oneway calls</code></td><td><code>grep -n &quot;BR_ONEWAY_SPAM_SUSPECT|oneway spamming&quot; frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>驱动的滥用告警路径</td><td>从 <code>CallStack::logStack</code> 打的栈定位高频 oneway 调用点</td></tr><tr><td>死亡通知只回调一次 / 再注册报错</td><td><code>grep -n &quot;mObitsSent&quot; frameworks/native/libs/binder/BpBinder.cpp</code></td><td><code>mObitsSent</code> 的置位与去重逻辑</td><td>确认是不是「死讯已发过」导致返回 <code>DEAD_OBJECT</code></td></tr><tr><td>本进程内注册死亡通知拿到 <code>INVALID_OPERATION</code></td><td><code>grep -n &quot;INVALID_OPERATION&quot; frameworks/native/libs/binder/Binder.cpp</code></td><td><code>BBinder::linkToDeath</code> 的拒绝条件</td><td>改用对端进程持有的 BpBinder 注册</td></tr><tr><td>回调里改了 UI 导致崩溃</td><td><code>grep -n &quot;reportOneDeath&quot; frameworks/native/libs/binder/BpBinder.cpp</code></td><td>回调在哪个线程执行</td><td>在 <code>binderDied</code> 里自行 post 到主线程</td></tr><tr><td>服务端没处理某个事务码</td><td><code>grep -n &quot;UNKNOWN_TRANSACTION&quot; frameworks/native/libs/binder/Binder.cpp</code></td><td><code>BBinder::onTransact</code> 的 <code>default</code> 分支</td><td>核对客户端事务码与服务端实现</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：同步事务主干与 <code>mAlive</code> 置 0 不可复活 → AND-P2-101；线程池容量策略 → AND-P2-301；驱动侧入队/唤醒/冻结 → P5 卷。</li><li><strong>本篇前置依赖</strong>：AND-P2-101。</li><li><strong>本篇后继</strong>：AND-P2-301。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>DEFAULT_MAX_BINDER_THREADS = 15</code>，口径为源码常量（<code>ProcessState.cpp:49</code>）。容量策略归 AND-P2-301。</li><li>oneway 等待的终止条件有三种：<code>BR_TRANSACTION_COMPLETE</code>、<code>BR_TRANSACTION_PENDING_FROZEN</code>、失败码分支，口径为本篇源码分析。</li><li><code>BR_ONEWAY_SPAM_SUSPECT</code> 的触发阈值在驱动侧，本篇不断言具体数值，列为待补。</li><li>死亡通知派发线程数上限与 <code>DEFAULT_MAX_BINDER_THREADS</code> 相关，具体派发线程选择无公开确定性规则，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树实测）</td><td><code>waitForResponse</code> 内 <code>BR_FROZEN_REPLY</code> 按 <code>enableFrozenObjectErrorCode()</code> 决定返回 <code>FROZEN_OBJECT</code> 还是 <code>FAILED_TRANSACTION</code>（<code>IPCThreadState.cpp:1195–1197</code>）</td><td>同一条冻结分支在不同返回码开关下表现不同，排查时先确认开关状态</td></tr><tr><td>早期版本</td><td>冻结语义与 <code>FROZEN_OBJECT</code> 返回码的引入时间早于本树，具体提交未在本篇核实</td><td>老代码可能只看到 <code>FAILED_TRANSACTION</code>，不要按本树返回码反推</td></tr><tr><td>早期版本</td><td><code>BR_ONEWAY_SPAM_SUSPECT</code> 与 <code>BR_TRANSACTION_PENDING_FROZEN</code> 均非最初设计即存在</td><td>老树里 grep 不到这两个符号不代表机制不存在旧形态</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>binder</code>、<code>AIDL oneway</code>、<code>linkToDeath</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>TF_ONE_WAY</code>、<code>BR_TRANSACTION_PENDING_FROZEN</code>、<code>linkToDeath</code>。</li><li>本仓关键路径：<code>frameworks/native/libs/binder/BpBinder.cpp</code>、<code>frameworks/native/libs/binder/IPCThreadState.cpp</code>、<code>frameworks/native/libs/binder/Binder.cpp</code>。</li><li>承接篇：AND-P2-101、AND-P2-301。</li></ul>
+</article>
+<footer>android-100 · AND-P2-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

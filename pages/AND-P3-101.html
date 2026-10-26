@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Native 世界导览：bionic、.so 与 Init 属性系统</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Native 世界导览：bionic、.so 与 Init 属性系统</h1>
+<div class="kv"><span>ID：AND-P3-101</span><span>卷：P3</span><span>章：3.1</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：bionic/libc/Android.bp ；bionic/libc/include/sys/system_properties.h ；bionic/libc/bionic/system_property_set.cpp ；bionic/libc/system_properties/system_properties.cpp ；bionic/linker/linker.cpp ；system/core/init/property_service.cpp ；system/sepolicy/private/property_contexts</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>应用崩溃日志里出现 <code>dlopen failed: library &quot;libxxx.so&quot; not found</code>，或者 <code>setprop</code> 返回失败，问题往往已经落在 Java 之下的 native 层。bionic 同时提供 C 库和链接器：<code>libc</code> 与 <code>linker</code> 是同一目录下的两个 Soong 模块，模块名就是安装后的 <code>.so</code> 名。<code>.so</code> 的装载由 linker 按命名空间配置解析，配置来自 <code>/system/etc/ld.config.txt</code> 与 <code>/linkerconfig/ld.config.txt</code>。属性的读取在进程内完成，写入却必须交给 init：<code>__system_property_set</code> 只把控制消息发给属性服务，具体落盘由 init 的 <code>PropertyServiceThread</code> 执行。记住三条硬边界：属性名 32 字节、属性值 92 字节、写入要过 SELinux 检查。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P3-G01</code>（P3 卷地图），它给出 Native 框架层的分层视图；本篇是其中 bionic 分支的第一站。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>bionic/libc/Android.bp</code></li><li><code>bionic/linker/linker.cpp</code></li><li><code>bionic/libc/include/sys/system_properties.h</code></li><li><code>bionic/libc/bionic/system_property_set.cpp</code></li><li><code>bionic/libc/system_properties/system_properties.cpp</code></li><li><code>system/core/init/property_service.cpp</code></li><li><code>system/sepolicy/private/property_contexts</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个应用调 <code>System.loadLibrary(&quot;foo&quot;)</code>，抛 <code>UnsatisfiedLinkError</code>；同一台机器上 <code>adb shell</code> 里用 <code>pm</code> 装的另一个应用加载同名库却正常。换个场景：脚本里循环 <code>setprop</code> 写一个自定义属性，前几次成功，后面开始失败，日志里只有 SELinux 拒绝。再换一个场景：<code>getprop ro.build.type</code> 立刻返回，但写一个 <code>persist.</code> 前缀属性后，另一进程读到的仍是旧值。</p>
+<p>这三个现象分别指向 native 世界的三个基础件：<code>.so</code> 从哪来、由谁装载；属性谁能写、写到哪里去；读和写为什么路径完全不同。把这三件事拆开看，后面的 JNI、libbinder、init.rc 才有立足点。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：</p>
+<ul><li><strong>bionic</strong>：Android 的 C 库与加载器集合。它不是一个 <code>.so</code>，而是 <code>libc</code>、<code>linker</code>、<code>libm</code>、<code>libdl</code>、<code>libc++</code> 等一组模块的统称，目录层面各自独立。</li><li><strong>linker</strong>：动态链接器，负责把 <code>.so</code> 映射进进程并按命名空间配置解析依赖。它本身也是一个模块，名叫 <code>linker</code>。</li><li><strong>属性系统（property system）</strong>：键值存储。读侧在进程内查内存，写侧必须经过 init 的属性服务。</li><li><strong>命名空间（namespace）</strong>：linker 的库搜索隔离单元，用 <code>android_namespace_t</code> 表示，配置来自 <code>ld.config.txt</code> 等配置文件。</li></ul>
+<p>图 1：三个基础件的调用关系</p>
+<pre><code>  app process                     init process
+  -----------                     ------------
+  dlopen/libdl  --&gt; linker  --&gt;   (namespace cfg)
+  __system_property_get  &lt;-+
+  __system_property_set  --+--&gt;  PropertyServiceThread
+                                 HandlePropertySet
+                                 SELinux check（CheckPermissions）
+                                 PropertySet</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>读侧完全在进程内完成：属性区由 bionic 按 context 分区映射，<code>__system_property_find</code> 直接命中。写侧是一条 socket 控制消息，终点是 init 的 <code>PropertyServiceThread</code>；init 收到后先做 <code>selinux_check_access</code>，再落进属性区，<code>persist.</code> 前缀的再异步交给持久化写线程。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>bionic 的模块构成。</strong> <code>libc</code> 模块定义在 <code>bionic/libc/Android.bp:1726</code>，<code>linker</code> 模块定义在 <code>bionic/linker/Android.bp:440</code>。Soong 的 <code>cc_library</code> 默认让模块名等于安装的 <code>.so</code> 名，所以 bp 里的名字就是设备上看到的名字。目录层面还存在 <code>bionic/libm</code>、<code>bionic/libdl</code>、libc++ 等，它们是不同的模块，各有自己的 bp。</p>
+<p><strong>两个硬上限。</strong> 属性值上限 <code>PROP_VALUE_MAX = 92</code>，属性名上限 <code>PROP_NAME_MAX = 32</code>，都在 <code>bionic/libc/include/sys/system_properties.h</code>（分别在第 50 行与第 116 行）。这两个数字是 buffer 尺寸，不是「建议长度」，超了就是截断或失败。</p>
+<p><strong>属性读写 API。</strong> 同族符号集中如下：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>__system_property_find</code></td><td>按名字在属性区中定位属性节点</td><td><code>system_properties.h:66</code></td></tr><tr><td><code>__system_property_read_callback</code></td><td>读属性并回调出值，避免拷贝到定长 buffer</td><td><code>system_properties.h:75</code></td></tr><tr><td><code>__system_property_wait</code></td><td>等待属性区版本号变化，实现监听</td><td><code>system_properties.h:108</code></td></tr><tr><td><code>__system_property_set</code></td><td>写属性，实际是向 init 发控制消息</td><td><code>bionic/libc/bionic/system_property_set.cpp:274</code></td></tr></tbody></table>
+<p><strong>写路径的完整链。</strong> <code>__system_property_set</code> 不直接改共享属性区，它把控制消息发给 init。init 侧由 <code>PropertyServiceThread</code>（<code>system/core/init/property_service.cpp:1471</code>）接收；<code>StartPropertyService</code>（<code>:1551</code>）内以 <code>StartThread(PROP_SERVICE_NAME, 0666, 0, property_service_thread, false)</code>（<code>:1564</code>）启动线程，socket 名是 <code>PROP_SERVICE_NAME &quot;property_service&quot;</code>（<code>system_properties.h:179</code>）。消息进入 <code>HandlePropertySet</code>（<code>property_service.cpp:541</code>），再交给 <code>PropertySet</code>（<code>:378</code>）；<code>persist.</code> 前缀的属性由 <code>persist_write_thread</code>（<code>:417-419</code>）异步落盘。</p>
+<p><strong>属性区按 context 分区。</strong> bionic 侧通过 <code>contexts_-&gt;GetSerialPropArea()</code> 与 <code>GetPropAreaForName(name)</code>（<code>bionic/libc/system_properties/system_properties.cpp:159/190</code>）取到对应的属性区，这就是为什么「同一份属性」实际分布在不同的映射区里。</p>
+<p><strong>属性文件加载顺序。</strong> property_service.cpp 中按序加载：<code>/system/build.prop</code>（:1207）→ <code>/system_dlkm/etc/build.prop</code>（:1213）→ <code>/vendor/default.prop</code>（:1217）→ <code>/vendor/build.prop</code>（:1219）→ <code>/vendor_dlkm/etc/build.prop</code>（:1220）→ <code>/odm_dlkm/etc/build.prop</code>（:1221）。</p>
+<p><strong>SELinux 约束属性类型。</strong> <code>system/sepolicy/private/property_contexts</code> 把属性名前缀逐条映射到类型，例如 <code>ril.</code> → <code>u:object_r:radio_prop:s0</code>、<code>net.rmnet</code> → <code>u:object_r:net_radio_prop:s0</code>。init 侧调用 <code>selinux_check_access(..., &quot;property_service&quot;, &quot;set&quot;, ...)</code>（<code>property_service.cpp:174</code>）做判定。</p>
+<p><strong>命名空间配置的来源。</strong> linker 侧读取三份主要候选配置：<code>/system/etc/ld.config.txt</code>（<code>bionic/linker/linker.cpp:102</code>）、<code>/system/etc/ld.config.vndk_lite.txt</code>（<code>:103</code>）、<code>/linkerconfig/ld.config.txt</code>（<code>:105</code>，由 system/linkerconfig 生成）。候选实际更多——还有 arch 专属路径（<code>:100</code>，<code>/system/etc/ld.config.&lt;ABI&gt;.txt</code>）、APEX 专用路径与 vndk 版本化路径，完整查找顺序见 <code>AND-P3-402</code>。命名空间对象类型是 <code>android_namespace_t</code>，定义在 linker_namespaces.h。</p>
+<p><strong>装载入口。</strong> dlopen 系列经 <code>bionic/libdl</code> 进入 linker。应用进程里，类加载器按 <code>BaseDexClassLoader</code> 的 librarySearchPath 找 native 库（libcore 侧，细节归后续篇）。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某进程调用 <code>__system_property_set(&quot;persist.vendor.foo&quot;, &quot;bar&quot;)</code>，走一遍：</p>
+<ol><li>调用落进 <code>system_property_set.cpp:274</code>，此处不做内存写，只组一条控制消息，发往名为 <code>property_service</code> 的 socket。</li><li>init 的 <code>PropertyServiceThread</code>（<code>property_service.cpp:1471</code>）收到消息，进入 <code>HandlePropertySet</code>（<code>:541</code>）。</li><li>先做 <code>selinux_check_access(..., &quot;property_service&quot;, &quot;set&quot;, ...)</code>（<code>:174</code>）。<code>persist.vendor.foo</code> 需要能匹配 <code>property_contexts</code> 里某个前缀以及域规则；匹配不上直接拒绝。</li><li>通过后进入 <code>PropertySet</code>（<code>:378</code>）。名字长度必须不超过 <code>PROP_NAME_MAX = 32</code>，值不超过 <code>PROP_VALUE_MAX = 92</code>。</li><li>因为带 <code>persist.</code> 前缀，值交给 <code>persist_write_thread</code>（<code>:417-419</code>）异步持久化。</li><li>读侧任何进程调 <code>__system_property_find</code> 时，bionic 经 <code>GetPropAreaForName(name)</code>（<code>system_properties.cpp:190</code>）找到对应属性区，直接读到新值。</li></ol>
+<p>反方向的例子：<code>getprop ro.build.type</code> 不经过 init，一次函数调用就返回，因为它只有 <code>__system_property_find</code> 这一步。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置：<code>AND-P3-G01</code> 给整卷地图，本篇是 bionic 分支入口。</li><li>边界的左侧：<code>AND-P8-201</code> 讲 init.rc 与触发器，即属性由谁在生产侧写入、何时触发；本篇只讲属性系统本身的读写两侧。</li><li>边界的右侧：<code>AND-P3-402</code> 讲 VNDK 命名空间细则；本篇只到「命名空间是什么、配置从哪来」。</li><li>后继：<code>AND-P3-301</code> 讲 JNI 注册与查找，<code>AND-P3-302</code> 讲 libbinder。两者都建立在本篇的 linker 与 bionic 之上。类加载与 <code>librarySearchPath</code> 的关联见 <code>AND-P3-201</code>。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>C 库模块定义</td><td><code>bionic/libc/Android.bp</code></td><td><code>libc</code> 模块</td><td>模块名即安装 <code>.so</code> 名</td></tr><tr><td>属性 API 与常量</td><td><code>bionic/libc/include/sys/system_properties.h</code></td><td><code>PROP_NAME_MAX</code>、<code>PROP_VALUE_MAX</code>、<code>__system_property_find</code>、<code>__system_property_set</code>、<code>PROP_SERVICE_NAME</code></td><td>读写两侧共用的头文件</td></tr><tr><td>属性写实现</td><td><code>bionic/libc/bionic/system_property_set.cpp</code></td><td><code>__system_property_set</code></td><td>组控制消息发往 init</td></tr><tr><td>属性区查找</td><td><code>bionic/libc/system_properties/system_properties.cpp</code></td><td><code>GetSerialPropArea</code>、<code>GetPropAreaForName</code></td><td>按 context 选属性区</td></tr><tr><td>链接器主文件</td><td><code>bionic/linker/linker.cpp</code></td><td><code>ld.config.txt</code> 系列路径</td><td>命名空间配置的读取点</td></tr><tr><td>init 属性服务</td><td><code>system/core/init/property_service.cpp</code></td><td><code>PropertyServiceThread</code>、<code>HandlePropertySet</code>、<code>PropertySet</code>、<code>persist_write_thread</code></td><td>写侧全部逻辑</td></tr><tr><td>属性类型映射</td><td><code>system/sepolicy/private/property_contexts</code></td><td><code>ril.</code>、<code>net.rmnet</code> 等前缀映射</td><td>SELinux 对属性的类型约束</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：bionic:06356e41c5ed</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">git -C bionic rev-parse --short=12 HEAD
+# 期望输出 06356e41c5ed，与本篇行号口径一致</code></pre>
+<pre><code class="lang-bash">grep -n &quot;PROP_VALUE_MAX\|PROP_NAME_MAX&quot; bionic/libc/include/sys/system_properties.h
+# 期望看到 PROP_VALUE_MAX = 92 在 :50，PROP_NAME_MAX = 32 在 :116</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;^cc_library\|^    name:&quot; bionic/libc/Android.bp | grep -n &quot;libc&quot; | head
+# 期望看到 name: &quot;libc&quot; 落在 :1726 附近</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;StartThread\|persist_write_thread\|selinux_check_access&quot; system/core/init/property_service.cpp
+# 期望看到 :1564 的 StartThread 调用、:417-419 的 persist_write_thread、:174 的 selinux_check_access</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;ld.config&quot; bionic/linker/linker.cpp
+# 期望看到三份主要候选：:102 /system/etc/ld.config.txt、:103 vndk_lite、:105 /linkerconfig/ld.config.txt（另有 arch 与 APEX 候选）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;ril\.\|net\.rmnet&quot; system/sepolicy/private/property_contexts | head
+# 期望看到前缀到 radio_prop / net_radio_prop 的映射行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：bionic 就是一个叫 `libbionic.so` 的库。</strong> 实际上 bionic 是仓库与一组模块的集合名。设备上并不存在 <code>libbionic.so</code>；你能看到的是 <code>libc.so</code>、<code>linker</code>、<code>libm.so</code>、<code>libdl.so</code> 等。</p>
+<p><strong>误区二：`__system_property_set` 直接把值写进共享属性区。</strong> 这个理解看起来对，因为读侧确实是进程内直接查内存。但写侧不是对称的：<code>system_property_set.cpp:274</code> 只发控制消息给 init，所有权在 init 一侧。之所以这样设计，就是为了让每次写入都能过一遍 <code>selinux_check_access</code> 与命名规则。</p>
+<p><strong>误区三：属性写完立即对所有进程可见且已落盘。</strong> 内存可见性通常是即时的，但 <code>persist.</code> 前缀的值是由 <code>persist_write_thread</code> 异步持久化的，重启后能否读到取决于那一步是否完成。</p>
+<p><strong>误区四：属性名可以随便长。</strong> <code>PROP_NAME_MAX = 32</code> 是硬上限，超长的名字会被拒绝或截断，且不同层的截断行为可能不一致。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么应用里 <code>dlopen</code> 一个 <code>/vendor/lib64</code> 下的库失败，shell 里 <code>ldd</code> 却能看到？ <strong>答</strong>：应用进程的 linker 按自己的命名空间配置搜索，配置由 <code>ld.config.txt</code> 系列决定；shell 进程的配置不同，搜索结果自然不同。 <strong>追问</strong>：那怎么确认应用进程用的是哪份配置？ <strong>答</strong>：看进程对应的 linker 配置来源：<code>/system/etc/ld.config.txt</code>、<code>/system/etc/ld.config.vndk_lite.txt</code>、<code>/linkerconfig/ld.config.txt</code> 三者中生效的那份（选择逻辑属 VNDK 命名空间细节，见 <code>AND-P3-402</code>）。</p>
+<p><strong>问</strong>：<code>setprop</code> 失败但没有任何 Java 异常，怎么定位？ <strong>答</strong>：先看是不是 SELinux 拒绝：init 侧在 <code>property_service.cpp:174</code> 调 <code>selinux_check_access</code>，拒绝会留下审计日志；再看名字/值是否超过 32/92 的上限。 <strong>追问</strong>：属性名合法、SELinux 也放行，还是失败？ <strong>答</strong>：检查该前缀是否在 <code>property_contexts</code> 里有映射，以及调用域是否被授予对应类型；两条任一缺失都会在判定阶段被挡住。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td><code>dlopen</code> 找不到库</td><td><code>grep -n &quot;ld.config&quot; bionic/linker/linker.cpp</code></td><td>主要配置路径（:102/:103/:105，另有 arch 与 APEX 候选）</td><td>确认目标进程实际使用哪份，再查该文件里的命名空间条目</td></tr><tr><td><code>setprop</code> 无声失败</td><td><code>grep -n &quot;selinux_check_access&quot; system/core/init/property_service.cpp</code></td><td>判定调用点 <code>:174</code></td><td>对照 <code>property_contexts</code> 查前缀是否有类型映射</td></tr><tr><td>属性读不到新值</td><td><code>grep -n &quot;persist_write_thread&quot; system/core/init/property_service.cpp</code></td><td>异步写线程 <code>:417-419</code></td><td>确认是否为 <code>persist.</code> 前缀，以及持久化是否完成</td></tr><tr><td>属性名被截断</td><td><code>grep -n &quot;PROP_NAME_MAX&quot; bionic/libc/include/sys/system_properties.h</code></td><td>常量值 32</td><td>缩短名字或改用其他键</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：init.rc 与触发器（<code>AND-P8-201</code>）；VNDK 命名空间细则（<code>AND-P3-402</code>）；JNI 注册与查找（<code>AND-P3-301</code>）；libbinder（<code>AND-P3-302</code>）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P3-G01</code>。</li><li><strong>本篇后继</strong>：<code>AND-P3-201</code>、<code>AND-P3-301</code>、<code>AND-P3-302</code>、<code>AND-P3-402</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>属性值上限 92 字节、属性名上限 32 字节（源码常量，<code>system_properties.h:50</code> 与 <code>:116</code>）。</li><li>属性服务 socket 权限位 <code>0666</code>（源码常量，<code>property_service.cpp:1564</code> 的 <code>StartThread</code> 参数）。</li><li>属性文件加载点 6 处（源码计数，<code>property_service.cpp:1207</code> 至 <code>:1221</code>）。</li><li>命名空间配置主要候选 3 份（源码常量，<code>linker.cpp:102/103/105</code>；另有 arch 专属与 APEX 专用路径，完整顺序见 <code>AND-P3-402</code>）。</li><li>bionic 内模块数量：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code>（2026-10-17 实测）</td><td><code>linker.cpp</code> 读取三份主要候选配置：<code>/system/etc/ld.config.txt</code>、<code>/system/etc/ld.config.vndk_lite.txt</code>、<code>/linkerconfig/ld.config.txt</code>（候选实际更多，含 arch 专属与 APEX 专用路径）</td><td>命名空间解析以 <code>/linkerconfig/ld.config.txt</code> 为可生成路径，<code>system/linkerconfig</code> 参与生成</td></tr><tr><td>本树 <code>android17-release</code>（2026-10-17 实测）</td><td>属性加载点含 <code>/system_dlkm/etc/build.prop</code>、<code>/vendor_dlkm/etc/build.prop</code>、<code>/odm_dlkm/etc/build.prop</code></td><td>dlkm 分区的属性可在 init 阶段进入属性区</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>bionic libc</code>、<code>properties</code>；android.googlesource.com 站内检索 <code>bionic linker</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>property_service</code>、<code>linkerconfig</code>、<code>system_properties</code>。</li><li>本仓关键路径：<code>bionic/libc/system_properties/</code>、<code>system/core/init/property_service.cpp</code>、<code>system/linkerconfig/</code>。</li><li>承接篇：<code>AND-P3-402</code>（命名空间细则）、<code>AND-P8-201</code>（属性生产侧）。</li></ul>
+</article>
+<footer>android-100 · AND-P3-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

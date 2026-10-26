@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>通话与 IMS：电信侧的框架链路</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>通话与 IMS：电信侧的框架链路</h1>
+<div class="kv"><span>ID：AND-P7-401</span><span>卷：P7</span><span>章：7.4</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/telephony/java/android/telephony/TelephonyManager.java ；frameworks/opt/telephony/src/java/com/android/internal/telephony/Phone.java ；frameworks/opt/telephony/src/java/com/android/internal/telephony/imsphone/ImsPhone.java ；frameworks/opt/net/ims/src/java/com/android/ims/ImsManager.java ；frameworks/base/telephony/java/android/telephony/ims/ImsMmTelManager.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>通话在 Android 上有两条并列的链路：传统电路域/IMS 语音经 <code>TelephonyManager</code> 与 <code>Phone</code> 抽象，最终通过 RIL 落到基带（radio）；而 VoLTE/VoWiFi 等现代语音走 IMS 栈，由 <code>ImsManager</code>/<code>ImsPhone</code> 与 <code>ImsMmTelManager</code> 承载。应用层监听来电、查 IMEI、读号码都只是门面，真正的状态机与信令在 <code>phone</code> 进程（或承载 IMS 的进程）里。理解这两条链路的分野，是定位「打不通/接不到/IMS 不可用」的起点。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P7-G01</code>（本卷导航）、<code>AND-P3-302</code>（Native Binder 全貌）；<code>AND-P2-401</code> 是「进程模型：Zygote、fork、COW 与进程优先级 adj」，与本篇链路无直接关系，不建议作为通话/IMS 的前置阅读。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/telephony/java/android/telephony/TelephonyManager.java</code>（门面，约 20215 行）</li><li><code>frameworks/opt/telephony/src/java/com/android/internal/telephony/Phone.java</code>（电话状态机基类，约 5550 行）</li><li><code>frameworks/opt/telephony/src/java/com/android/internal/telephony/imsphone/ImsPhone.java</code>（IMS 电话实现，dial <code>:989</code>）</li><li><code>frameworks/opt/net/ims/src/java/com/android/ims/ImsManager.java</code>（IMS 管理器，约 3822 行）</li><li><code>frameworks/base/telephony/java/android/telephony/ims/ImsMmTelManager.java</code>（IMS 多媒体电话门面）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「来电监听收不到」「VoWiFi 突然不可用」「双卡下拨号走错卡」——这些问题的因果横跨框架层与 IMS 栈：来电分发依赖 <code>registerForIncomingRing</code> 这类状态订阅，IMS 可用性由 <code>ImsMmTelManager.isAvailable</code> 判定。应用侧只看到回调成败，真正的信令在远端进程。本文把两条链路在代码层面钉死。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p><code>TelephonyManager</code> 是应用访问电话能力的统一门面，定义来电广播 <code>ACTION_PHONE_STATE_CHANGED</code>（<code>TelephonyManager.java:792</code>）、查设备标识 <code>getImei</code>（<code>:2373</code>/<code>:2414</code>）与本机号 <code>getLine1Number</code>（<code>:5226</code>/<code>:5254</code>），并以 <code>listen</code>（<code>:6610</code>）订阅电话状态变化。<code>Phone</code> 是电话状态机基类，<code>registerForPreciseCallStateChanged</code>（<code>:1030</code>）与 <code>registerForIncomingRing</code>（<code>:1329</code>）提供细粒度状态订阅。</p>
+<p>图 1：通话两条链路的分野（注意 IMS 侧是<strong>两条并行的面</strong>，不是一条串行链）</p>
+<pre><code>CS/语音 : App --TelephonyManager--&gt; Phone --RIL--&gt; radio(基带)
+
+IMS —— 应用的能力面（查状态、查可用性）：
+   App --ImsMmTelManager--&gt; getITelephonyInterface() 经 ITelephony.Stub.asInterface(:1722) --&gt; phone 进程
+
+IMS —— 框架的呼叫面（真正建立会话）：
+   ImsPhone(ImsPhoneCallTracker) --FeatureConnector--&gt; ImsManager --IMS 服务--&gt; 载波</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>两条面在应用侧以同一个 <code>ImsMmTelManager</code> 呈现，但内部走向不同：能力面止于 <code>phone</code> 进程的 <code>ITelephony</code> 服务，呼叫面则由 <code>ImsPhone</code> 主动去拉 <code>ImsManager</code>（见 §4.2 图 2）。把它们串成「App → ImsMmTelManager → ImsPhone → ImsManager」一条线，会让读者误以为应用的一次查询会驱动 IMS 会话的建立。</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>拨号：<code>Phone</code>/<code>ImsPhone</code> 的 <code>dial</code>（<code>ImsPhone.java:989</code>）发起呼叫；IMS 场景先经 <code>ImsManager</code>（实例 <code>:478</code>、连接 <code>:2240</code>、断开 <code>:2544</code>）建立 IMS 会话。来电：radio/RIL 上报告警，经 <code>Phone</code> 的 <code>registerForIncomingRing</code>（<code>:1329</code>）触发分发，应用通过 <code>TelephonyManager.listen</code>（<code>:6610</code>）或 <code>ACTION_PHONE_STATE_CHANGED</code>（<code>:792</code>）感知。失败路径：IMS 未注册（<code>ImsMmTelManager.isAvailable</code> <code>:906</code>、<code>isCapable</code> <code>:876</code> 均否）、RIL 无响应、双卡路由错（subId 选错）。</p>
+<p>图 2：IMS 可用性的建立顺序（自上而下，勿倒着读）</p>
+<pre><code>ImsPhone(ImsPhoneCallTracker)
+   │ :1318 mConnectorFactory.create(...)
+   ↓
+FeatureConnector&lt;ImsManager&gt;
+   │ :1320-1322 connectionReady(manager, subId)
+   ↓
+ImsManager.open(...)                 ← ImsPhoneCallTracker.java:1390
+   ↓
+IMS 服务 / 载波侧会话与注册
+   ↓
+isAvailable? --否--&gt; 回退 CS 语音</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>方向要点：是 <strong>`ImsPhone` 的 tracker 先把 `ImsManager` 拉起来，然后再 `open()`</strong>，不是 <code>ImsManager.open</code> 去注册 <code>ImsPhone</code>。因果上 <code>ImsPhone</code> 是 <code>Phone</code> 的子类（<code>ImsPhone extends ImsPhoneBase</code> 而 <code>ImsPhoneBase extends Phone</code>，见 <code>ImsPhone.java:154</code>、<code>ImsPhoneBase.java:53</code>），它在 IMS 能力出现时被纳入电话体系；把它画成由 <code>ImsManager</code> 注册出来的产物，方向就反了。</p>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>框架门面 <code>TelephonyManager.java</code>：<code>ACTION_PHONE_STATE_CHANGED</code>（<code>:792</code>）是来电/通话状态广播的 action；<code>getImei</code>（<code>:2373</code>）按 slot 取 IMEI；<code>getLine1Number</code>（<code>:5226</code>）取本机号；<code>listen</code>（<code>:6610</code>）订阅状态。这些调用经 Binder 到 <code>phone</code> 进程。</p>
+<p>状态机侧 <code>Phone.java</code>：<code>registerForPreciseCallStateChanged</code>（<code>:1030</code>）订阅精确通话状态，<code>registerForIncomingRing</code>（<code>:1329</code>）订阅来电振铃。<code>ImsPhone.java</code> 的 <code>dial</code>（<code>:989</code>）是 IMS 拨号入口。</p>
+<p>IMS 栈 <code>ImsManager.java</code>：<code>getInstance</code>（<code>:478</code>）取管理器，<code>open</code>（<code>:2240</code>）建立 IMS 会话，<code>close</code>（<code>:2544</code>）断开。门面 <code>ImsMmTelManager.java</code>：<code>isCapable</code>（<code>:876</code>）判定某项 IMS 能力是否具备，<code>isAvailable</code>（<code>:906</code>）判定 IMS 当前是否可用，<code>registerImsStateCallback</code>（<code>:1668</code>）订阅 IMS 状态变化。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>依赖关系说明（2026-10-19 更正）：本卷卷纲在 <code>AND-P7-401</code> 的前置列登记了 <code>AND-P2-401</code>，但那篇的正文是「进程模型：Zygote、fork、COW 与进程优先级 adj」（<code>_volumes/P2-framework.md:20</code>），与 Telephony/RIL/Phone 抽象无关；本文所需的 <code>Phone</code>/RIL 基础由 §4.1 自己给出，不依赖外部成稿篇。</li><li>与通讯外设（402）的关系：蓝牙通话（HFP）等把音频路由到蓝牙设备，依赖 202 的音频路由与 402 的蓝牙协议。</li><li>与 <code>TelephonyManager</code> 其他能力（数据、短信）的关系：本篇只覆盖通话与 IMS，数据/短信另有链路。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>门面</td><td><code>frameworks/base/telephony/java/android/telephony/TelephonyManager.java</code></td><td><code>ACTION_PHONE_STATE_CHANGED</code>、<code>getImei</code>、<code>listen</code></td><td>应用直接调用</td></tr><tr><td>状态机基类</td><td><code>frameworks/opt/telephony/src/java/com/android/internal/telephony/Phone.java</code></td><td><code>registerForIncomingRing</code>、<code>registerForPreciseCallStateChanged</code></td><td>框架侧</td></tr><tr><td>IMS 实现</td><td><code>frameworks/opt/telephony/src/java/com/android/internal/telephony/imsphone/ImsPhone.java</code></td><td><code>dial</code></td><td>IMS 拨号入口</td></tr><tr><td>IMS 管理器</td><td><code>frameworks/opt/net/ims/src/java/com/android/ims/ImsManager.java</code></td><td><code>open</code>、<code>close</code>、<code>getInstance</code></td><td>IMS 会话管理</td></tr><tr><td>IMS 门面</td><td><code>frameworks/base/telephony/java/android/telephony/ims/ImsMmTelManager.java</code></td><td><code>isAvailable</code>、<code>isCapable</code></td><td>应用侧 IMS 能力查询</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df 锚点：frameworks/opt/telephony:aef289516bea 锚点：frameworks/opt/net/ims:314c843f3627</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD
+git -C frameworks/opt/telephony rev-parse HEAD
+git -C frameworks/opt/net/ims rev-parse HEAD</code></pre>
+<p>期望分别得到 <code>94b4c163b7df</code>、<code>aef289516bea</code>、<code>314c843f3627</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;ACTION_PHONE_STATE_CHANGED\|getImei\|getLine1Number\|public void listen&quot; \
+  frameworks/base/telephony/java/android/telephony/TelephonyManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：广播 action <code>:792</code>、<code>getImei</code> <code>:2373</code>、<code>getLine1Number</code> <code>:5226</code>、<code>listen</code> <code>:6610</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;registerForIncomingRing\|registerForPreciseCallStateChanged&quot; \
+  frameworks/opt/telephony/src/java/com/android/internal/telephony/Phone.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>registerForPreciseCallStateChanged</code> <code>:1030</code>、<code>registerForIncomingRing</code> <code>:1329</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;public Connection dial\|ImsManager getInstance\|public void open\|public void close&quot; \
+  frameworks/opt/telephony/src/java/com/android/internal/telephony/imsphone/ImsPhone.java \
+  frameworks/opt/net/ims/src/java/com/android/ims/ImsManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>ImsPhone.dial</code> <code>:989</code>、<code>ImsManager.getInstance</code> <code>:478</code>、<code>open</code> <code>:2240</code>、<code>close</code> <code>:2544</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;isCapable\|isAvailable\|registerImsStateCallback&quot; \
+  frameworks/base/telephony/java/android/telephony/ims/ImsMmTelManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>isCapable</code> <code>:876</code>、<code>isAvailable</code> <code>:906</code>、<code>registerImsStateCallback</code> <code>:1668</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「监听来电用广播就够了」。广播是粗粒度状态，<code>registerForIncomingRing</code> 才是来电振铃的精确订阅点，二者语义不同。</li><li>「<code>getLine1Number</code> 一定能拿到号码」。在 VoLTE/IMS 或号卡未写本机号的场景下它可能返回空，需做空值处理。</li><li>「看起来对其实是错的」：以为所有通话都走 <code>TelephonyManager</code> 直连基带。VoLTE/VoWiFi 走 IMS 栈，断 IMS 后才会回退 CS 语音。</li><li>「IMS 不可用就是没信号」。更可能是 IMS 未注册（载波未开通或 <code>isAvailable</code> 为否），与信号强度无直接因果。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：如何判断当前通话走的是 IMS 还是 CS？ <strong>答</strong>：查 <code>ImsMmTelManager.isAvailable</code>/<code>isCapable</code>；可用且通话中通常走 IMS，否则回退 CS。 <strong>追问</strong>：IMS 突然不可用怎么排查？ <strong>答</strong>：<code>dumpsys ims</code> 看 IMS 注册状态与 <code>ImsManager.open</code> 是否成功，转 §4.3。</p>
+<p><strong>问</strong>：双卡拨号走错卡怎么定位？ <strong>答</strong>：拨号请求携带的 subId 决定走哪张卡，核对 <code>TelephonyManager</code> 的 subId 选择逻辑，转 §4.2。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>来电收不到</td><td><code>dumpsys telephony</code></td><td>通话状态机与订阅</td><td>查 <code>registerForIncomingRing</code>，转 §4.2</td></tr><tr><td>IMS 不可用</td><td><code>dumpsys phone</code>（IMS 段落在 phone 服务侧）</td><td>IMS 注册状态</td><td>查 <code>ImsManager.open</code>，转 §4.3</td></tr><tr><td>号码读不到</td><td><code>service call</code>/日志</td><td><code>getLine1Number</code> 返回</td><td>号卡未写本机号，转 §4.1</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/opt/net/ims rev-parse HEAD</code></td><td>是否 <code>314c843f3627</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：数据业务与短信链路、RIL/radio HAL 细节、蓝牙通话音频路由（402/202）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P2-401</code>、<code>AND-P7-G01</code>、<code>AND-P3-302</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-402</code>（通讯外设）、<code>AND-P7-202</code>（音频路由）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>TelephonyManager.java</code> 约 20215 行、<code>Phone.java</code> 约 5550 行、<code>ImsManager.java</code> 约 3822 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>IMS 能力由 <code>isCapable</code>/<code>isAvailable</code> 双判定（口径：源码符号 <code>:876</code>/<code>:906</code>）。</li><li>双卡以 subId 区分，拨号路由依赖 subId（口径：架构语义）。</li><li>单通呼叫建立时延依赖载波与 RIL，暂无统一实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>ImsMmTelManager</code> 为 IMS 门面；IMS 包位于 <code>frameworks/opt/net/ims</code></td><td>本篇行号基准</td></tr><tr><td>旧版本</td><td>IMS 门面类与路径不同</td><td>按符号重锚</td></tr><tr><td>多代演进</td><td><code>TelephonyManager</code> 持续膨胀（已逾 2 万行）</td><td>本文只列关键符号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>telephony</code>、<code>ims</code>；developer.android.com 站内检索 <code>TelephonyManager</code>、<code>ImsMmTelManager</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ImsManager.java</code>、<code>Phone.java</code>。</li><li>承接篇：<code>AND-P2-401</code>、<code>AND-P7-402</code>、<code>AND-P7-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

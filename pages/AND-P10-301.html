@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>功耗与热管理：从 BatteryStats 到温控策略</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>功耗与热管理：从 BatteryStats 到温控策略</h1>
+<div class="kv"><span>ID：AND-P10-301</span><span>卷：P10</span><span>章：10.3</span><span>难度：3</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/power/stats/BatteryStatsImpl.java ；frameworks/base/core/java/com/android/internal/os/PowerProfile.java ；frameworks/base/core/java/android/os/BatteryUsageStats.java ；frameworks/base/services/core/java/com/android/server/power/PowerManagerService.java ；frameworks/base/services/core/java/com/android/server/power/thermal/ThermalManagerService.java ；frameworks/base/core/res/res/xml/power_profile.xml ；frameworks/native/cmds/atrace/atrace.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一格电被谁消耗，答案不在某个模块里，而在两条链路的交界处。统计侧由 <code>BatteryStatsImpl</code> 按 uid 记账，<code>PowerProfile</code> 把「时间与次数」乘成「电量」；控制侧由 <code>ThermalManagerService</code> 接收温度、把状态写进 trace，再由电源层与内核执行降频与限流。两侧的公共接口是 <code>BatteryUsageStats</code> 与 trace 的 <code>power</code> / <code>thermal</code> 类别。本篇只讲口径与链路，不给任何设备的实测功耗与温度阈值。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P10-G01</code>，先建立本卷工具链与 trace 体系的地图，避免把 <code>atrace</code> 与可视化工具的关系搞反。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/services/core/java/com/android/server/power/stats/BatteryStatsImpl.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code></li><li><code>frameworks/base/core/java/android/os/BatteryUsageStats.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/power/PowerManagerService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/power/thermal/ThermalManagerService.java</code></li><li><code>frameworks/base/core/res/res/xml/power_profile.xml</code></li><li><code>frameworks/native/cmds/atrace/atrace.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> / <code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>用户说「待机一晚上掉了 30%」，你要给出一个 uid 的名字。手机玩游戏十分钟烫手，帧率掉下去，你要说清降频指令是从哪一层下来的。这两件事看起来一个是统计、一个是控制，实际共用同一套「时间 → 电量 / 温度 → 状态」的换算口径。口径不通，你会拿到两个都对但彼此矛盾的数字：统计说某个 uid 只占 3%，用户体感却是它最耗电。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念串成一条线：<strong>电量记账</strong>（按 uid 累计时间与次数）、<strong>功耗参数表</strong>（把时间乘成电流的系数）、<strong>聚合出口</strong>（对外一份 <code>BatteryUsageStats</code>）、<strong>温控状态</strong>（温度事件转成状态并进 trace）。</p>
+<p>图 1：统计侧与控制侧的链路与接缝</p>
+<pre><code>  [uid 时间/次数]  --PowerProfile 系数--&gt;  [mAh 估算]
+        |                                        |
+   BatteryStatsImpl                        BatteryUsageStats
+        |                                        |
+        +------------- system_server ------------+
+        |                    ^                   |
+        |                    | IBatteryStats     |
+  PowerManagerService ------+              ThermalManagerService
+        |                                        |
+        +------- trace: power / thermal ---------+
+                                                 |
+                                    降频、限流（策略端执行）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>图 1 的关键点：<code>ThermalManagerService</code> 与 <code>BatteryStatsImpl</code> 之间没有任何直接调用，两者在 <code>system_server</code> 进程里共享状态；但电源侧不是纯旁观者——<code>PowerManagerService</code> 持有 <code>IBatteryStats mBatteryStats</code>（:362），经由 <code>BatteryStatsService.getService()</code>（:1461）直接调用统计侧的 <code>computeBatteryTimeRemaining()</code>（:7050）。所以「统计侧与控制侧互不调用」只在温控这一段成立，电源这一段有一根细线。对外暴露接缝的是 trace 的 <code>power</code> 与 <code>thermal</code> 两个类别。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>一、统计主体的规模与入口。</strong></p>
+<p><code>BatteryStatsImpl</code> 共 15807 行，类声明在 :179（<code>extends BatteryStats</code>）。uid 维度是内部类 <code>public static class Uid extends BatteryStats.Uid</code>，在 :7496。唤醒锁记账入口 <code>noteStartWakeLocked</code> 在 :4519。这三个位置决定了三件事：谁在记、按什么维度记、唤醒锁怎么变成 uid 的账。</p>
+<p><strong>二、`PowerProfile` 的常量族。</strong></p>
+<p>功耗不是一个数，是一族查表项。同前缀常量节选如下：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>POWER_CPU_SUSPEND</code></td><td><code>&quot;cpu.suspend&quot;</code>，CPU 挂起态系数</td><td><code>PowerProfile.java</code> :77</td></tr><tr><td><code>POWER_CPU_IDLE</code></td><td><code>&quot;cpu.idle&quot;</code>，CPU 空闲态系数</td><td><code>PowerProfile.java</code> :79</td></tr><tr><td><code>POWER_CPU_ACTIVE</code></td><td><code>&quot;cpu.active&quot;</code>，CPU 运行态系数</td><td><code>PowerProfile.java</code> :81</td></tr><tr><td><code>POWER_WIFI_SCAN</code></td><td><code>&quot;wifi.scan&quot;</code>，扫描系数</td><td><code>PowerProfile.java</code> :87</td></tr><tr><td><code>POWER_WIFI_ON</code></td><td><code>&quot;wifi.on&quot;</code>，开启态系数</td><td><code>PowerProfile.java</code> :93</td></tr><tr><td><code>POWER_WIFI_ACTIVE</code></td><td><code>&quot;wifi.active&quot;</code>，传输态系数</td><td><code>PowerProfile.java</code> :99</td></tr><tr><td><code>POWER_WIFI_CONTROLLER_IDLE</code> / <code>_RX</code> / <code>_TX</code> / <code>_TX_LEVELS</code></td><td>Wi-Fi 控制器空闲 / 收 / 发 / 发送分级系数</td><td><code>PowerProfile.java</code> :105–:108</td></tr><tr><td><code>POWER_WIFI_CONTROLLER_OPERATING_VOLTAGE</code></td><td><code>&quot;wifi.controller.voltage&quot;</code>，控制器工作电压（电压项，不是功率系数）</td><td><code>PowerProfile.java</code> :109</td></tr></tbody></table>
+<p>另有一个同前缀常量 <code>POWER_WIFI_BATCHED_SCAN</code>（<code>PowerProfile.java</code> :241），位置不在上述连续段，本篇不展开。</p>
+<p>读取入口有两个：<code>getAveragePower(String)</code> 在 :909，<code>getAveragePower(String, int)</code> 在 :960。带第二参数的版本用于按档位取值（如按 CPU 频率或信号强度分档）。数值来源是 <code>frameworks/base/core/res/res/xml/power_profile.xml</code>，该文件共 198 行。</p>
+<p><strong>三、CPU 功耗的相加口径。</strong></p>
+<p><code>PowerProfile.java</code> 注释 :60–:71 给出了三条互斥又叠加的规则：</p>
+<table><thead><tr><th>状态项</th><th>何时计入</th></tr></thead><tbody><tr><td><code>POWER_CPU_SUSPEND</code></td><td>恒加（<strong>旧 cluster 模型口径</strong>，见 :60–:71 注释；本树无<strong>电量计费</strong>消费方——<code>PowerProfile.java</code> :1019 的 proto 转储与 <code>tools/powermodel</code> 仍会读该项，详见表下注）</td></tr><tr><td><code>POWER_CPU_IDLE</code></td><td>退出 power collapse 之后加</td></tr><tr><td><code>POWER_CPU_ACTIVE</code></td><td>CPU 真正运行时加</td></tr></tbody></table>
+<p>注意「恒加」这一条要分清两层：:60–:71 的注释描述的是<strong>旧 cluster 模型的功耗方程</strong>口径（suspend 项作为基底恒加）；但本树实际生效的 uid CPU 电量并不走这条——它由 <code>services/core/java/com/android/server/power/stats/processor/CpuPowerStatsProcessor.java</code> :97/:102（按 scaling policy／step 取系数）与 :107（<code>POWER_CPU_ACTIVE</code>）估出，唤醒锁走同目录 <code>WakelockPowerStatsProcessor.java</code> :29（<code>POWER_CPU_IDLE</code>）。默认 <code>power_profile.xml</code> 未定义 <code>cpu.suspend</code>，缺项经 <code>PowerProfile.java</code> :892 的 <code>getAveragePowerOrDefault</code> 返回 0。所以注释里的「恒加基底」不能直接当成正在生效的计费链路来用。</p>
+<p><strong>四、对外出口。</strong></p>
+<p><code>BatteryUsageStats.java</code> 共 1338 行，用 <code>Builder</code> 聚合。私有构造在 :165（签名 <code>private BatteryUsageStats(@NonNull Builder builder)</code>，<code>@NonNull</code> 在参数位，纯 <code>private BatteryUsageStats(Builder)</code> 字面模式匹配不到它），<code>mUidBatteryConsumerBuilders</code> 的 grep 首命中 :186 是构造内使用处，字段声明在 :925。也就是说，一个 uid 对应一个 consumer builder，聚合过程就是把 builder 列表收成一个不可变对象。</p>
+<p><strong>五、电源状态与省电模式。</strong></p>
+<p><code>PowerManagerService.java</code> 共 8258 行。<code>WAKEFULNESS_*</code> 常量自 <code>android.os.PowerManagerInternal</code> 静态导入（:28–:31），包含 <code>WAKEFULNESS_ASLEEP</code>、<code>WAKEFULNESS_AWAKE</code>、<code>WAKEFULNESS_DOZING</code>、<code>WAKEFULNESS_DREAMING</code> 四个。初始值 <code>mWakefulnessRaw = WAKEFULNESS_AWAKE</code> 在 :1363，<code>PowerGroup</code> 实例化（<code>new PowerGroup(...)</code>）在 :1478，省电模式入口 <code>setLowPowerModeInternal</code> 在 :4416。</p>
+<p><strong>六、温控服务与 trace 接缝。</strong></p>
+<p><code>ThermalManagerService.java</code> 类声明在 :105，温度回调 <code>onTemperatureChanged</code> 的 HAL 包装回调声明在 :189（:192 是包装内的转发行，收温度的实现重载在 :490）。关键一行是 :415：</p>
+<pre><code>Trace.traceCounter(Trace.TRACE_TAG_POWER, &quot;ThermalManagerService.status&quot;, newStatus)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>这一行位于 <code>setStatusLocked(int)</code>（:413 起），被 <code>if (newStatus != mStatus)</code>（:414）包住，全文件唯一。温度状态用 <code>TRACE_TAG_POWER</code> 写进 trace 的 <code>power</code> 类别，不是 <code>thermal</code> 类别——这是抓 trace 时最容易看漏的地方。trace 类别对应关系在 <code>atrace.cpp</code>：<code>power</code> 在 :120（<code>ATRACE_TAG_POWER</code>），<code>thermal</code> 在 :249（<code>ATRACE_TAG_THERMAL</code>）。</p>
+<p><strong>七、写 counter 的门控链。</strong></p>
+<p>从上一条往下看，「温度到达」与「counter 被写」不是同一件事，中间有三重门控：</p>
+<table><thead><tr><th>门控</th><th>位置</th><th>后果</th></tr></thead><tbody><tr><td>调用链两跳</td><td><code>onTemperatureChanged</code>(:490) → <code>onTemperatureMapChangedLocked</code>(:397) → <code>setStatusLocked</code>(:413)</td><td>单条温度事件本身不直接写 counter</td></tr><tr><td><code>sendCallback</code> 为 false</td><td>:497 判 true 才经 :498 调 :397；HAL 连接批量回填路径传 false（循环内 :295）</td><td>该路径下只在 :297 循环外补一次 :397</td></tr><tr><td><code>mIsStatusOverride</code> 为 true</td><td>:407 短路温度事件链（:1193 由 shell override 置位）</td><td>温度事件路径不写 trace；override 生效期间 status 由 shell override/reset 命令直接驱动（:1194 直接调 <code>setStatusLocked</code> 写 trace；:1049 置 false、:1050 经 <code>onTemperatureMapChangedLocked</code> 重算）</td></tr><tr><td>非 <code>TYPE_SKIN</code> 传感器</td><td>:400–:405 只取 <code>t.getType() == Temperature.TYPE_SKIN</code> 的传感器求 status 最大值</td><td>battery/cpu/gpu 等温度事件不改变 <code>newStatus</code>，:414 再拦一次</td></tr></tbody></table>
+<p>所以正确的说法是：<strong>满足门控条件、且 SKIN 温度的聚合状态确实发生迁移时</strong>，才在 <code>power</code> 类别里看到 <code>ThermalManagerService.status</code> 的台阶。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某 uid 在一段区间内持有唤醒锁、跑过 CPU，你想知道它的电量构成。</p>
+<p>第一步，唤醒锁进入 <code>noteStartWakeLocked</code>（<code>BatteryStatsImpl.java</code> :4519），记到 <code>Uid</code>（:7496）名下。第二步，该 uid 的 CPU 运行时长按 <code>getAveragePower(&quot;cpu.active&quot;)</code>（:909 / :960）乘出运行态电量，（旧口径还会按 <code>getAveragePower(&quot;cpu.suspend&quot;)</code> 计一份恒加基底，但那是 :60–:71 注释描述的旧模型，本树实际生效路径见 §4.2 三的表下注。）第三步，各 uid 的 builder 汇总进 <code>BatteryUsageStats.Builder</code>（<code>mUidBatteryConsumerBuilders</code>：grep 首命中 :186 为构造内使用处，字段声明在 :925），构造出对外对象（:165）。</p>
+<p>如果这段时间正好在省电模式，<code>setLowPowerModeInternal</code>（<code>PowerManagerService.java</code> :4416）已经在另一条路径上改过状态，统计口径不变，执行侧行为变了。两件事分开看，才不会把「统计没算准」和「策略没生效」混为一谈。</p>
+<p>温控侧同时发生的是：<code>onTemperatureChanged</code>（<code>ThermalManagerService.java</code> :490 实现，:189 HAL 包装声明）收到温度，经 §4.2 第七条的门控链，在状态真的迁移时由 :415 写进 <code>power</code> 类别的 trace。你抓 trace 时看到 <code>ThermalManagerService.status</code> 的台阶变化，就对应一次状态迁移。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>与 <code>AND-P10-G01</code>：G01 讲 trace 采集与工具链，本篇只用到 <code>power</code> / <code>thermal</code> 两个类别名，采集方法不重复。</p>
+<p>与 <code>AND-P5-402</code>：该篇讲电源管理的 <code>suspend</code> / <code>resume</code>、runtime PM 与 wakeup 源，是本篇控制链再往下的那一层。需要说明的是，thermal 驱动的实现没有专篇承接，本树也没有内核 C 源码，所以本篇止于 <code>ThermalManagerService</code> 的状态与 trace，不越界做实现断言。</p>
+<p>与电源状态机：P2 卷没有电源或唤醒锁专篇，本篇只把 <code>WAKEFULNESS_*</code> 与 <code>noteStartWakeLocked</code> 当作接口口径引用，状态机细节不展开，口径以 <code>android.os.PowerManagerInternal</code> 为准。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>电量记账主体</td><td><code>frameworks/base/services/core/java/com/android/server/power/stats/BatteryStatsImpl.java</code></td><td><code>noteStartWakeLocked</code>、<code>Uid</code>、类声明</td><td>15807 行，uid 与唤醒锁账目来源</td></tr><tr><td>功耗系数表</td><td><code>frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code></td><td><code>POWER_CPU_*</code>、<code>POWER_WIFI_*</code>、<code>getAveragePower</code></td><td>1214 行，时间乘电流的系数</td></tr><tr><td>对外聚合出口</td><td><code>frameworks/base/core/java/android/os/BatteryUsageStats.java</code></td><td><code>Builder</code>、<code>mUidBatteryConsumerBuilders</code></td><td>1338 行，一份不可变快照</td></tr><tr><td>电源状态</td><td><code>frameworks/base/services/core/java/com/android/server/power/PowerManagerService.java</code></td><td><code>WAKEFULNESS_*</code>、<code>setLowPowerModeInternal</code>、<code>mBatteryStats</code></td><td>8258 行，状态与省电入口</td></tr><tr><td>温控服务</td><td><code>frameworks/base/services/core/java/com/android/server/power/thermal/ThermalManagerService.java</code></td><td><code>onTemperatureChanged</code>、<code>setStatusLocked</code>、<code>traceCounter</code></td><td>温度到状态，状态进 trace</td></tr><tr><td>trace 类别表</td><td><code>frameworks/native/cmds/atrace/atrace.cpp</code></td><td><code>&quot;power&quot;</code>、<code>&quot;thermal&quot;</code></td><td>类别名与 tag 的对应处</td></tr><tr><td>设备侧系数配置</td><td><code>frameworks/base/core/res/res/xml/power_profile.xml</code></td><td>198 行配置表</td><td>各机型系数来源</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 统计主体规模与类声明
+wc -l frameworks/base/services/core/java/com/android/server/power/stats/BatteryStatsImpl.java
+sed -n '179p;4519p;7496p' frameworks/base/services/core/java/com/android/server/power/stats/BatteryStatsImpl.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：第一行输出 15807；第二行按文件序依次打印 :179 的 <code>extends BatteryStats</code> 类声明、:4519 的 <code>noteStartWakeLocked</code>、:7496 的 <code>Uid</code> 内部类（多地址 sed 按文件序输出，不是按地址列表序）。</p>
+<pre><code class="lang-bash"># 2. 功耗常量族
+grep -n 'POWER_CPU_SUSPEND\|POWER_CPU_IDLE\|POWER_CPU_ACTIVE' frameworks/base/core/java/com/android/internal/os/PowerProfile.java
+grep -n 'getAveragePower' frameworks/base/core/java/com/android/internal/os/PowerProfile.java
+wc -l frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>POWER_CPU_*</code> 三条 grep 实际命中 <strong>14 行</strong>（:60/:61/:64/:65/:69/:70/:71 的注释、:77/:79/:81 的常量声明，以及 :593/:1019/:1022/:1025 的使用处）——只想看声明行可把模式收紧为 <code>POWER_CPU_SUSPEND =</code> 这类带等号的写法；<code>getAveragePower</code> 的 grep 命中 <strong>24 行</strong>（含 :892 <code>getAveragePowerOrDefault</code> 与 :669/:682/:745/:756/:986/:999 的 <code>ForCpu*</code>／<code>ForOrdinal</code> 族），两个读取入口在 :909 与 :960；总行数 1214。</p>
+<pre><code class="lang-bash"># 3. 相加口径注释
+sed -n '60,71p' frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：读到最后三行为 SUSPEND 恒加、IDLE 退出 power collapse 后加、ACTIVE 运行时加。</p>
+<pre><code class="lang-bash"># 4. 聚合出口
+grep -n 'private BatteryUsageStats(Builder)\|mUidBatteryConsumerBuilders' frameworks/base/core/java/android/os/BatteryUsageStats.java
+wc -l frameworks/base/core/java/android/os/BatteryUsageStats.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：8 行命中（:186、:190、:925、:1128、:1135、:1147、:1153、:1177）——:186 是构造内首次使用、:925 是字段声明；:165 匹配不到（签名带 <code>@NonNull</code>）。总行数 1338。</p>
+<pre><code class="lang-bash"># 5. 温控进 trace 的那一行与门控
+grep -n 'ThermalManagerService.status' frameworks/base/services/core/java/com/android/server/power/thermal/ThermalManagerService.java
+grep -n '&quot;power&quot;\|&quot;thermal&quot;' frameworks/native/cmds/atrace/atrace.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>traceCounter</code> 一行命中 :415，且其 tag 是 <code>TRACE_TAG_POWER</code>；<code>atrace.cpp</code> 中 <code>power</code> 在 :120、<code>thermal</code> 在 :249。行内 token 后不跟分号，故匹配要用引号包裹的类别名，别用 <code>ATRACE_TAG_POWER;</code>。</p>
+<pre><code class="lang-bash"># 6. 设备侧系数表规模
+wc -l frameworks/base/core/res/res/xml/power_profile.xml</code></pre>
+<p>期望：198。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：温控状态在 `thermal` 类别里。</strong> 错。<code>ThermalManagerService</code> 写 <code>ThermalManagerService.status</code> 时用的 tag 是 <code>TRACE_TAG_POWER</code>（:415）。只开 <code>thermal</code> 抓不到这个计数器。</p>
+<p><strong>误区二：温度事件一到，counter 就会更新。</strong> 错。:415 在 <code>setStatusLocked</code> 里，被状态不等判断与 <code>sendCallback</code>、<code>mIsStatusOverride</code>、SKIN 传感器聚合三道门控拦住（见 §4.2 第七条）。看不到台阶先查门控，别急着怀疑传感器。</p>
+<p><strong>误区三：`cpu.suspend` 只在挂起时计费。</strong> 错——但要分清是哪一层的源码：按 <code>PowerProfile.java</code> :60–:71 <strong>注释</strong>的旧 cluster 模型口径它确实是恒加的基底项；可在本树实际生效的链路里，<code>cpu.suspend</code> 并没有消费方（默认 <code>power_profile.xml</code> 未定义该项，<code>getAveragePowerOrDefault</code> :892 返回 0），uid CPU 电量走 <code>CpuPowerStatsProcessor.java</code> :97/:102/:107、唤醒锁走 <code>WakelockPowerStatsProcessor.java</code> :29（<code>POWER_CPU_IDLE</code>）。所以「恒加」是注释口径，不是现行计费事实。</p>
+<p><strong>误区四：统计口径和降频策略失败是一件事。</strong> 看起来对，其实是两条独立链路。统计走 <code>BatteryStatsImpl</code> → <code>BatteryUsageStats</code>；降频走 <code>ThermalManagerService</code> 状态 → 策略端。统计正确不代表策略生效，反之亦然。</p>
+<p><strong>误区五：`getAveragePower(String)` 和带档位版本等价。</strong> 错。带第二参数的版本按档位取值（如频率档、信号档），Wi-Fi 的 <code>_TX_LEVELS</code> 就是个分级项。用单参数版估算分档场景会系统性偏低。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么某 uid 唤醒锁时长为 0，电量却不为 0？ <strong>答</strong>：唤醒锁只是账目之一。CPU 运行时长走 <code>POWER_CPU_ACTIVE</code>、基底项按注释口径记在 <code>POWER_CPU_SUSPEND</code>（本树实际链路见 §4.2 三的表下注），这两项与该 uid 是否持锁无必然关系。 <strong>追问</strong>：那唤醒锁账目什么时候才有区分度？ <strong>答</strong>：在同一区间内比较多个 uid 时，持锁时长能把「长时间不让系统睡」的那一方放大出来；单看一个 uid 的绝对值没有意义。</p>
+<p><strong>问</strong>：省电模式改了 <code>setLowPowerModeInternal</code>，统计数字会变吗？ <strong>答</strong>：统计口径不变，变量是执行侧允许的时间与频率。所以「开了省电模式但耗电没降」要先去查策略是否真的落到执行端，而不是怀疑统计。 <strong>追问</strong>：怎么区分这两种情况？ <strong>答</strong>：抓 <code>power</code> 类别 trace，看 <code>ThermalManagerService.status</code> 与电源状态的台阶变化；台阶没动说明链路没走通（先按误区二排门控）。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>温控状态在 trace 里找不到</td><td><code>grep -n 'ThermalManagerService.status' frameworks/base/services/core/java/com/android/server/power/thermal/ThermalManagerService.java</code></td><td>该行用的 tag 是 <code>TRACE_TAG_POWER</code></td><td>按 <code>power</code> 类别重新抓 trace</td></tr><tr><td>有温度事件但 counter 不动</td><td><code>grep -n 'mIsStatusOverride|TYPE_SKIN' frameworks/base/services/core/java/com/android/server/power/thermal/ThermalManagerService.java</code></td><td>:407 短路、:400–:405 只聚合 SKIN</td><td>关掉 override，确认温度源类型</td></tr><tr><td>待机估算始终不为零</td><td><code>sed -n '60,71p' frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code></td><td>SUSPEND 是否标注为恒加</td><td>检查是否误把它当条件项</td></tr><tr><td>各 uid 电量加起来对不上总量</td><td><code>grep -n 'mUidBatteryConsumerBuilders' frameworks/base/core/java/android/os/BatteryUsageStats.java</code></td><td>grep 首命中 :186（使用处；声明 :925）</td><td>确认是同一份快照而非跨区间比较</td></tr><tr><td>分档功耗估不准</td><td><code>grep -n 'getAveragePower' frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code></td><td>是否用了带 int 的 :960 版本</td><td>分档场景改用双参数版</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：内核侧电源管理与 <code>suspend</code> / runtime PM（<code>AND-P5-402</code>）；trace 采集工具链（<code>AND-P10-G01</code>）。thermal 驱动实现无专篇承接，且本树 <code>kernel/</code> 无内核 C 源码，本篇只按接口口径核，不做实现断言。电源状态机细节不在本篇范围。</li><li><strong>本篇前置依赖</strong>：<code>AND-P10-G01</code>。</li><li><strong>本篇后继</strong>：本卷内与崩溃、卡顿相关的篇目会复用本篇的 trace 类别口径。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>BatteryStatsImpl</code> 15807 行（源码行数，口径为 2026-10-21 于 <code>android17-release</code> 实读）。</li><li><code>PowerProfile</code> 1214 行、<code>BatteryUsageStats</code> 1338 行、<code>PowerManagerService</code> 8258 行（同上口径）。</li><li><code>power_profile.xml</code> 198 行（同上口径）。</li><li>各设备的实际功耗数值与温度阈值：本篇不断言，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td><code>PowerProfile</code> 提供 <code>getAveragePower(String)</code> :909 与 <code>getAveragePower(String, int)</code> :960 两个入口；<code>ThermalManagerService</code> 状态经 <code>TRACE_TAG_POWER</code> 写入 :415</td><td>分档估算与 trace 核验都需要用双参数入口与 <code>power</code> 类别</td></tr><tr><td>早期版本</td><td>带档位重载是否存在：本树只能证明 <code>android17-release</code> 下 :960 已存在，跨版本演化本树不可判，待补 commit 出处</td><td>老版本源码树请按符号 grep 重锚，不套用本篇行号</td></tr><tr><td>本树行数基线</td><td><code>BatteryStatsImpl</code> 15807 行、<code>BatteryUsageStats</code> 1338 行、<code>PowerManagerService</code> 8258 行、<code>power_profile.xml</code> 198 行</td><td>行数作为对账基线，跨版本会漂移</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>power profile</code>、<code>battery stats</code>、<code>thermal</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>BatteryStatsImpl</code>、<code>PowerProfile</code>、<code>ThermalManagerService</code>。</li><li>本仓关键路径：<code>frameworks/base/services/core/java/com/android/server/power/</code>、<code>frameworks/base/core/java/com/android/internal/os/PowerProfile.java</code>、<code>frameworks/base/core/res/res/xml/power_profile.xml</code>、<code>frameworks/native/cmds/atrace/atrace.cpp</code>。</li><li>承接篇：<code>AND-P10-G01</code>、<code>AND-P5-402</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

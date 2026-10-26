@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>特殊合成场景：壁纸、悬浮窗、多屏与外接显示</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>特殊合成场景：壁纸、悬浮窗、多屏与外接显示</h1>
+<div class="kv"><span>ID：AND-P6-401</span><span>卷：P6</span><span>章：6.4</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/wm/WallpaperWindowToken.java ；frameworks/base/services/core/java/com/android/server/wm/WallpaperController.java ；frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java ；frameworks/base/core/java/android/view/WindowManager.java ；frameworks/native/services/surfaceflinger/DisplayDevice.cpp ；frameworks/native/services/surfaceflinger/DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>壁纸不是「一张背景图」，而是一个挂在 <code>DisplayContent</code> 下的独立 <code>WallpaperWindowToken</code>，层级由 <code>WallpaperController</code> 在每次窗口变更重算时决定，所以它天然在所有应用窗口之下。悬浮窗（<code>TYPE_APPLICATION_OVERLAY</code>）之所以蒙不住输入法，是因为它属于系统窗口层但层级低于输入法窗口，不是权限问题。多屏不是「复制一份窗口树」，每个显示有自己的 <code>DisplayContent</code> 和自己的 layer 分配，镜像显示另有 <code>getDisplayIdToMirror</code> 这条查询路径。投屏画面的源头是 <code>VirtualDisplaySurface</code>：应用照常往 Surface 上画，SurfaceFlinger 侧把这个 Surface 接成一个虚拟显示设备再合成出去。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P6-201</code>，先有 SurfaceFlinger 通用合成与 layer 概念，本篇讨论的「特殊」才有参照系。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/services/core/java/com/android/server/wm/WallpaperWindowToken.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/WallpaperController.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManager.java</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayDevice.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> / <code>grep</code>。不需要编译，不需要真机；验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>现象一：给桌面应用加了个悬浮按钮，设成 <code>TYPE_APPLICATION_OVERLAY</code>，结果一拉起输入法，按钮就被键盘盖住了，开发者第一反应是去查权限。现象二：把壁纸设成动态壁纸后，某个应用窗口偶发变透明、露出壁纸，怀疑是应用自己画错了。现象三：接上外接显示器做演示，发现副屏内容和主屏是同一个画面，但某个 Activity 又确实只在副屏出现了。这三个现象都属于「窗口归属哪个显示、哪个层级」的问题，不属于绘制质量问题。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个关键概念：窗口令牌（<code>WindowToken</code>）是同一类窗口的分组容器；<code>DisplayContent</code> 是一块显示的窗口树根，持有自己的 layer 分配；<code>WallpaperController</code> 是挂在 <code>DisplayContent</code> 上的壁纸决策器，负责选出壁纸目标并调整壁纸窗口。</p>
+<p>图 1：壁纸、悬浮窗、多屏三者的归属关系</p>
+<pre><code>DisplayContent (mDisplayId)
+  |- WallpaperController ---&gt; WallpaperWindowToken (壁纸层)
+  |- 应用窗口层
+  |- 系统窗口层: TYPE_TOAST / TYPE_WALLPAPER / TYPE_APPLICATION_OVERLAY
+  |- 输入法窗口层
+  '- VirtualDisplaySurface (虚拟显示, 投屏出口)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键点：壁纸窗口挂的是 <code>WallpaperWindowToken</code>，不是普通应用令牌；悬浮窗虽然在系统窗口层，但层序在输入法之下；虚拟显示不是窗口树里的成员，它是 SurfaceFlinger 侧的显示设备。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>壁纸这一侧的机制分工很清楚。入口是 <code>adjustWallpaperWindows</code>（WallpaperController.java:605），它先调 <code>findWallpaperTarget</code>（:609）选出当前应显示壁纸的目标窗口，再调 <code>updateWallpaperWindowsTarget</code>（:610）更新目标并处理切换，最后由自身完成窗口位置与可见性调整；<code>WallpaperWindowToken</code> 侧负责把结果落到令牌上，<code>updateWallpaperWindows</code> 触发重算，<code>setVisibleRequested</code> 落实可见性请求。<code>DisplayContent</code> 在 1280 行构造 <code>new WallpaperController(mWmService, this)</code>，在 605 行持有 <code>mWallpaperController</code> 字段，并在 5605 与 7059 两次调用 <code>adjustWallpaperWindows</code>——说明壁纸重算不止发生在窗口增删时，也发生在布局与显示更新路径上。</p>
+<p>悬浮窗这一侧只有类型常量，没有独立机制。<code>TYPE_APPLICATION_OVERLAY</code> 由 <code>FIRST_SYSTEM_WINDOW + 38</code> 得出，即 2038；<code>TYPE_WALLPAPER</code> 是 <code>FIRST_SYSTEM_WINDOW+13</code>，即 2013；<code>TYPE_TOAST</code> 是 2005。这三个都是系统窗口层常量，层序由窗口层级排序决定，应用无法通过权限改变自己在同一层里的位次。</p>
+<p>多屏这一侧的分水岭是「独立显示」与「镜像显示」。独立显示有自己的 <code>DisplayContent</code>，<code>final int mDisplayId</code>（:354）在构造时定死，用 <code>getDisplayId</code>（:1749）对外暴露；<code>assignWindowLayers</code>（:4549）按这个显示自己的窗口集合重排 layer。镜像显示的判定入口是 <code>getDisplayIdToMirror</code>（:7343）——被镜像的显示不重复合成，而是复用源显示的结果。跨显示迁移窗口走 <code>DisplayContent</code> 的 <code>reParentWindowToken</code>（定义在 DisplayContent.java:1850，由 WindowToken.java:346-347 的 <code>onDisplayChanged</code> 调起），把令牌从一棵窗口树挪到另一棵。</p>
+<p>SurfaceFlinger 侧的显示设备是这块的落点。<code>DisplayDevice.cpp</code> 共 551 行，构造函数在 :59，负责把一个物理或虚拟显示接成 SurfaceFlinger 可合成的设备。虚拟显示表面 <code>VirtualDisplaySurface.cpp</code> 共 505 行，构造函数在 :70，<code>onFrameAvailable</code> 在 :59——后者是应用画完一帧后、通知虚拟显示有数据可消费的入口，投屏编码器从这里取走画面。</p>
+<p>同名族常量集中在 <code>WindowManager.java</code>：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>TYPE_TOAST</code></td><td>Toast 窗口类型，2005</td><td><code>WindowManager.java</code>:2476</td></tr><tr><td><code>TYPE_WALLPAPER</code></td><td>壁纸窗口类型，2013</td><td><code>WindowManager.java</code>:2539</td></tr><tr><td><code>TYPE_APPLICATION_OVERLAY</code></td><td>应用悬浮窗类型，2038</td><td><code>WindowManager.java</code>:2716</td></tr></tbody></table>
+<p>三者同属系统窗口层，但层序不同：<code>TYPE_WALLPAPER</code> 在所有应用窗口之下，<code>TYPE_APPLICATION_OVERLAY</code> 在应用窗口之上但低于输入法。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设主屏 id 为 0，外接屏 id 为 2，用户做了三件事：给桌面加一个 <code>TYPE_APPLICATION_OVERLAY</code> 悬浮球、拉起输入法、把某 Activity 投到副屏。</p>
+<p>第一步：悬浮球创建时，<code>TYPE_APPLICATION_OVERLAY</code>（2038）落入 <code>DisplayContent(0)</code> 的系统窗口层，<code>assignWindowLayers</code> 把它排在应用窗口之上。第二步：输入法窗口创建，层级高于悬浮窗层，于是悬浮球被盖住——这与 <code>TYPE_APPLICATION_OVERLAY</code> 的权限判定无关，是层序结果。第三步：壁纸依然在所有应用窗口之下，由 <code>WallpaperController.adjustWallpaperWindows</code>（:605）作入口，内部 <code>findWallpaperTarget</code>（:609）选目标、<code>updateWallpaperWindowsTarget</code>（:610）更新目标并调整位置；这一步不涉及副屏，因为副屏有自己的 <code>DisplayContent</code>。第四步：投屏窗口落在 <code>DisplayContent(2)</code>，<code>assignWindowLayers</code>（:4549）在显示 2 的窗口集合里独立重排，不走主屏的 layer 序列；如果副屏配置为镜像，<code>getDisplayIdToMirror</code>（:7343）返回源显示 id，画面直接复用。第五步：SurfaceFlinger 侧由 <code>VirtualDisplaySurface.onFrameAvailable</code>（:59）接住每一帧，交给编码器。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P6-302</code> 讲常规 <code>addWindow</code> 主链路，本篇的三类场景都是这条主链路走到 <code>DisplayContent</code> 之后的分叉，不重复描述窗口添加的前半段。<code>AND-P6-201</code> 是 SurfaceFlinger 通用合成，本篇只讲 SurfaceFlinger 里「虚拟显示设备」这个特殊输入源。虚拟显示消费者侧的编码与封装属于 P7，本篇到 <code>onFrameAvailable</code> 为止。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>壁纸令牌</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WallpaperWindowToken.java</code></td><td><code>class WallpaperWindowToken</code>、<code>updateWallpaperWindows</code>、<code>setVisibleRequested</code></td><td>共 295 行，令牌侧落地点</td></tr><tr><td>壁纸决策</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WallpaperController.java</code></td><td><code>findWallpaperTarget</code>、<code>updateWallpaperWindowsTarget</code>、<code>adjustWallpaperWindows</code></td><td>共 918 行，壁纸目标选择与调整</td></tr><tr><td>显示与挂载</td><td><code>frameworks/base/services/core/java/com/android/server/wm/DisplayContent.java</code></td><td><code>mWallpaperController</code>、<code>mDisplayId</code>、<code>assignWindowLayers</code>、<code>getDisplayIdToMirror</code></td><td>壁纸挂载点与多屏 layer 分配</td></tr><tr><td>窗口类型</td><td><code>frameworks/base/core/java/android/view/WindowManager.java</code></td><td><code>TYPE_TOAST</code>、<code>TYPE_WALLPAPER</code>、<code>TYPE_APPLICATION_OVERLAY</code></td><td>系统窗口层类型常量</td></tr><tr><td>SurfaceFlinger 显示设备</td><td><code>frameworks/native/services/surfaceflinger/DisplayDevice.cpp</code></td><td>构造函数</td><td>共 551 行，物理/虚拟显示接入点</td></tr><tr><td>虚拟显示表面</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp</code></td><td>构造函数、<code>onFrameAvailable</code></td><td>共 505 行，投屏帧入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">wc -l services/core/java/com/android/server/wm/WallpaperWindowToken.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 295 行，对上事实 1 的总行数。</p>
+<pre><code class="lang-bash">grep -n &quot;class WallpaperWindowToken extends WindowToken\|updateWallpaperWindows\|setVisibleRequested&quot; \
+  services/core/java/com/android/server/wm/WallpaperWindowToken.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 :42、:142、:251 三处命中，对上事实 1 的符号位置。</p>
+<pre><code class="lang-bash">grep -n &quot;class WallpaperController\|findWallpaperTarget\|updateWallpaperWindowsTarget\|adjustWallpaperWindows&quot; \
+  services/core/java/com/android/server/wm/WallpaperController.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 :62、:523、:572、:605，对上事实 2。</p>
+<pre><code class="lang-bash">grep -n &quot;mWallpaperController\|new WallpaperController\|getWallpaperTarget\|adjustWallpaperWindows&quot; \
+  services/core/java/com/android/server/wm/DisplayContent.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 :605、:1280、:2236、:5605、:7059，对上事实 3。</p>
+<pre><code class="lang-bash">grep -n &quot;TYPE_APPLICATION_OVERLAY =\|TYPE_WALLPAPER =\|TYPE_TOAST =&quot; \
+  core/java/android/view/WindowManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 :2716、:2539、:2476，对上事实 4。</p>
+<pre><code class="lang-bash">grep -n &quot;mDisplayId\|getDisplayIdToMirror\|assignWindowLayers&quot; \
+  services/core/java/com/android/server/wm/DisplayContent.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 :354、:7343、:4549，对上事实 5。</p>
+<pre><code class="lang-bash">grep -n &quot;reParentWindowToken&quot; services/core/java/com/android/server/wm/DisplayContent.java \
+  services/core/java/com/android/server/wm/WindowToken.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 DisplayContent.java:1850 定义处与 WindowToken.java:347 调用处，对上事实 6。</p>
+<pre><code class="lang-bash">cd ../native &amp;&amp; wc -l services/surfaceflinger/DisplayDevice.cpp \
+  services/surfaceflinger/DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 551 与 505，对上事实 7、8 的总行数。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p>误区一：悬浮窗被输入法盖住是权限不够。实际上 <code>TYPE_APPLICATION_OVERLAY</code>（2038）已经落在系统窗口层，盖不住是因为输入法窗口层序更高，加权限不会改变层序。</p>
+<p>误区二：壁纸是应用自己画的背景。实际上壁纸是独立的 <code>WallpaperWindowToken</code>，由 <code>WallpaperController</code> 管理，应用窗口透明才露出它。</p>
+<p>误区三：副屏是主屏窗口树的复制品。看起来对，其实是错的——每个显示有自己的 <code>DisplayContent</code>，<code>assignWindowLayers</code>（:4549）各算各的 layer；只有镜像显示才通过 <code>getDisplayIdToMirror</code>（:7343）复用源画面。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：投屏画面是应用直接画给编码器的吗？<strong>答</strong>：不是。应用照常画到自己的 Surface，SurfaceFlinger 侧的 <code>VirtualDisplaySurface</code> 在 <code>onFrameAvailable</code>（:59）接帧，再由虚拟显示设备消费。<strong>追问</strong>：那编码器在哪一环？<strong>答</strong>：在本篇边界之外，属于 P7 的消费者侧内容。</p>
+<p><strong>问</strong>：把窗口迁到副屏要重建窗口吗？<strong>答</strong>：不重建，走 <code>DisplayContent.reParentWindowToken</code>（定义 :1850，调用点 WindowToken.java:346-347）把令牌换一棵窗口树。<strong>追问</strong>：迁移后 layer 会重排吗？<strong>答</strong>：会，目标显示会执行自己的 <code>assignWindowLayers</code>。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>悬浮窗被输入法遮挡</td><td><code>grep -n &quot;TYPE_APPLICATION_OVERLAY&quot; core/java/android/view/WindowManager.java</code></td><td>类型常量值 2038</td><td>对比输入法窗口层序，确认是层序而非权限</td></tr><tr><td>应用窗口透出壁纸</td><td><code>grep -n &quot;setVisibleRequested&quot; services/core/java/com/android/server/wm/WallpaperWindowToken.java</code></td><td>壁纸可见性落点</td><td>查该窗口是否被设为透明</td></tr><tr><td>副屏与主屏画面相同</td><td><code>grep -n &quot;getDisplayIdToMirror&quot; services/core/java/com/android/server/wm/DisplayContent.java</code></td><td>是否命中镜像查询</td><td>确认副屏是否配置为镜像显示</td></tr><tr><td>副屏窗口层级错乱</td><td><code>grep -n &quot;assignWindowLayers&quot; services/core/java/com/android/server/wm/DisplayContent.java</code></td><td>layer 分配入口</td><td>检查目标 <code>DisplayContent</code> 的窗口集合</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：常规 <code>addWindow</code> 主链路见 <code>AND-P6-302</code>；SurfaceFlinger 通用合成见 <code>AND-P6-201</code>；虚拟显示的编码器消费者侧见 P7。</li><li><strong>本篇前置依赖</strong>：<code>AND-P6-201</code>。</li><li><strong>本篇后继</strong>：P7 中虚拟显示消费者侧相关篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>WallpaperWindowToken.java</code> 295 行、<code>WallpaperController.java</code> 918 行（源码实测，2026-10-18 于 android17-release）。</li><li><code>DisplayDevice.cpp</code> 551 行、<code>VirtualDisplaySurface.cpp</code> 505 行（源码实测，同上口径）。</li><li><code>TYPE_APPLICATION_OVERLAY</code> = 2038、<code>TYPE_WALLPAPER</code> = 2013、<code>TYPE_TOAST</code> = 2005（源码常量）。</li><li>一次壁纸重算的耗时暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本</td><td>壁纸类型与悬浮窗类型长期共用 <code>FIRST_SYSTEM_WINDOW</code> 偏移族</td><td>类型值和层序关系稳定，本篇结论可移植</td></tr><tr><td>android17-release</td><td>本树实测：<code>TYPE_APPLICATION_OVERLAY</code> 为 2038，<code>adjustWallpaperWindows</code> 在 <code>DisplayContent</code> 有两处调用点</td><td>壁纸重算覆盖窗口变更与布局更新两条路径</td></tr><tr><td>本树未断言</td><td>各版本间 <code>WallpaperController</code> 行数变化</td><td>本篇不断言</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>、<code>SurfaceFlinger and Hardware Composer</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>WallpaperController</code>、<code>VirtualDisplaySurface</code>、<code>TYPE_APPLICATION_OVERLAY</code>。</li><li>本仓关键路径：<code>services/core/java/com/android/server/wm/DisplayContent.java</code>、<code>services/surfaceflinger/DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp</code>。</li><li>承接篇：<code>AND-P6-201</code>、<code>AND-P6-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

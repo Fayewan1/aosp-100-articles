@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：系统是怎么被造出来的</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：系统是怎么被造出来的</h1>
+<div class="kv"><span>ID：AND-P11-G01</span><span>卷：P11</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/envsetup.sh ；build/make/core/Makefile ；build/soong/Android.bp ；build/soong/ui/build/kati.go ；system/fs/fs_mgr/liblp/builder.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>系统镜像不是「跑一条命令出来的」，而是「模块图 → ninja 目标 → 分区镜像 → 签名 payload（OTA 载荷）→ 刷入或 A/B 切换」这条流水线的产物。本卷九篇按这条流水线排列：<code>AND-P11-101</code> 讲模块怎么变成 ninja 目标，<code>AND-P11-201</code> 讲模块怎么进 product 与 A/B 分区，<code>AND-P11-202</code> 讲镜像怎么打包成 payload 并更新。生态边界（<code>AND-P11-301</code> GMS、<code>AND-P11-302</code> OEM/ODM）与形态差异（<code>AND-P11-401</code> 车载/可穿戴）是流水线外部的约束条件，<code>AND-P11-402</code> 收卷。全卷以静态源码分析为主；101/102/201/202 的整包构建本机不可行，涉及实际构建产物的断言一律不作实测承诺。读懂本卷的前置只有一条：P0 已建立的「Soong 模块 → 安装路径」概念。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P0-202</code>（模块与 PROJECT 名：从 soong 模块到安装路径）——模块是构建、分区、OTA 三段对话的共同主语，没有这个前提，本卷九篇都会失焦。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/envsetup.sh</code></li><li><code>build/make/core/Makefile</code></li><li><code>build/soong/Android.bp</code></li><li><code>build/soong/ui/build/kati.go</code></li><li><code>system/fs/fs_mgr/liblp/builder.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>最常见的困惑是这样一句：「我改了 <code>Android.bp</code>，为什么 <code>out/</code> 下多出来的东西我不知道是谁生成的？」往上追问一层，会撞到 product 继承链；再往下追问镜像怎么组装，会撞到 <code>super.img</code> 与 payload；而「A/B 分区到底怎么切」通常夹在中间没人讲清。本卷就是把这四段接成一条可核验的链路，并给每段标注边界与失败形态。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念串起全卷，关系是层层收窄的：</p>
+<p>图 1：从模块定义到设备更新的四段链路</p>
+<pre><code>Android.bp（模块声明）
+   ↓ Soong 解析 + kati/Make 变量
+ninja 目标（.ninja 文件）
+   ↓ 打包
+分区镜像（system/vendor/super.img）
+   ↓ payload + A/B 切换
+设备端更新（update_engine / fastboot / adb sideload）</code></pre>
+<p>「模块（module）」是最小构建单元，由 Android.bp 声明；「product」决定哪些模块进镜像、以什么变体（variant）进；「动态分区」把多个只读分区装进一个 <code>super.img</code>；「payload」是 OTA 包里的分区差分与全量数据载体。图里的「分区镜像」要分两层：<code>system</code>、<code>vendor</code>、<code>product</code>、<code>system_ext</code> 是 <code>super</code> 内的逻辑分区（由动态分区机制装进 <code>super.img</code>），<code>boot</code>、<code>vendor_boot</code>、<code>dtbo</code> 不在 <code>super</code> 内，走 fastboot 直刷通道。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷九篇构成一条流水线，读法取决于你要回答的问题。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P11-G01</code></td><td>卷导读：系统是怎么被造出来的</td><td>入口；给本卷地图与读法，不含机制细节</td></tr><tr><td><code>AND-P11-101</code></td><td>Soong 构建体系：从 Android.bp 到 ninja</td><td>锚点篇；阅读依赖的起点（卷纲写作顺序把 301 排在它之后，那是写作次序，不是阅读门槛）</td></tr><tr><td><code>AND-P11-102</code></td><td>Make 到 Bazel：构建系统的演进与选型</td><td>B 档，支线</td></tr><tr><td><code>AND-P11-201</code></td><td>模块与产品变体：product、flavor 与 A/B 分区</td><td>主干中段</td></tr><tr><td><code>AND-P11-202</code></td><td>镜像格式与 OTA：payload、fastboot 与增量更新</td><td>主干末段</td></tr><tr><td><code>AND-P11-301</code></td><td>Google Play 服务与 GMS 依赖边界</td><td>生态约束</td></tr><tr><td><code>AND-P11-302</code></td><td>定制化与 OEM/ODM 适配实践</td><td>B 档，生态约束</td></tr><tr><td><code>AND-P11-401</code></td><td>车载、IoT 与可穿戴的形态差异</td><td>形态分支</td></tr><tr><td><code>AND-P11-402</code></td><td>从 AOSP 到产品：工程化清单</td><td>全书收卷篇</td></tr></tbody></table>
+<p>依赖链：<code>AND-P11-G01</code> → <code>AND-P11-101</code> → <code>AND-P11-201</code> → <code>AND-P11-202</code> 是必读主链，后一篇不能跳过前一篇；<code>AND-P11-102</code> 只依赖 101 的模块概念，可与 201 并行读（另注意 201 自身还依赖 <code>AND-P5-101</code> 的内核构建，读 201 前最好先有那一篇）；<code>AND-P11-301</code> 只依赖本导读、可独立进入，<code>AND-P11-302</code> 接在 301 之后；<code>AND-P11-401</code> 以 201 的分区划分为前置，202 的更新链路可作回头对读（卷纲写作顺序里 401 先于 202）；<code>AND-P11-402</code> 引用上述所有篇目。严格先后关系分三段说：<code>101 → 201 → 202</code> 是必读主链；<code>301 → 302</code> 与 <code>201 → 401 → 402</code> 另成两条；102 只依赖 101 的模块概念。除此之外没有先后约束，可按需插入。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>拿 <code>liblp</code> 做示范。<code>system/fs/fs_mgr/liblp/builder.cpp</code> 负责构建并 Export 逻辑分区的元数据（<code>MetadataBuilder::Export()</code> :816，真正落盘写出在同目录的 <code>images.cpp</code> 与 <code>writer.cpp</code>）。要注意这条因果不是「liblp 写出 super.img」：<code>super.img</code> 是三层调用拼出来的：<code>build/make/core/Makefile</code> :7642 的 <code>build-superimage-target</code> 在 :7651-7652 执行 <code>$(BUILD_SUPER_IMAGE)</code>（即 <code>build_super_image.py</code>），并把 <code>$(LPMAKE)</code> 加进 PATH 供其取用；<code>build_super_image.py</code> :72 再调 <code>lpmake</code>（<code>system/extras/partition_tools/Android.bp</code> :101）；:7655 定产物路径。<strong>Make 不直接执行 lpmake</strong>，元数据是这条链上被消费的输入。liblp 在其中的角色是定义并序列化这份布局，<code>super.img</code> 再由 OTA 的 payload 携带。所以同一份布局定义，会在 101（模块归属）、201（动态分区配置）、202（payload 生成）三篇里各出现一次，视角不同。注意 <code>system/core/fs_mgr</code> 在本树未检出，<code>liblp</code>、<code>libsnapshot</code>、<code>libdm</code>、<code>libfstab</code> 都在 <code>system/fs/fs_mgr/</code> 下——沿用旧路径去 grep 会一无所获。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置：<code>AND-P0-202</code> 立模块概念；<code>AND-P5-101</code>（内核构建与配置：GKI、defconfig 与模块化）是 201 的前置。</li><li>下游对读：<code>AND-P8-102</code>（启动镜像格式：boot/system/vendor 与 fastboot 链路）与 201/202 互为上下游——镜像由构建产出、被启动消费。</li><li>横向互引：<code>AND-P9-301</code>（签名与密钥体系：APK 签名 v2/v3/v4 与密钥轮转）与 301 共享信任模型口径。</li><li>分界：101 只讲 Soong 内部机制，不碰 product 继承；201 只讲 product/flavor/A/B 配置，不讲 payload 格式；301 只划 GMS 边界，不讲定制实施。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>构建入口</td><td><code>build/envsetup.sh</code></td><td>指向 <code>make/envsetup.sh</code> 的符号链接，1210 行</td><td>所有入口函数的落点</td></tr><tr><td>入口函数</td><td><code>build/make/envsetup.sh</code></td><td><code>make()</code> :1033、<code>tapas()</code> :674、<code>banchan()</code> :747</td><td><code>m</code>/<code>mm</code>/<code>mmm</code> 本树未检出</td></tr><tr><td>镜像组装</td><td><code>build/make/core/Makefile</code></td><td>镜像与目标定义</td><td>Make 侧主定义文件</td></tr><tr><td>Soong 声明</td><td><code>build/soong/Android.bp</code></td><td>359 行</td><td>Soong 自身的 <code>subdirs</code> 白名单与少量模块声明（:1-:20 为 package 与 subdirs）</td></tr><tr><td>kati 调用</td><td><code>build/soong/ui/build/kati.go</code></td><td><code>runKati</code> :99、<code>runKatiBuild</code> :239、<code>runKatiPackage</code> :351</td><td><code>build/make/kati</code> 目录本树未检出，二进制来自 prebuilts</td></tr><tr><td>动态分区</td><td><code>system/fs/fs_mgr/liblp/builder.cpp</code></td><td>构建并 Export 逻辑分区元数据（写出归 <code>images.cpp</code>/<code>writer.cpp</code>）</td><td>201/202 的共用底层</td></tr><tr><td>超级分区拼装</td><td><code>build/make/tools/releasetools/build_super_image.py</code>（:72 调 lpmake）＋ <code>system/extras/partition_tools/lpmake.cc</code>（<code>Android.bp</code> :101）</td><td><code>Makefile</code> :7642/:7651 执行前者、前者再调后者拼出 <code>super.img</code>；:7655 定产物</td><td>布局定义、脚本编排、二进制拼装是三件事</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/soong:6722dd8833db</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l build/envsetup.sh</code></pre>
+<p>期望约 1210 行，且 <code>ls -l build/envsetup.sh</code> 显示指向 <code>make/envsetup.sh</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;^function \(make\|tapas\|banchan\)()&quot; build/make/envsetup.sh</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中三个入口函数，行号分别约 1033、674、747。</p>
+<pre><code class="lang-bash">ls prebuilts/build-tools/linux-x86/bin/ | grep kati</code></pre>
+<p>期望看到 <code>ckati</code> 与 <code>rkati</code> 两个预编译产物。</p>
+<pre><code class="lang-bash">ls build/make/kati 2&gt;&amp;1</code></pre>
+<p>期望报「No such file or directory」——kati 源码目录本树未检出。</p>
+<pre><code class="lang-bash">ls system/fs/fs_mgr/ | grep -E &quot;liblp|libsnapshot|libdm|libfstab&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望四个目录全部命中；同一命令换 <code>system/core/fs_mgr</code> 则不命中。</p>
+<pre><code class="lang-bash">wc -l build/soong/Android.bp build/soong/scripts/run-ckati.sh</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别为 359 行与 91 行。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 `m`/`mm`/`mmm` 还能用。</strong> 本树未检出这三个命令，入口是 <code>make()</code>；模块组构建走 <code>tapas()</code> 与 <code>banchan()</code>。照旧习惯敲命令只会得到「command not found」。</p>
+<p><strong>误区二：以为 kati 是源码构建出来的。</strong> <code>build/make/kati</code> 目录本树未检出，kati 以预编译形态待在 <code>prebuilts/build-tools/linux-x86/bin/</code> 下，<code>run-ckati.sh</code> 直接调用它。</p>
+<p><strong>误区三：以为 fs_mgr 还在 `system/core/fs_mgr`。</strong> 看起来对——这是历史路径且大量旧文引用——实际本树在 <code>system/fs/fs_mgr/</code> 下组织这些组件（<code>liblp</code>、<code>libsnapshot</code> 等），<code>system/core/fs_mgr</code> 未被检出。</p>
+<p><strong>误区四：以为 Bazel 已在树里。</strong> manifest 未收录 <code>build/bazel</code>，本树工作区亦未检出该目录，所以 102 只讲演进与选型，不给该目录下的路径与行号。但 manifest 另收录两个 Bazel 相关项目——<code>external/bazelbuild-remote-apis</code>（:100）与 <code>prebuilts/bazel/common</code>（:883）——「未收录 <code>build/bazel</code>」不等于「树内没有任何 Bazel 痕迹」。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：只想知道镜像怎么刷，需要读哪几篇？ <strong>答</strong>：201 与 202，再对读 <code>AND-P8-102</code>。<strong>追问</strong>：那 101 能跳过吗？<strong>答</strong>：能跳过内部机制，但 201 里的模块归属描述依赖 101 的术语口径，至少扫一遍它的术语表。</p>
+<p><strong>问</strong>：为什么本卷很多断言都标着「未在本树构建验证」？ <strong>答</strong>：101/102/201/202 需要整包构建，本机 32GB 内存不可行，所以只做静态分析。<strong>追问</strong>：那结论可信吗？<strong>答</strong>：路径、行号、文件形态都可核验；只有镜像体积、构建耗时这类量不承诺。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>入口函数找不到</td><td><code>grep -n &quot;^function make()&quot; build/make/envsetup.sh</code></td><td>是否有 <code>make()</code> 定义</td><td>无则确认 <code>build/envsetup.sh</code> 是否被 source</td></tr><tr><td>kati 调不起来</td><td><code>ls prebuilts/build-tools/linux-x86/bin/ | grep kati</code></td><td><code>ckati</code> 是否在</td><td>不在则检查 manifest 项目是否同步</td></tr><tr><td>找不到 <code>liblp</code></td><td><code>find . -type d -name liblp</code></td><td>命中路径是否在 <code>system/fs/fs_mgr</code></td><td>不在则按新路径重锚</td></tr><tr><td>找不到 Bazel 配置</td><td><code>ls build/bazel</code></td><td>是否报错</td><td>报错属预期，转 102 的演进叙述</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Soong 内部机制归 <code>AND-P11-101</code>；Make/Bazel 演进归 <code>AND-P11-102</code>；product/flavor/A-B 配置归 <code>AND-P11-201</code>；镜像与 OTA 归 <code>AND-P11-202</code>；GMS 边界归 <code>AND-P11-301</code>；OEM/ODM 定制归 <code>AND-P11-302</code>；形态差异归 <code>AND-P11-401</code>；工程化清单归 <code>AND-P11-402</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P0-202</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P11-101</code>、<code>AND-P11-201</code>、<code>AND-P11-202</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>manifest 默认 revision 为 <code>android17-release</code>（<code>.repo/manifests/default.xml</code> :7），仅 <code>platform/superproject</code>（:11）另标 <code>android-latest-release</code>；1087 个 <code>&lt;project&gt;</code> 全部继承默认 revision（口径：2026-10-23 本树 manifest 元数据）。</li><li><code>build/make/core/</code> 顶层 113 个 <code>.mk</code> 文件；含 <code>clang/</code>、<code>combo/</code>、<code>packaging/</code>、<code>proguard/</code>、<code>tasks/</code> 五个子目录在内共 148 个（口径：本树文件计数）。</li><li><code>build/soong/Android.bp</code> 359 行（口径：本树行数）。</li><li><code>build/blueprint</code> 工作区检出为空：git HEAD <code>7f2058de8155</code> 有文件、本树工作区未检出（口径：本树工作区状态）。</li><li>构建耗时、镜像体积、OTA 包大小均无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早分支</td><td>入口函数集合可能与本树不同，本篇不断言具体形态</td><td>旧脚本迁移后需按本树入口重写</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td>上述命令本树未检出，入口为 <code>make()</code>/<code>tapas()</code>/<code>banchan()</code>；kati 以预编译形态存在于 <code>prebuilts/build-tools/linux-x86/bin/</code>；fs_mgr 位于 <code>system/fs/fs_mgr/</code></td><td>本篇全部路径与命令按此口径</td></tr><tr><td>本树</td><td>manifest 未收录 <code>build/bazel</code></td><td>102 不给 Bazel 路径与行号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>soong</code>、<code>dynamic partitions</code>、<code>A/B updates</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>soong_ui</code>、<code>liblp</code>、<code>update_engine</code>。</li><li>本仓关键路径：<code>build/envsetup.sh</code>、<code>build/soong/ui/build/kati.go</code>、<code>system/fs/fs_mgr/liblp/builder.cpp</code>。</li><li>承接篇：<code>AND-P11-101</code>、<code>AND-P11-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

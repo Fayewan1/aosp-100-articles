@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>属性系统：从 property_service 到 getprop 的完整链路</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>属性系统：从 property_service 到 getprop 的完整链路</h1>
+<div class="kv"><span>ID：AND-P8-202</span><span>卷：P8</span><span>章：8.2</span><span>难度：3</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/init/property_service.cpp ；system/core/init/property_type.cpp ；system/sepolicy/private/property_contexts ；bionic/libc/bionic/system_property_set.cpp ；bionic/libc/bionic/system_property_api.cpp ；system/core/toolbox/getprop.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一条属性从设置到被读到，路径是：调用方经 libbinder 之外的专用 socket 把 <code>name=value</code> 发给 init 的 property_service，init 在 <code>CheckPermissions</code> 里按 SELinux source context 和调用方凭据决定放不放行，放行后写进属性内存区，读侧直接读这块内存，不经过 init——<code>getprop</code> 用 <code>__system_property_foreach</code> 加回调遍历，应用查单键才用 <code>__system_property_get</code>。</p>
+<p><code>StartPropertyService</code> 起两个线程、两个 socket：<code>PROP_SERVICE_NAME</code> 权限 <code>0666</code>，<code>PROP_SERVICE_FOR_SYSTEM_NAME</code> 权限 <code>0660</code> 且属主 <code>AID_SYSTEM</code>。</p>
+<p><code>ro.</code> 类属性写一次就锁死——<code>PropertySet</code>（<code>:378</code>）在 <code>:399-402</code> 判 <code>StartsWith(name, &quot;ro.&quot;)</code> 后直接返回 <code>PROP_ERROR_READ_ONLY_PROPERTY</code>；<code>persist.</code> 前缀会落到 <code>/data/property/persistent_properties</code>。</p>
+<p>内核来源有两条：cmdline 里的 <code>androidboot.*</code> 在 <code>ProcessKernelCmdline</code> 里映射成 <code>ro.boot.*</code>，bootconfig 走 <code>ProcessBootconfig</code>。</p>
+<p>读侧极快的原因是属性区是共享只读内存，<code>getprop</code> 只是遍历这块区域。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P8-201</code>，init.rc 语法、触发器与服务分类是本篇的上下文；本篇只讲属性服务本身，不重复 rc 解析。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/core/init/property_service.cpp</code></li><li><code>system/core/init/property_type.cpp</code></li><li><code>system/sepolicy/private/property_contexts</code></li><li><code>bionic/libc/bionic/system_property_set.cpp</code></li><li><code>bionic/libc/bionic/system_property_api.cpp</code></li><li><code>system/core/toolbox/getprop.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你写了个 native 服务，启动时 <code>__system_property_set(&quot;persist.demo.flag&quot;, &quot;1&quot;)</code> 返回 0，没有任何报错，但下次开机这个值又变回默认。换一条 <code>ro.demo.flag</code> 设置，直接失败，日志里只有一行 permission denied。</p>
+<p>另一头，<code>getprop</code> 一秒钟能刷出几百条属性，而 <code>setprop</code> 每条都要等 init 回应。同是属性接口，读和写的代价差出两个数量级。</p>
+<p>这两个现象指向同一件事：属性不是「一个全局变量」，而是一套由 init 独占写入、所有进程只读的通道。搞清楚谁在写、谁能写、写进去之后存在哪，才能解释上面两件事。本篇只走这条链路。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：</p>
+<ul><li>属性区：一块进程间共享的只读内存，所有进程都映射同一份，读侧无系统调用。</li><li>property_service：init 里的一组分发线程，是唯一写入口。</li><li><code>CheckPermissions</code>：init 侧的准入判定，输入是属性名、值、调用方 SELinux 上下文与凭据。</li><li><code>property_contexts</code>：<code>system/sepolicy/private/property_contexts</code> 里的「属性名前缀 → SELinux 类型」映射表，共 1959 行。</li></ul>
+<p>图 1：设置与读取两条路径</p>
+<pre><code>  设置侧                          读取侧
+  app/native                     app/getprop
+      |                              |
+  __system_property_set        __system_property_foreach
+      |  socket (AF_UNIX)        -&gt; __system_property_read_callback
+      |                              |  直接读内存（单键查询走 __system_property_get）
+      v                              v
+  property_service 线程  ----&gt;  属性共享内存区
+      |                          (ro 段 + 可变段)
+  CheckPermissions
+      |
+  property_contexts</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>设置是「跨进程 + 判定」，读取是「本地内存拷贝」，这就是两者代价差异的根。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>写侧的完整链路，以 <code>property_service.cpp</code>（1575 行）为轴：</p>
+<ol><li><code>StartPropertyService</code>（:1551）在 init 启动时调用，先 <code>InitPropertySet(&quot;ro.property_service.version&quot;, &quot;2&quot;)</code>（:1552），标记协议版本。</li><li>建立 socketpair 连接 init 与 property_service，随后起两个线程：<code>StartThread(PROP_SERVICE_FOR_SYSTEM_NAME, 0660, AID_SYSTEM, property_service_for_system_thread, true)</code>（:1562）与 <code>StartThread(PROP_SERVICE_NAME, 0666, 0, property_service_thread, false)</code>（:1564）。</li><li>设置请求进入 <code>HandlePropertySet</code>（:541），先调 <code>CheckPermissions(name, value, source_context, cr, error)</code>（:498）判定。</li><li>判定依据是 SELinux source context 加调用方凭据，规则来自 <code>property_contexts</code> 的前缀匹配。</li><li>通过后写入属性内存区。落盘不是「前缀对上就写」，而是要同时满足三个条件——判断在 <code>static PropertySet</code>（<code>:378</code> 起）里：先算 <code>need_persist = StartsWith(name, &quot;persist.&quot;) || StartsWith(name, &quot;next_boot.&quot;)</code>（:416），再由 <code>:417</code> 一行判 <code>if (socket &amp;&amp; persistent_properties_loaded &amp;&amp; need_persist)</code>，<code>:418-421</code> 则是命中后的异步分支。条件本身是三条：前缀命中、socket 非空、且持久属性已回载完成。<code>persistent_properties_loaded</code> 是静态标志，<code>:106</code> 初值为 false，<code>:1463</code> 在回载结束时置 true。三者齐了才写 <code>/data/property/persistent_properties</code>。这里还有一条分支要分清：若 <code>ro.property_service.async_persist_writes</code> 为真（<code>:1566-1569</code> 读取该属性后才创建 <code>PersistWriteThread</code>），<code>:418-421</code> 会把写入交给写盘线程并<strong>立刻返回</strong>——真正的 <code>WritePersistentProperty</code>（<code>:1518</code>）与回包 <code>socket.SendUint32(PROP_SUCCESS)</code>（<code>:1522</code>）是线程侧异步完成的。所以开了这个开关时，「返回 0」的语义是「已排队」，不是「已落盘」。这也正是 §3 那个「返回 0 却没持久化」场景的成因之一：早期进程在 <code>load_persist_props</code> 之前 set，前缀对了也照样不落盘。</li></ol>
+<p>补一句父子关系：判定与写入虽都在 <code>PropertySet</code> 里，但入口是 <code>HandlePropertySet</code>（<code>:541</code>）——它在 <code>:544</code> 调 <code>CheckPermissions</code> 做权限判定，全部通过后在 <code>:581</code> 才 <code>return PropertySet(name, value, socket, error)</code> 完成内存写入与落盘。所以「权限不过」与「写不进」是两个函数、两个阶段。</p>
+<p>两个 socket 的区分就是「谁能写」的第一道闸，见表 1。</p>
+<p>表 1：属性服务的关键符号</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>PROP_SERVICE_NAME</code></td><td>通用属性服务 socket，权限 <code>0666</code></td><td><code>property_service.cpp</code> :1564</td></tr><tr><td><code>PROP_SERVICE_FOR_SYSTEM_NAME</code></td><td>面向系统进程的 socket，权限 <code>0660</code>，属主 <code>AID_SYSTEM</code></td><td><code>property_service.cpp</code> :1562</td></tr><tr><td><code>CheckPermissions</code></td><td>按 SELinux 上下文与凭据判定可否写入</td><td><code>property_service.cpp</code> :498</td></tr><tr><td><code>HandlePropertySet</code></td><td>设置请求主处理函数</td><td><code>property_service.cpp</code> :541</td></tr><tr><td><code>ro.property_service.version</code></td><td>属性服务协议版本，值为 <code>&quot;2&quot;</code></td><td><code>property_service.cpp</code> :1552</td></tr></tbody></table>
+<p>注：<code>PROP_SERVICE_NAME</code> / <code>PROP_SERVICE_FOR_SYSTEM_NAME</code> 两个宏定义在 <code>bionic/libc/include/sys/system_properties.h:179-180</code>，是客户端与服务端共用的 socket 名常量。</p>
+<p>读侧和工具侧：</p>
+<ul><li><code>bionic/libc/bionic/system_property_set.cpp</code>（332 行）提供 <code>__system_property_set</code> 入口，负责连 socket 并发送。</li><li><code>bionic/libc/bionic/system_property_api.cpp</code>（137 行）提供 <code>__system_property_get</code>（:86），在本地属性区查名字取值。</li><li><code>system/core/toolbox/getprop.cpp</code>（162 行）是 <code>getprop</code> 命令：<code>PrintAllProperties</code>（:39）里先 <code>__system_property_foreach</code>（:41）拿到每个 <code>prop_info</code>，再在回调里 <code>__system_property_read_callback</code>（:43）取值。注意它用的不是 <code>__system_property_get</code>——那是应用侧单键查询的入口，<code>getprop</code> 要的是全量遍历。</li><li><code>system/core/init/property_type.cpp</code>（86 行）做 init 侧的类型解析。</li></ul>
+<p>内核来源两条，都在 <code>property_service.cpp</code>：<code>ProcessKernelCmdline</code>（:1388）把 cmdline 里的 <code>androidboot.*</code> 转成 <code>ro.boot.*</code>；<code>ProcessBootconfig</code>（:1397）处理 bootconfig 来源。两者都在开机早期执行，早于大部分 service 起来。</p>
+<p>开机早期的默认值装配按 <code>PropertyInit</code>（:1405）里的固定次序执行：<code>ProcessKernelDt</code> → <code>ProcessBootconfig</code> → <code>ProcessKernelCmdline</code> → <code>ExportKernelBootProps</code>（定义 :1338，把内核变量导出成 init 内部与对外属性）→ <code>PropertyLoadBootDefaults</code>（:1148）→ <code>PropertyLoadDerivedDefaults</code>。也就是说 cmdline/bootconfig 的映射先于默认属性文件装载，后者可以覆盖前者。</p>
+<p><code>persist.</code> 落盘值<strong>不在</strong> <code>PropertyLoadBootDefaults</code> 里合并：该函数只读 <code>/prop.default</code> 等默认属性文件。持久值的回载由 init 主线程在 rc 的 <code>on post-fs-data</code> 段调 <code>load_persist_props</code> 内建命令（<code>system/core/rootdir/init.rc:722</code>）触发（该分支里还会调 <code>load_override_properties()</code>（<code>:1448</code>，定义在 <code>:870</code>）处理覆盖值，并在 <code>:1462</code> 置 <code>ro.persistent_properties.ready=true</code> 作为「回载完成」的对外观测点）——它经 <code>SendLoadPersistentPropertiesMessage</code>（<code>init.cpp:933</code>）把消息发给 property_service，由 <code>HandleInitSocket</code> 的 <code>kLoadPersistentProperties</code> 分支（<code>property_service.cpp:1447-1464</code>）调 <code>LoadPersistentProperties()</code> 后逐条 <code>InitPropertySet</code>。时序上这在 <code>PropertyLoadBootDefaults</code> 之后，因此持久值能覆盖默认值。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以写一条 <code>persist.demo.flag=1</code> 为例，按上面的链路走一遍：</p>
+<ol><li>进程调 <code>__system_property_set</code>（<code>system_property_set.cpp</code>）。</li><li>请求经 socket 到 init 的 <code>property_service_thread</code>（对应 <code>PROP_SERVICE_NAME</code>，:1564）。</li><li><code>HandlePropertySet</code>（:541）接住，调 <code>CheckPermissions</code>（:498）。</li><li><code>CheckPermissions</code> 拿调用方 SELinux source context 去 <code>property_contexts</code> 里按前缀匹配，判定该域是否被允许写这类属性。</li><li>通过则写入属性区。落盘再看三条件（:416 的 <code>need_persist</code>、:417 的 <code>socket</code> 与 <code>persistent_properties_loaded</code>）：本例前缀命中 <code>persist.</code>，若此刻 <code>persistent_properties_loaded</code> 仍为 false（:106 初值），写入成功但不落盘；只有等 <code>:1463</code> 把它置 true 之后，同类写入才会落 <code>/data/property/persistent_properties</code>。</li><li>下次开机按三步装配（下面给的是 <code>PropertyInit</code> 内的<strong>调用点</strong>行号，与 §4.2 引用 <code>:1148</code> 这类定义行不是一套口径）：先 <code>ProcessKernelDt</code>/<code>ProcessBootconfig</code>/<code>ProcessKernelCmdline</code>（:1421-1423）映射 bootconfig 与 cmdline，<code>ExportKernelBootProps</code>（:1427）导出内核变量；再 <code>PropertyLoadBootDefaults</code>（:1148）装载默认属性文件；最后 <code>on post-fs-data</code> 段的 <code>load_persist_props</code>（<code>system/core/rootdir/init.rc:722</code>）经 <code>kLoadPersistentProperties</code> 分支（:1447-1464）把 <code>/data/property/persistent_properties</code> 里的持久值读回来——分支内还会 <code>load_override_properties()</code>（:1448，定义 :870）应用覆盖值，末尾 <code>:1462</code> 置 <code>ro.persistent_properties.ready=true</code>。此时 <code>persist.demo.flag=1</code> 才重新可见，且能覆盖同名的默认值。</li></ol>
+<p>对照第 3 节的场景：返回 0 却没有持久化，说明 socket 通信成功但持久化环节另有条件；而 <code>ro.</code> 设置失败要走另一条判据：<code>CheckPermissions</code> 放行之后，<code>PropertySet</code>（<code>:378</code>）在 <code>:399-402</code> 发现前缀是 <code>ro.</code> 且已存在，返回 <code>PROP_ERROR_READ_ONLY_PROPERTY</code>——这是「写一次」的语义，不是权限问题，也不是 I/O 错误。顺便把 <code>CheckPermissions</code>（<code>:498-537</code>）自己的组成拆清：先 <code>IsLegalPropertyName</code>（<code>:500</code>），<code>ctl.</code> 开头走 <code>CheckControlPropertyPerms</code> 特判（<code>:505-513</code>），其余先 <code>GetPropertyInfo</code>（<code>:517</code>）取目标上下文，再 <code>CheckMacPerms</code>（<code>:519</code>）判 SELinux，最后 <code>CheckType</code>（<code>:530</code>）判值类型。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P8-201</code>（init.rc 语法、触发器与服务分类）讲 rc 的解析与触发器排队。本篇只从 <code>StartPropertyService</code> 往下讲，rc 里怎么声明 service 不在此处。</li><li><code>AND-P3-101</code>（Native 世界导览：bionic、.so 与 Init 属性系统）讲 bionic/native 侧的属性接口与 init 属性系统语义，即框架各处 <code>getprop</code> 消费侧的完整图景。本篇到「值进了内存区、谁能写」为止，更外侧的读取语义归那一篇。</li><li>与 <code>AND-P8-201</code> 的衔接点在启动时序：属性服务线程必须在其他 service 之前可用，否则早期 service 的 <code>setprop</code> 会失败。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>写侧总控</td><td><code>system/core/init/property_service.cpp</code></td><td><code>StartPropertyService</code>、<code>HandlePropertySet</code>、<code>CheckPermissions</code></td><td>1575 行，属性服务全部服务端逻辑</td></tr><tr><td>权限规则</td><td><code>system/sepolicy/private/property_contexts</code></td><td>属性名前缀到 SELinux 类型映射</td><td>1959 行，判定数据源</td></tr><tr><td>类型解析</td><td><code>system/core/init/property_type.cpp</code></td><td>init 侧属性类型解析</td><td>86 行</td></tr><tr><td>客户端写</td><td><code>bionic/libc/bionic/system_property_set.cpp</code></td><td><code>__system_property_set</code></td><td>332 行</td></tr><tr><td>客户端读</td><td><code>bionic/libc/bionic/system_property_api.cpp</code></td><td><code>__system_property_get</code>（:86）</td><td>137 行</td></tr><tr><td>命令行工具</td><td><code>system/core/toolbox/getprop.cpp</code></td><td><code>PrintAllProperties</code>（:39）、<code>__system_property_foreach</code>（:41）、<code>__system_property_read_callback</code>（:43）</td><td>162 行；全量遍历走 foreach，不是 <code>__system_property_get</code></td></tr><tr><td>框架侧单键读</td><td><code>bionic/libc/bionic/system_property_api.cpp</code></td><td><code>__system_property_get</code>（:86）</td><td>应用侧单键入口，与 getprop 的遍历入口不是一回事</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e381</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">wc -l system/core/init/property_service.cpp</code></pre>
+<p>期望 <code>1575 system/core/init/property_service.cpp</code>，与 §8 数量级小节的 <code>property_service.cpp</code> 行数一致。</p>
+<pre><code class="lang-bash">grep -n &quot;CheckPermissions\|HandlePropertySet\|PropertyLoadBootDefaults\|ProcessKernelCmdline\|ProcessBootconfig\|StartPropertyService&quot; system/core/init/property_service.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :498、:541、:1148、:1388、:1397、:1551，与 §4.2/§4.3 引用的行号一致。</p>
+<pre><code class="lang-bash">sed -n '1551,1566p' system/core/init/property_service.cpp</code></pre>
+<p>期望看到 <code>InitPropertySet(&quot;ro.property_service.version&quot;, &quot;2&quot;)</code>（:1552）与两个 <code>StartThread</code> 调用（:1562、:1564）。</p>
+<pre><code class="lang-bash">wc -l system/sepolicy/private/property_contexts bionic/libc/bionic/system_property_set.cpp bionic/libc/bionic/system_property_api.cpp system/core/toolbox/getprop.cpp system/core/init/property_type.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次为 <code>1959</code>、<code>332</code>、<code>137</code>、<code>162</code>、<code>86</code>，与 §8 数量级小节列出的各行数一致。</p>
+<pre><code class="lang-bash">grep -n &quot;androidboot\|ro.boot&quot; system/core/init/property_service.cpp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>ProcessKernelCmdline</code> 附近的 <code>androidboot.*</code> 到 <code>ro.boot.*</code> 映射代码。</p>
+<pre><code class="lang-bash">grep -rn &quot;persistent_properties&quot; system/core/init/</code></pre>
+<p>期望命中 <code>persist.</code> 落盘路径 <code>/data/property/persistent_properties</code> 的引用。</p>
+<pre><code class="lang-bash">grep -n &quot;__system_property_get&quot; bionic/libc/bionic/system_property_api.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :86，与 §4.2/§5 引用的 <code>__system_property_get</code> 行号一致——这条 grep 找的是读侧入口，与 socket 路径常量无关。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 `__system_property_set` 返回 0 就是写成功了。</strong> 返回 0 只代表请求送达并得到 init 回应；<code>ro.</code> 前缀的属性一旦设定即锁死——第二次设置走 <code>PropertySet</code> 的 <code>:399-402</code>，返回 <code>PROP_ERROR_READ_ONLY_PROPERTY</code>，与权限判定无关。而部分调用路径的失败不体现在这个返回值上。判断是否真正生效应该回读。</p>
+<p><strong>误区二：以为所有进程通过同一个 socket 写属性。</strong> 实际有两个：<code>PROP_SERVICE_NAME</code> 权限 <code>0666</code>，<code>PROP_SERVICE_FOR_SYSTEM_NAME</code> 权限 <code>0660</code> 且属主 <code>AID_SYSTEM</code>（:1562、:1564）。系统进程与普通进程走的入口不同。一个例外是 <code>sys.powerctl</code>：<code>system_property_set.cpp:64-73</code> 里，只要调用方对该高权限 socket 有写权限（<code>access(..., W_OK)</code> 为真），就改走 <code>property_service_for_system_socket</code>——所以同一个属性对不同进程会落到不同 socket，权限结论不能只按属性名推。</p>
+<p><strong>误区三：以为读属性也要问 init。</strong> 读侧只访问本地映射的属性区，不产生跨进程调用。具体入口要分清：应用查单个键走 <code>__system_property_get</code>（<code>system_property_api.cpp</code> :86），<code>getprop</code> 命令走的是 <code>__system_property_foreach</code>（<code>getprop.cpp:41</code>）加回调里的 <code>__system_property_read_callback</code>（:43），frameworks 侧单键查询则走 <code>android::base::GetProperty</code>。三者都不经过 init。这正是 <code>getprop</code> 能瞬时刷出几百条的原因。</p>
+<p><strong>误区四（看起来对其实是错的）：以为属性权限写在 `property_contexts` 里就够了。</strong> <code>property_contexts</code> 只给出「这个名字属于哪个 SELinux 类型」，真正放不放行要 <code>CheckPermissions</code>（:498）结合调用方的 source context 和凭据一起算。上下文类型对、调用方域不对，依然拒绝。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>ro.boot.*</code> 是谁写进去的？ <strong>答</strong>：<code>ProcessKernelCmdline</code>（:1388）在开机早期把 kernel cmdline 里的 <code>androidboot.*</code> 映射成 <code>ro.boot.*</code>，<code>ProcessBootconfig</code>（:1397）处理 bootconfig 来源。 <strong>追问</strong>：两者冲突时谁说了算？ <strong>答</strong>：DT 优先。<code>property_service.cpp:1419-1420</code> 的注释写明「properties set in DT always have priority over the command-line ones」，紧接着 <code>:1421</code> 处理 DT、<code>:1423</code> 才处理 cmdline——所以同名属性同时在两处出现时，以 DT 里的值为准。这条结论在本树是源码注释直接声明的设计意图，不需要真机验证；换版本时注释与次序要重新核。</p>
+<p><strong>问</strong>：<code>persist.</code> 属性的落盘时机是每次 set 都写吗？ <strong>答</strong>：<code>persist.</code> 前缀的属性落在 <code>/data/property/persistent_properties</code>，写盘动作发生在 <code>HandlePropertySet</code> 通过 <code>CheckPermissions</code> 判定、且满足「前缀 + socket 非空 + 已回载」三条件之后（<code>:416-418</code>）；若开了 <code>ro.property_service.async_persist_writes</code>，返回值只表示「已交给写盘线程」。回载不在 <code>PropertyLoadBootDefaults</code>（:1148）里，而是 <code>on post-fs-data</code> 段的 <code>load_persist_props</code>（<code>system/core/rootdir/init.rc:722</code>）经 <code>kLoadPersistentProperties</code> 分支（:1447-1464）完成，期间 <code>load_override_properties()</code>（:1448）应用覆盖值，<code>:1462</code> 置 <code>ro.persistent_properties.ready=true</code>。 <strong>追问</strong>：落盘失败会怎样？ <strong>答</strong>：表现为值在本次开机内可见、重启后丢失。先查 <code>/data/property/</code> 的挂载与权限，再查 <code>CheckPermissions</code> 是否放行。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>setprop 报 permission denied</td><td><code>adb shell grep -n &quot;&lt;属性前缀&gt;&quot; /system/etc/selinux/plat_property_contexts</code></td><td>该前缀映射到的 SELinux 类型</td><td>对照调用方域的 allow 规则</td></tr><tr><td><code>ro.</code> 属性设了不生效</td><td><code>adb shell getprop &lt;属性名&gt;</code></td><td>回读值是否仍为旧值</td><td>确认 <code>ro.</code> 只允许设定一次</td></tr><tr><td><code>persist.</code> 属性重启后丢失</td><td><code>adb shell ls -l /data/property/</code></td><td><code>persistent_properties</code> 是否存在及属主</td><td>查 <code>/data</code> 挂载与写盘路径</td></tr><tr><td>怀疑持久值没回载完</td><td><code>adb shell getprop ro.persistent_properties.ready</code></td><td>是否为 <code>true</code></td><td>不是 <code>true</code> 说明 <code>load_persist_props</code> 还没跑完（<code>:1462</code> 才置位），此时 <code>persist.*</code> 写入不会落盘</td></tr><tr><td><code>ro.boot.*</code> 值为空</td><td><code>adb shell cat /proc/cmdline</code></td><td>是否有对应 <code>androidboot.*</code> 键</td><td>对照 <code>ProcessKernelCmdline</code> 的映射</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：init.rc 语法、触发器与服务分类见 <code>AND-P8-201</code>；bionic/native 侧属性接口与消费侧语义见 <code>AND-P3-101</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P8-201</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P3-101</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>property_service.cpp</code> 1575 行、<code>property_contexts</code> 1959 行、<code>system_property_set.cpp</code> 332 行、<code>system_property_api.cpp</code> 137 行、<code>getprop.cpp</code> 162 行、<code>property_type.cpp</code> 86 行。来源：源码行数实测，口径 <code>system/core</code> 545d2487e381。</li><li>两个 socket 的权限常量 <code>0666</code> 与 <code>0660</code>，属主 <code>AID_SYSTEM</code>。来源：源码常量。</li><li>属性服务协议版本 <code>&quot;2&quot;</code>。来源：源码常量 <code>ro.property_service.version</code>。</li><li>属性区容量上限、单条属性名与值的最大长度：本篇不断言，暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早的主线版本</td><td>本篇不断言其 socket 入口数量与形态（本机只有 <code>android17-release</code> 一份检出，无法核验历史）</td><td>跨版本比较时以本树的双 socket 现状为基准，不要假设旧版也是两个</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>StartPropertyService</code> 起两个线程：<code>PROP_SERVICE_NAME</code>（<code>0666</code>）与 <code>PROP_SERVICE_FOR_SYSTEM_NAME</code>（<code>0660</code>，<code>AID_SYSTEM</code>）</td><td>系统进程与普通进程在 socket 层就分开，属性服务协议版本标为 <code>&quot;2&quot;</code></td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>property service</code>、<code>property_contexts</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>property_service</code>、<code>StartPropertyService</code>、<code>CheckPermissions</code>。</li><li>本仓关键路径：<code>system/core/init/property_service.cpp</code>、<code>system/sepolicy/private/property_contexts</code>、<code>bionic/libc/bionic/system_property_api.cpp</code>。</li><li>承接篇：<code>AND-P8-201</code>（init.rc 语法、触发器与服务分类）、<code>AND-P3-101</code>（bionic/native 侧属性接口与消费侧语义）。</li></ul>
+</article>
+<footer>android-100 · AND-P8-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

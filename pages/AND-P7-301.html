@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>相机框架：Camera2 API 到 HAL 的链路</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>相机框架：Camera2 API 到 HAL 的链路</h1>
+<div class="kv"><span>ID：AND-P7-301</span><span>卷：P7</span><span>章：7.3</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/hardware/camera2/CameraManager.java ；frameworks/base/core/java/android/hardware/camera2/impl/CameraDeviceImpl.java ；frameworks/av/services/camera/libcameraservice/CameraService.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>Camera2</code> 是 Android 相机的统一门面：应用通过 <code>CameraManager</code> 枚举并打开相机，拿到 <code>CameraDevice</code> 后创建 <code>CaptureSession</code> 提交 <code>CaptureRequest</code>。但打开与采集的实处都在独立的 <code>cameraserver</code> 进程里，<code>CameraService</code> 负责连接设备、管理多客户端抢占与 HAL 对接。理解「打开 → 配流 → 采集」三步及其在 <code>cameraserver</code> 的落点，是定位相机黑屏、忙、掉帧问题的关键。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P4-401</code>（相机 HAL 契约侧）、<code>AND-P7-G01</code>（本卷导航）、<code>AND-P3-302</code>（Native Binder 全貌）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code>（入口，约 3648 行）</li><li><code>frameworks/base/core/java/android/hardware/camera2/impl/CameraDeviceImpl.java</code>（设备实现，约 3350 行）</li><li><code>frameworks/av/services/camera/libcameraservice/CameraService.cpp</code>（服务端，约 7019 行）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「<code>openCamera</code> 偶尔返回忙」「预览黑屏但硬件正常」「多 App 抢相机时掉线」——这些问题的根因几乎都在 <code>cameraserver</code> 与 HAL 之间：<code>CameraService</code> 的抢占规则、流配置校验、或 HAL 回调延迟。应用侧只能看到异步回调成败，真正的因果在远端。本文把这条链路在代码层面钉死。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p><code>CameraManager</code> 是相机子系统在应用进程的入口，构造于 <code>CameraManager.java:207</code>；它持有 <code>CameraManagerGlobal</code> 单例，真正与 <code>cameraserver</code> 通信的是后者。<code>getCameraIdList</code>（<code>:291</code>）返回当前可用相机 id 列表。打开后拿到的是 <code>CameraDeviceImpl</code>，其流配置由 <code>configureStreamsChecked</code>（<code>:621</code>）把关，采集会话由 <code>createCaptureSession</code>（<code>:821</code>/<code>:972</code>）建立。</p>
+<p>图 1：Camera2 框架分层</p>
+<pre><code>App --CameraManager--&gt; CameraManagerGlobal --Binder--&gt; CameraService(cameraserver)
+   CameraDeviceImpl &lt;--回调-- CameraService --HAL--&gt; camera 硬件</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>打开到采集的三步：① <code>openCamera</code>（经 <code>CameraManager</code>）→ <code>CameraService::connectDevice</code>（<code>:2376</code>，内部转 <code>connectDeviceImpl</code> <code>:2400</code>）建立设备连接；② <code>createCaptureSession</code> 配置输出 Surface（流）——公开重载有两个：<code>List&lt;Surface&gt;</code> 版（<code>CameraDeviceImpl.java:821</code>）与 <code>SessionConfiguration</code> 版（<code>:972</code>），两者都不直接做流校验，而是都转 <code>createCaptureSessionInternal</code>，真正的 <code>configureStreamsChecked</code>（<code>:621</code>）调用在 <code>:1053</code>；③ <code>capture</code>/<code>setRepeatingRequest</code> 提交请求。失败路径主要是：设备被占用（<code>handleEvictionsLocked</code> <code>:2026</code> 踢掉低优先级客户端）、流配置非法（校验不通过）、HAL 初始化失败（<code>getCameraInfo</code> <code>:1280</code> 取设备信息失败）。</p>
+<p>图 2：打开→配流→采集三步</p>
+<pre><code>openCamera -&gt; connectDevice -&gt; createCaptureSession -&gt; capture
+   (连接)       (占用/抢占)       (流校验)          (取帧)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>客户端入口 <code>CameraManager.java</code>：<code>CameraManager</code>（<code>:207</code>）构造、<code>getCameraIdList</code>（<code>:291</code>）枚举、<code>registerAvailabilityCallback</code>（<code>:454</code>/<code>:492</code>）监听相机可用性变化。<code>CameraDeviceImpl</code> 负责把应用请求翻译为对 <code>CameraService</code> 的调用：<code>configureStreamsChecked</code>（<code>:621</code>）在创建会话前校验流组合，<code>createCaptureSession</code>（<code>:821</code>/<code>:972</code>）落地会话。</p>
+<p>服务端 <code>CameraService.cpp</code> 是枢纽：<code>getCameraInfo</code>（<code>:1280</code>）按 id 取设备元数据；连接入口在这里要分清——<strong>现代 Camera2 路径走 `connectDevice`（`:2376`）</strong>，它把活转给 <code>connectDeviceImpl</code>（<code>:2400</code>），最终还是进 <code>connectHelper</code>；而 <code>connect</code>（<code>:2246</code>）是 <strong>API1 遗留入口</strong>，本树的 Java 侧 Camera2 实现（<code>CameraDeviceImpl</code>）不再调用它。写排障文档时把两者并列，容易让人以为有两个平级开关。多客户端竞争时由 <code>handleEvictionsLocked</code>（<code>:2026</code>）执行抢占——这是「打开返回忙」的第一来源。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与相机 HAL（<code>AND-P4-401</code>）的关系：<code>CameraService</code> 通过 camera HAL 接口操作设备；HAL 篇讲契约，本篇讲框架侧如何驱动它。</li><li>与 <code>CaptureRequest</code> 语义（302）的关系：本篇讲「通道怎么建」，302 讲「请求里写什么」。</li><li>与图形卷的关系：预览流的 <code>Surface</code> 来自 <code>BufferQueue</code>（见 <code>AND-P6-102</code>），采集结果在图形卷被消费。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>Java 入口</td><td><code>frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></td><td><code>getCameraIdList</code>、<code>openCamera</code>、<code>registerAvailabilityCallback</code></td><td>应用直接调用</td></tr><tr><td>Java 设备实现</td><td><code>frameworks/base/core/java/android/hardware/camera2/impl/CameraDeviceImpl.java</code></td><td><code>configureStreamsChecked</code>、<code>createCaptureSession</code></td><td>请求翻译层</td></tr><tr><td>服务端</td><td><code>frameworks/av/services/camera/libcameraservice/CameraService.cpp</code></td><td><code>connect</code>、<code>connectDevice</code>、<code>handleEvictionsLocked</code></td><td><code>cameraserver</code> 落点</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df（短哈希，展示用；锚点匹配按 <code>rev-parse</code> 全哈希 <code>94b4c163b7dfe5ce3607f7bb8456f9573f7de57d</code>） 锚点：frameworks/av:475269ec44ac</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD
+git -C frameworks/av rev-parse HEAD</code></pre>
+<p>期望分别得到 <code>94b4c163b7df</code>、<code>475269ec44ac</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;public CameraManager\|getCameraIdList\|registerAvailabilityCallback&quot; \
+  frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：构造 <code>:207</code>、<code>getCameraIdList</code> <code>:291</code>、<code>registerAvailabilityCallback</code> <code>:454</code>/<code>:492</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;configureStreamsChecked\|public void createCaptureSession&quot; \
+  frameworks/base/core/java/android/hardware/camera2/impl/CameraDeviceImpl.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>configureStreamsChecked</code> 声明在 <code>:621</code>、两处调用在 <code>:592</code>（<code>configureOutputs</code> 兼容入口）与 <code>:1053</code>（<code>createCaptureSessionInternal</code> 内，公开会话创建的真实路径）；<code>createCaptureSession</code> 两个公开重载在 <code>:821</code>（<code>List&lt;Surface&gt;</code> 版）与 <code>:972</code>（<code>SessionConfiguration</code> 版）——注意这两个重载内部都不直接调 <code>configureStreamsChecked</code>，而是汇入 <code>createCaptureSessionInternal</code>，按 <code>:1053</code> 复跑才能串起来。</p>
+<pre><code class="lang-bash">grep -n &quot;CameraService::getCameraInfo\|CameraService::connect\b\|CameraService::connectDevice\|CameraService::handleEvictionsLocked&quot; \
+  frameworks/av/services/camera/libcameraservice/CameraService.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>getCameraInfo</code> <code>:1280</code>、<code>connect</code> <code>:2246</code>、<code>connectDevice</code> <code>:2376</code>、<code>handleEvictionsLocked</code> <code>:2026</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「<code>openCamera</code> 失败就是硬件坏了」。绝大多数是抢占（别的 App 正占用，<code>handleEvictionsLocked</code> <code>:2026</code>）；次级来源是 <code>client-&gt;initialize()</code> 返回的 <code>-EBUSY</code>（<code>:2680</code> 调用、<code>:2691</code> 把 <code>-EBUSY</code> 翻译成 <code>ERROR_CAMERA_IN_USE</code>）——这时忙的是 HAL open 端，与应用优先级无关，两者要看的错误信息并不一样。</li><li>「黑屏是预览没画出来」。更可能是 <code>createCaptureSession</code> 的流配置未通过 <code>configureStreamsChecked</code> 校验，或 Surface 未就绪。</li><li>「看起来对其实是错的」：以为 <code>CameraManager.getCameraIdList</code> 总能返回全部物理相机。逻辑/物理多摄下，返回的是逻辑相机 id，物理子摄需另行查询。</li><li>「关掉 App 相机就释放了」。释放依赖 <code>CameraDevice.close</code> 的异步回调完成，若 HAL 卡住，连接可能延迟释放，下次打开仍报忙。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：打开相机返回「忙」怎么确认是谁占用？ <strong>答</strong>：<code>dumpsys media.camera</code> 看当前已连接客户端与 <code>handleEvictionsLocked</code> 记录；若能定位高优先级占用方，优先关闭它。 <strong>追问</strong>：为什么有时重试就好？ <strong>答</strong>：前一次 <code>close</code> 的异步释放尚未完成，稍后连接已释放，重试即成功。</p>
+<p><strong>问</strong>：预览黑屏但拍照正常说明什么？ <strong>答</strong>：说明设备连接与采集正常（拍照走同一链路），问题在预览 <code>Surface</code>/流配置（转 §4.2 的流校验与 <code>AND-P6-102</code>）。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>打开返回忙</td><td><code>dumpsys media.camera</code></td><td>已连接客户端列表</td><td>确认抢占，转 §4.3</td></tr><tr><td>预览黑屏</td><td><code>dumpsys media.camera</code></td><td>会话与流状态</td><td>查流配置，转 §4.2/AND-P6-102</td></tr><tr><td>相机不可用</td><td><code>dumpsys media.camera</code></td><td>设备 availability</td><td>查 <code>registerAvailabilityCallback</code> 原因</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/av rev-parse HEAD</code></td><td>是否 <code>475269ec44ac</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：<code>CaptureRequest</code> 的键空间语义（302）、相机 HAL 契约（AND-P4-401）、预览流上屏（AND-P6-102）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P4-401</code>、<code>AND-P7-G01</code>、<code>AND-P3-302</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-302</code>（请求语义）、<code>AND-P6-102</code>（Surface 消费）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>CameraManager.java</code> 约 3648 行、<code>CameraDeviceImpl.java</code> 约 3350 行、<code>CameraService.cpp</code> 约 7019 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>；锚点短哈希为展示用，匹配按 <code>rev-parse</code> 全哈希）。</li><li>多客户端抢占由 <code>handleEvictionsLocked</code>（<code>:2026</code>）统一仲裁（口径：源码符号）。</li><li>单帧采集延迟依赖 HAL 与分辨率，暂无统一实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>CameraService.cpp</code> 约 7019 行；<code>connectDevice</code> 为新架构连接入口</td><td>本篇行号基准</td></tr><tr><td>旧版本</td><td>入口与分层不同（口径：演进史，本树单分支不可核验）</td><td>按符号重锚</td></tr><tr><td>API 21+</td><td><code>Camera2</code> 引入并逐步替代旧 <code>Camera</code> API（口径：官方文档）</td><td>旧 API 不推荐，本文只覆盖 Camera2</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>camera</code>、<code>camera2</code>、<code>CameraService</code>；developer.android.com 站内检索 <code>CameraManager</code>、<code>CameraDevice</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>CameraService.cpp</code>、<code>CameraDeviceImpl.java</code>。</li><li>承接篇：<code>AND-P7-302</code>、<code>AND-P4-401</code>、<code>AND-P6-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

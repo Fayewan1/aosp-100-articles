@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图形 HAL：BufferQueue、gralloc 与 HWC 合成</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>图形 HAL：BufferQueue、gralloc 与 HWC 合成</h1>
+<div class="kv"><span>ID：AND-P4-202</span><span>卷：P4</span><span>章：4.2</span><span>难度：4</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/gui/BufferQueueProducer.cpp ；frameworks/native/libs/ui/include/ui/BufferQueueDefs.h ；frameworks/native/libs/gui/Surface.cpp ；frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp ；frameworks/native/services/surfaceflinger/DisplayHardware/AidlComposerHal.cpp ；hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一帧画面在 HAL 侧要穿过两个契约：缓冲队列（BufferQueue）管“缓冲什么时候能被写、什么时候能被读”，HWC（硬件合成器）管“这次提交的图层列表能不能被硬件接住”。生产者（应用或 SurfaceFlinger）用 <code>dequeueBuffer</code> 取槽、画完 <code>queueBuffer</code> 归还；缓冲被取走后，SurfaceFlinger 把客户端目标缓冲和若干设备图层一起交给 composer。composer 的 AIDL 与 HIDL 二选一由服务名判定，AIDL 侧每帧命令走 <code>executeCommands</code>。卡顿定位的第一刀是分清“等槽位”“等 fence”“present 被拆成两次”。本篇只讲队列契约与提交协议，分配器归 AND-P4-201，合成决策归 P6-201。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读（C 读 §4/§9，D 读 §1/§4.1/§9）</p></blockquote>
+<p><strong>建议先读</strong>：AND-P4-201（缓冲从哪来、由谁分配、底层载体是什么），否则 §4 里“缓冲进入队列”会被误读成“分配”。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code></li><li><code>frameworks/native/libs/ui/include/ui/BufferQueueDefs.h</code></li><li><code>frameworks/native/libs/gui/Surface.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/AidlComposerHal.cpp</code></li><li><code>hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>应用掉帧，<code>dumpsys SurfaceFlinger</code> 里看到某层的队列长度一直贴在 1 或 2，但 GPU 占用不高。另一台机器上同款应用不卡，换的只是厂商的显示驱动。</p>
+<p>两种现象落在同一段链路上：缓冲在队列里排不上，或者排上了但合成器每帧多绕一轮。要判断卡在哪一段，得先看清这一帧跨了几次进程边界、在每个边界上谁在等谁。缓冲槽位的上限、生产者的四个动作、composer 的两次提交调用，是回答这个问题的全部坐标。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：<strong>缓冲槽（slot）</strong>、<strong>缓冲队列（BufferQueue）</strong>、<strong>客户端目标缓冲（client target）</strong>、<strong>composer</strong>。槽位是队列内的固定编号资源，队列是生产者与消费者之间的握手协议，客户端目标缓冲是 SurfaceFlinger 自己合成的图像，composer 是 HAL 侧接收图层列表的接口。</p>
+<p>图 1：一帧从生产者到 composer 的路径（BLAST 模型）</p>
+<pre><code> 应用进程                                    |  SurfaceFlinger 进程
+ --------------------------------------------|-----------------------------
+ 生产者 dequeueBuffer --&gt; 空闲槽位            |
+ 绘制             --&gt; 槽位占用                |
+ BLAST acquireBuffer --&gt; 拿到已入队的缓冲     |
+ queueBuffer 入队 + fence                    |
+ Transaction::setBuffer().apply() -----------|-- binder 跨入 SurfaceFlinger
+                                             |  合成 -&gt; setClientTarget
+                                             |  -&gt; validate / present（再跨一次进 composer）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键点是进程边界的数法。BLAST 模型下 <code>BufferQueue</code> 的消费者由应用侧的 <code>BLASTBufferQueue</code> 兼任：<code>acquireBuffer</code> 在应用进程内完成（<code>libs/gui/BLASTBufferQueue.cpp:600</code>／<code>:769</code>），缓冲随后经 <code>Transaction::setBuffer(...)</code> 与 <code>apply()</code>（<code>:667</code>／<code>:1105</code>）跨 binder 进入 SurfaceFlinger，再经 <code>setClientTarget</code> 跨进 composer。<strong>一帧至少两次边界，不是一次。</strong> 所以「队列卡」发生在应用进程内，「合成卡」发生在后两跳，两类问题不要混在一起查。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>槽位与上限。</strong> 队列最多 <code>NUM_BUFFER_SLOTS = 64</code> 个槽（<code>frameworks/native/libs/ui/include/ui/BufferQueueDefs.h:25</code>）。单次可同时被持有的缓冲有更紧的上限：<code>BufferQueueCore</code> 里 <code>MAX_MAX_ACQUIRED_BUFFERS = NUM_BUFFER_SLOTS - 2</code>（<code>frameworks/native/libs/gui/include/gui/BufferQueueCore.h:75</code>）。减 2 是为了给“已 dequeue 未 queue”和“已 queue 未 acquire”各留位置，队列不会因为两侧都顶满而互相锁死。</p>
+<p><strong>生产者四个动作。</strong> 同一文件里四个入口，语义各不相同：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>dequeueBuffer</code></td><td>取一个可写槽位，可能需要等待</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp:462</code></td></tr><tr><td><code>queueBuffer</code></td><td>归还槽位并附 fence，交给消费者</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp:976</code></td></tr><tr><td><code>cancelBuffer</code></td><td>放弃该槽位，不产生可消费缓冲</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp:1290</code></td></tr><tr><td><code>allocateBuffers</code></td><td>预分配，不占用队列状态</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp:1638</code></td></tr></tbody></table>
+<p><code>cancelBuffer</code> 与 <code>queueBuffer</code> 的差别在于是否让消费者看见：前者只是把槽位还回去，后者才会触发消费侧。</p>
+<p>图 2：一个槽位的状态流转</p>
+<pre><code>        dequeueBuffer            queueBuffer             acquire
+FREE ----------------&gt; DEQUEUED -----------&gt; QUEUED -----------&gt; ACQUIRED
+ ^                          |                                       |
+ |      cancelBuffer        |                                       |
+ +--------------------------+                                       |
+ |                                                                  |
+ +------------------- 消费者 releaseBuffer --------------------------+</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>Surface 的挂接。</strong> 应用通常不直接见到 <code>IGraphicBufferProducer</code>。<code>Surface</code> 构造时持 <code>mGraphicBufferProducer</code>（<code>frameworks/native/libs/gui/Surface.cpp:126</code>），把 <code>ANativeWindow::dequeueBuffer = hook_dequeueBuffer</code>（<code>:145</code>）、<code>ANativeWindow::queueBuffer = hook_queueBuffer</code>（<code>:147</code>）装上。于是 <code>ANativeWindow</code> 的三个函数指针就是队列三动作的转发口，应用的绘制循环从 <code>ANativeWindow</code> 进、从 <code>BufferQueueProducer</code> 出。</p>
+<p><strong>接口层有批量版本。</strong> <code>IGraphicBufferProducer</code> 同时暴露单发与批量：<code>dequeueBuffer</code>（<code>frameworks/native/libs/gui/IGraphicBufferProducer.cpp:200</code>）、<code>queueBuffer</code>（<code>:390</code>）、<code>dequeueBuffers</code>（<code>:248</code>）、<code>queueBuffers</code>（<code>:412</code>）。批量版本的意义是多槽一次往返，跨进程时的调用次数与槽数解耦。</p>
+<p><strong>composer 的二选一。</strong> <code>AidlComposer::namesAnAidlComposerService(serviceName)</code> 为真就走 AIDL，否则回落 <code>HidlComposer</code>（<code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp:27-31</code>）。判定条件是：服务名以 <code>AidlIComposer::descriptor</code> 开头即真，否则查 <code>AServiceManager_isDeclared</code>（<code>AidlComposerHal.cpp:245-250</code>）；构造用 <code>AServiceManager_waitForService</code>（<code>:254</code>）。</p>
+<p><strong>两套提交面的形状。</strong> AIDL 侧 <code>validateDisplay</code>（<code>AidlComposerHal.cpp:880</code>）、<code>presentDisplay</code>（<code>:748</code>）、<code>acceptDisplayChanges</code>（<code>:430</code>）、<code>setPowerMode</code>（<code>:848</code>）；HIDL 侧同形方法在 <code>HidlComposerHal.cpp:687/:601/:372/:665</code>。名字一致意味着合成器的调用序列在两套后端之间可以共用，差异被压在 <code>ComposerHal</code> 之下。</p>
+<p><strong>AIDL 变成了命令队列。</strong> <code>IComposer</code> 只留 <code>createClient()</code>（<code>IComposer.aidl:36</code>）与 <code>getCapabilities()</code>（<code>:45</code>），每帧操作统一走 <code>IComposerClient::executeCommands(in DisplayCommand[])</code>（<code>IComposerClient.aidl:189</code>）。这是本树里最值得注意的接口形状变化：<code>validateDisplay</code>/<code>presentDisplay</code> 在客户端仍以方法存在，但落到底层是一串 <code>DisplayCommand</code>。</p>
+<p><strong>客户端目标缓冲的提交。</strong> <code>HWComposer::setClientTarget</code>（<code>HWComposer.cpp:525</code>）转 <code>hwcDisplay-&gt;setClientTarget(slot, target, acquireFence, dataspace, hdrSdrRatio)</code>（<code>:532</code>）。带 <code>acquireFence</code> 说明提交不等于可用：合成器把 fence 一起交出去，由显示硬件自己等。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>SurfaceFlinger 要合成一帧，客户端目标缓冲已经画好。它先调 <code>HWComposer::setClientTarget</code>（<code>HWComposer.cpp:525</code>），把槽位号、缓冲、acquire fence、dataspace、<code>hdrSdrRatio</code> 交给 <code>hwcDisplay-&gt;setClientTarget(...)</code>（<code>:532</code>）。</p>
+<p>随后是两次语义不同的调用。<code>validateDisplay</code>（AIDL 侧 <code>AidlComposerHal.cpp:880</code>）问的是“这套图层组合能不能接”；如果 HWC 要求换合成方式，客户端调 <code>acceptDisplayChanges</code>（<code>:430</code>）确认。再调 <code>presentDisplay</code>（<code>:748</code>）才真正推上屏。</p>
+<p>在这个 AIDL 后端上，上面三次调用最终都被折进 <code>IComposerClient::executeCommands(in DisplayCommand[])</code>（<code>IComposerClient.aidl:189</code>）。如果一次 <code>present</code> 被拆成多个 <code>DisplayCommand</code> 批次，抓包会看到不止一次跨进程往返——这就是“合成没卡但每帧多绕一轮”的来源。</p>
+<p>同一条路径在 <code>HidlComposer</code> 上走的是 <code>HidlComposerHal.cpp:687/:601/:372/:665</code> 这几个同形方法，调用序列不变，只是传输层与批处理形态不同。</p>
+<p>图 3：一帧的提交序列与两次往返</p>
+<pre><code>SurfaceFlinger            ComposerHal            composer HAL
+   setClientTarget  -----&gt;  hwcDisplay-&gt;setClientTarget
+   validateDisplay  -----&gt;  executeCommands([...])
+        &lt;----- 需改合成方式 / 无需改
+   acceptDisplayChanges --&gt;  executeCommands([...])
+   presentDisplay   -----&gt;  executeCommands([...])
+        &lt;----- present fence</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><strong>AND-P4-201</strong>：讲缓冲怎么来、分配器与 dma-buf 载体。本篇从“缓冲已经存在、要进队列”开始，不重复分配路径。</li><li><strong>P6-201</strong>：讲 SurfaceFlinger 的图层树与合成决策（谁跟谁合成、客户端合成还是设备合成）。本篇只讲决策做完之后，提交协议怎么走。</li><li><strong>P6-101</strong>：讲应用侧绘制。本篇只到 <code>ANativeWindow</code> 的三个 hook 为止。</li><li><strong>本条边界</strong>：队列槽位、生产者的四个动作、composer 的 validate/present 序列归本篇。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>槽位上限定义</td><td><code>frameworks/native/libs/ui/include/ui/BufferQueueDefs.h</code></td><td><code>NUM_BUFFER_SLOTS = 64</code></td><td>队列容量天花板</td></tr><tr><td>可获取上限</td><td><code>frameworks/native/libs/gui/include/gui/BufferQueueCore.h</code></td><td><code>MAX_MAX_ACQUIRED_BUFFERS</code></td><td>比槽数少 2</td></tr><tr><td>生产者四动作</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code></td><td><code>dequeueBuffer</code>/<code>queueBuffer</code>/<code>cancelBuffer</code>/<code>allocateBuffers</code></td><td>队列契约入口</td></tr><tr><td>应用侧挂接</td><td><code>frameworks/native/libs/gui/Surface.cpp</code></td><td><code>mGraphicBufferProducer</code>、<code>hook_dequeueBuffer</code>、<code>hook_queueBuffer</code></td><td><code>ANativeWindow</code> 转发</td></tr><tr><td>批量接口</td><td><code>frameworks/native/libs/gui/IGraphicBufferProducer.cpp</code></td><td><code>dequeueBuffers</code>/<code>queueBuffers</code></td><td>单发与批量并存</td></tr><tr><td>后端选择</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></td><td><code>namesAnAidlComposerService</code></td><td>AIDL/HIDL 分叉点</td></tr><tr><td>AIDL 提交面</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/AidlComposerHal.cpp</code></td><td><code>validateDisplay</code>/<code>presentDisplay</code>/<code>acceptDisplayChanges</code></td><td>提交序列</td></tr><tr><td>命令模型</td><td><code>hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></td><td><code>executeCommands</code>、<code>DisplayCommand[]</code></td><td>批量命令入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;NUM_BUFFER_SLOTS&quot; frameworks/native/libs/ui/include/ui/BufferQueueDefs.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出含 <code>NUM_BUFFER_SLOTS = 64</code>，对上 4.2 第一条。</p>
+<pre><code class="lang-bash">grep -n &quot;MAX_MAX_ACQUIRED_BUFFERS&quot; frameworks/native/libs/gui/include/gui/BufferQueueCore.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出含 <code>NUM_BUFFER_SLOTS - 2</code>，对上可获取上限。</p>
+<pre><code class="lang-bash">grep -nE &quot;(status_t|void) BufferQueueProducer::(dequeueBuffer|queueBuffer|cancelBuffer|allocateBuffers)&quot; frameworks/native/libs/gui/BufferQueueProducer.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出四行，行号分别为 462、976、1290、1638，对上生产者四动作表。注意 <code>allocateBuffers</code> 返回 <code>void</code>，模式里必须带 <code>void</code> 分支，只写 <code>status_t</code> 会永远匹配不到它。</p>
+<pre><code class="lang-bash">grep -n &quot;mGraphicBufferProducer\|hook_dequeueBuffer\|hook_queueBuffer&quot; frameworks/native/libs/gui/Surface.cpp | head -5</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出含 <code>:126</code>、<code>:145</code>、<code>:147</code> 三处挂接点。</p>
+<pre><code class="lang-bash">grep -n &quot;namesAnAidlComposerService&quot; frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出含 <code>:27-31</code> 区间的调用，对上后端二选一。</p>
+<pre><code class="lang-bash">grep -n &quot;executeCommands&quot; hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出含 <code>:189</code>，对上批量命令入口。</p>
+<pre><code class="lang-bash">sed -n '525,533p' frameworks/native/services/surfaceflinger/DisplayHardware/HWComposer.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>setClientTarget</code> 转调，行号分别为 525 与 532。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：队列长度等于缓冲数量。</strong> 不对。队列里的槽位最多 <code>NUM_BUFFER_SLOTS = 64</code>，但真正能同时被持有的更少：<code>MAX_MAX_ACQUIRED_BUFFERS = NUM_BUFFER_SLOTS - 2</code>。看 <code>dumpsys</code> 里队列深度时，可获取上限才是有效天花板。</p>
+<p><strong>误区二：`cancelBuffer` 和 `queueBuffer` 是同一条路上的两种退出方式。</strong> 不对。<code>cancelBuffer</code>（<code>BufferQueueProducer.cpp:1290</code>）只是把槽位还回去，消费者看不到这次操作；<code>queueBuffer</code>（<code>:976</code>）才让缓冲变成可消费。丢帧排查里两者混算会得出“生产了但没人消费”的错误结论。</p>
+<p><strong>误区三：`validateDisplay` 就是提交。</strong> 看起来像，其实是错的。<code>validateDisplay</code>（<code>AidlComposerHal.cpp:880</code>）只回答“这套图层组合能不能接”，需要时还要 <code>acceptDisplayChanges</code>（<code>:430</code>）确认；真正推上屏是 <code>presentDisplay</code>（<code>:748</code>）。把 validate 当提交会让“改了合成方式后没生效”的现象无从解释。</p>
+<p><strong>误区四：AIDL 和 HIDL 是两个独立的调用模型，得分别读。</strong> 不对。<code>ComposerHal</code> 之上是同形方法（AIDL 侧 <code>:880/:748/:430/:848</code>，HIDL 侧 <code>:687/:601/:372/:665</code>），合成器的调用序列共用；AIDL 只是把每帧折进 <code>executeCommands</code>（<code>IComposerClient.aidl:189</code>）。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：应用改了缓冲数量，为什么卡顿没变？ <strong>答</strong>：队列容量不是唯一变量，<code>MAX_MAX_ACQUIRED_BUFFERS</code> 把可获取上限压在 <code>NUM_BUFFER_SLOTS - 2</code>，加缓冲也可能先撞这个上限。<strong>追问</strong>：那怎么判断是真撞上限？<strong>答</strong>：看 <code>dequeueBuffer</code>（<code>BufferQueueProducer.cpp:462</code>）是否长期阻塞，而不是看队列里报了几个槽。</p>
+<p><strong>问</strong>：<code>presentDisplay</code> 返回正常，为什么屏幕还是慢一帧？ <strong>答</strong>：<code>setClientTarget</code>（<code>HWComposer.cpp:525</code>）把 <code>acquireFence</code> 一起交出去，返回正常只说明提交被接受，不代表显示硬件已经等到 fence。<strong>追问</strong>：怎么确认是 fence 在等？<strong>答</strong>：查这次提交的 fence 与后续 <code>presentDisplay</code> 的时间差，而不是查返回值。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>队列长期贴着上限</td><td><code>grep -n &quot;MAX_MAX_ACQUIRED_BUFFERS&quot; frameworks/native/libs/gui/include/gui/BufferQueueCore.h</code></td><td>可获取上限是否被撞</td><td>对照 <code>dequeueBuffer</code> 是否阻塞</td></tr><tr><td>每帧多次跨进程</td><td><code>grep -n &quot;executeCommands&quot; hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></td><td>是否走 AIDL 批量命令</td><td>看 <code>present</code> 被拆成几批 <code>DisplayCommand</code></td></tr><tr><td>提交被拒但无报错</td><td><code>grep -n &quot;acceptDisplayChanges&quot; frameworks/native/services/surfaceflinger/DisplayHardware/AidlComposerHal.cpp</code></td><td>是否漏掉确认这一步</td><td>补看 <code>validateDisplay</code> 的返回值</td></tr><tr><td>应用侧取不到槽</td><td><code>grep -n &quot;hook_dequeueBuffer&quot; frameworks/native/libs/gui/Surface.cpp</code></td><td><code>ANativeWindow</code> 挂接是否在位</td><td>转查 <code>BufferQueueProducer.cpp:462</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：缓冲分配器与 dma-buf 载体（AND-P4-201）；SurfaceFlinger 图层树与合成决策（P6-201）；应用侧绘制（P6-101）。</p>
+<p><strong>本篇前置依赖</strong>：AND-P4-201、AND-P3-101。</p>
+<p><strong>本篇后继</strong>：P6-201。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>槽位上限 <code>64</code>，来源：源码常量 <code>NUM_BUFFER_SLOTS</code>。</li><li>可获取上限为槽数减 2，来源：源码常量 <code>MAX_MAX_ACQUIRED_BUFFERS</code>。</li><li>生产者动作 4 个，来源：<code>BufferQueueProducer.cpp</code> 的四个方法。</li><li>composer 后端 2 套（AIDL/HIDL），来源：<code>ComposerHal.cpp</code> 的分叉。</li><li>AIDL 每帧命令批次数：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL 时代</td><td>composer 以 HIDL 方法逐次调用</td><td>提交序列与传输层绑定</td></tr><tr><td>android17-release（本树实测）</td><td>AIDL 侧 <code>IComposer</code> 只留 <code>createClient()</code>/<code>getCapabilities()</code>，每帧走 <code>executeCommands</code></td><td>批次数与调用次数解耦，抓包口径要改</td></tr><tr><td>本树过渡态</td><td><code>AidlComposer::namesAnAidlComposerService</code> 为假时回落 <code>HidlComposer</code></td><td>两套后端并存，行号分文件</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>composer hal</code>、<code>gralloc bufferqueue</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>IComposerClient executeCommands</code>、<code>MAX_MAX_ACQUIRED_BUFFERS</code>。</li><li>本仓关键路径：<code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code>、<code>frameworks/native/services/surfaceflinger/DisplayHardware/AidlComposerHal.cpp</code>。</li><li>承接篇：AND-P4-201、P6-201。</li></ul>
+</article>
+<footer>android-100 · AND-P4-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

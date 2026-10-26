@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：边界与信任</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：边界与信任</h1>
+<div class="kv"><span>ID：AND-P9-G01</span><span>卷：P9</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/sepolicy/private/seapp_contexts ；frameworks/base/core/java/android/os/Process.java ；frameworks/base/core/res/AndroidManifest.xml ；external/avb/libavb/avb_slot_verify.c ；system/security/keystore2/src/keystore2_main.rs ；trusty/user/app</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 的安全不是一道门，而是几层互相兜底的边界：启动链证明「跑起来的是谁签的代码」，沙箱与 SELinux 限定「这条进程能碰什么」，权限与签名决定「这个调用者被允许做什么」，Keystore 与网络策略守住「密钥和数据往哪去」。本卷 9 篇按这条纵深顺序读，不必按篇号顺序读。追「谁在什么条件下被允许做什么」，主入口是 <code>AND-P9-202</code>，锚点也在它。每篇的结论都落在可 grep 的源文件与可复现的静态检查上，不靠口头承诺。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P2-101</code>——本卷各篇的检查点几乎都发生在 Binder 调用的两端（框架侧发起、system_server 侧判定），先看一次事务从 <code>transact</code> 到 <code>onTransact</code> 的完整往返，才好定位「判定发生在哪一端」。应用进程从 Zygote fork 出来的细节见 <code>AND-P2-401</code>，安装期权限授予见 <code>AND-P2-203</code>。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/sepolicy/private/seapp_contexts</code></li><li><code>frameworks/base/core/java/android/os/Process.java</code></li><li><code>frameworks/base/core/res/AndroidManifest.xml</code></li><li><code>external/avb/libavb/avb_slot_verify.c</code></li><li><code>system/security/keystore2/src/keystore2_main.rs</code></li><li><code>trusty/user/app</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> 与 <code>grep</code>。不需要编译，也不需要真机，本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个应用装上了、也申请了权限，但读某个目录照样返回拒绝；一条 <code>avc: denied</code> 出现在 <code>dmesg</code> 里，权限明明已授予。换个场景：<code>adb shell ps -Z</code> 看到每个进程都挂着奇怪的域标签，同一份代码在 A 设备能跑、B 设备崩。再换一个：用户问「我的密钥到底在芯片里还是文件里」，没人能给出确切位置。</p>
+<p>这些问题的共同点是边界不在应用代码里，而在几层系统机制的交界处。看不清交界，就只能靠试。本卷把交界一处一处摊开。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个关键概念：信任根（Bootloader 与 AVB 验证的起点）、沙箱（uid/gid 加 SELinux 域，内核强制）、权限（安装期与运行期的授予状态，由 system_server 进程记账）、密钥（Keystore 2 经 TEE 托管）。信任根决定系统未被篡改，沙箱决定进程看得见什么，权限决定调用被接受，密钥决定数据离开进程后还安全。</p>
+<p>图 1：本卷四层边界与对应篇目</p>
+<pre><code>信任根  Bootloader/AVB      -&gt; 102
+沙箱    uid/gid + SELinux   -&gt; 202
+权限    安装期/运行期授予    -&gt; 201
+密钥    Keystore 2 / TEE    -&gt; 401</code></pre>
+<p>四层是纵向依赖：信任根不成立，后三层都无意义；沙箱不成立，权限检查可被绕过。横向还有签名（301/302）与网络（402）两条支线，签名决定「谁有资格申请高等级权限」，网络决定「数据出设备时走什么校验」。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷按纵深排列，篇目与角色如下。表中主题与索引标题逐字一致。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P9-G01</code></td><td>卷导读：边界与信任</td><td>入口；给地图与读法，不含机制细节</td></tr><tr><td><code>AND-P9-101</code></td><td>Android 安全架构全景与威胁模型</td><td>定坐标系：先讲清防谁、防到什么程度</td></tr><tr><td><code>AND-P9-102</code></td><td>信任根与启动链验证：从 Bootloader 到 TEE</td><td>起点篇：证明运行的是已签名镜像</td></tr><tr><td><code>AND-P9-201</code></td><td>权限体系：安装期/运行期、权限组与特殊权限</td><td>授予侧：权限从声明到生效的记账</td></tr><tr><td><code>AND-P9-202</code></td><td>应用沙箱：uid/gid、SELinux 域与文件隔离</td><td>锚点篇：内核强制的实际边界</td></tr><tr><td><code>AND-P9-301</code></td><td>签名与密钥体系：APK 签名 v2/v3/v4 与密钥轮转</td><td>资格篇：签名决定权限等级与升级路径</td></tr><tr><td><code>AND-P9-302</code></td><td>APEX 与模块化签名：mainline 的信任模型</td><td>模块篇：系统组件独立更新时的信任链</td></tr><tr><td><code>AND-P9-401</code></td><td>数据安全：Keystore、TEE 与数据加密</td><td>终点篇：密钥落在哪、谁能用</td></tr><tr><td><code>AND-P9-402</code></td><td>网络安全：网络安全配置、TLS 与证书透明度</td><td>出网篇：数据离开设备时的校验</td></tr></tbody></table>
+<p>依赖链（与卷纲的写作依赖图同向）：<code>201</code> → <code>202</code> → <code>401</code>——权限体系 → 应用沙箱 → 密钥与加密，前者是后者的前置；<code>101</code> → <code>102</code> 与 <code>301</code> → <code>302</code> 是两条独立支线（<code>302</code> 在卷纲里是叶子，不再引出 <code>401</code>）。可分头读的两组：<code>101</code>+<code>102</code> 读架构与启动，<code>301</code>+<code>302</code>+<code>402</code> 读签名与网络，两组互不阻塞。锚点篇是 <code>AND-P9-202</code>，全卷的行号与符号以它为参照。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p><code>frameworks/base/core/res/AndroidManifest.xml</code> 里有 1160 个 <code>&lt;permission&gt;</code> 元素、19 个 <code>&lt;permission-group&gt;</code> 元素。按 protectionLevel 的<strong>完整串</strong>分：<code>signature</code> 298 条、<code>signature|privileged</code> 298 条、<code>normal</code> 87 条、<code>dangerous</code> 42 条、<code>internal|role</code> 114 条、<code>signature|role</code> 48 条，另有几十种带额外 flags 的组合（如 <code>signature|privileged|role</code> 34 条、<code>signature|privileged|development</code> 24 条、<code>dangerous|instant</code> 8 条、<code>normal|instant</code> 18 条）。</p>
+<p>这组数字说明本卷为什么先读 201 再读 301：1160 条里完整串恰为 <code>dangerous</code> 的只占 42 条（连 <code>dangerous|instant</code>、<code>dangerous|runtime</code> 一起也才 51 条），其余绝大多数靠签名或平台特权通过。也就是说，安全边界的主力不是弹窗，是「谁签的」。把 298＋298 条签名类权限当成默认拒绝面，就能解释为什么一个自签名应用无论怎么申请，都拿不到它想要的那类能力。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置：<code>AND-P2-302</code>（权限校验框架：checkPermission 的所有路径）与 <code>AND-P2-203</code>（PMS、InputManager 与其余系统服务）是 201/301 的地基；<code>AND-P5-501</code>（安全模块：SELinux、seccomp 与 IMA）是 202 的地基；<code>AND-P8-101</code>（bootloader 到 init）是 102 的地基。</li><li>后继：201/202 的下游在 <code>AND-P11-302</code>（定制化中的权限实践）；301 的下游在 <code>AND-P11-202</code>（镜像格式与 OTA：payload、fastboot 与增量更新）；401 与 <code>AND-P7-402</code>（蓝牙、NFC、USB 外设与投屏虚拟设备）互引，交集在安全元件。</li><li>边界篇：<code>AND-P9-101</code> 只给威胁模型框架，不重复各篇机制；<code>AND-P9-402</code> 只管出网校验，不涉及设备内密钥存放。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>沙箱域映射</td><td><code>system/sepolicy/private/seapp_contexts</code></td><td>从 uid、seinfo 到 SELinux 域的匹配规则</td><td>202 主证据</td></tr><tr><td>uid 分段</td><td><code>frameworks/base/core/java/android/os/Process.java</code></td><td><code>FIRST_APPLICATION_UID</code> 与各区间常量</td><td>202 的数值口径</td></tr><tr><td>权限总量</td><td><code>frameworks/base/core/res/AndroidManifest.xml</code></td><td><code>&lt;permission</code>、protectionLevel 组合</td><td>201 与 301 的分母</td></tr><tr><td>启动验证</td><td><code>external/avb/libavb/avb_slot_verify.c</code></td><td>槽位校验流程</td><td>102 主证据</td></tr><tr><td>密钥入口</td><td><code>system/security/keystore2/src/keystore2_main.rs</code></td><td>Keystore 2 服务主流程</td><td>401 主证据</td></tr><tr><td>TEE 用户态应用</td><td><code>trusty/user/app</code></td><td>十个 TEE 应用目录</td><td>102 与 401 的交汇点</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -c &quot;&lt;permission &quot; frameworks/base/core/res/AndroidManifest.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 1116 附近——这是<strong>行计数</strong>；真正的元素数是 1160（有 44 个标签的属性换行书写，行计数漏掉它们，可用 <code>grep -o 'protectionLevel=' | wc -l</code> 交叉印证得 1160）。对上 §4.3 的权限总量。</p>
+<pre><code class="lang-bash">grep -c &quot;&lt;permission-group&quot; frameworks/base/core/res/AndroidManifest.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 19，即权限组数量。</p>
+<pre><code class="lang-bash">grep -c 'protectionLevel=&quot;signature|privileged&quot;' frameworks/base/core/res/AndroidManifest.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 298，对上签名加特权这一类（若写成 <code>grep -c &quot;signature|privileged&quot;</code>，BRE 的竖线是交替运算符——只含 <code>signature</code> 或只含 <code>privileged</code> 的行都会命中，再加 <code>signature|privileged|role</code> 等更长变体，合计 504；与注释无关，含 protectionLevel 的注释行实测 0 行）。</p>
+<pre><code class="lang-bash">find system/sepolicy/private system/sepolicy/public -name &quot;*.te&quot; | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 501，即平台策略源（private 356 ＋ public 145）的总数；若改成 <code>find system/sepolicy -name &quot;*.te&quot; -not -path &quot;*prebuilt*&quot;</code>，得 652——多出的是 vendor 89、microdroid 61，以及 <code>reqd_mask/reqd_mask.te</code> 这 1 个（501＋89＋61＋1＝652，可复算）。</p>
+<pre><code class="lang-bash">grep -rhE '^\s*neverallow' --include='*.te' system/sepolicy/private system/sepolicy/public | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 1172，即 <code>neverallow</code> 规则数。同口径下另两条：<code>^\s*allow </code> 得 4591、<code>^\s*type </code> 得 1594。口径＝private＋public 两个目录、只数 <code>.te</code> 文件、行首锚定（不数 <code>allowxperm</code> 的 148 条变体）。</p>
+<pre><code class="lang-bash">grep -n &quot;FIRST_APPLICATION_UID&quot; frameworks/base/core/java/android/os/Process.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 10000 起点，对上 §4.1 的沙箱分段。</p>
+<pre><code class="lang-bash">wc -l external/avb/libavb/avb_slot_verify.c</code></pre>
+<p>期望 1819，对上启动验证路径规模。</p>
+<pre><code class="lang-bash">find system/security/keystore2 -name &quot;*.rs&quot; | xargs wc -l | tail -1</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 51571 合计行数，对上 Keystore 2 的体量。</p>
+<pre><code class="lang-bash">ls trusty/user/app</code></pre>
+<p>期望十个目录，含 <code>keymint</code>、<code>gatekeeper</code>、<code>storage</code>。</p>
+<pre><code class="lang-bash">grep -c &quot;^user=\|^seinfo=\|^domain=&quot; system/sepolicy/private/seapp_contexts
+wc -l system/sepolicy/private/seapp_contexts</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前者得到该表匹配行的条数 52、后者 222——<code>seapp_contexts</code> 是本卷锚点篇 <code>AND-P9-202</code> 的主证据，本篇只引不做展开，此处给一条可复算的入口。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：权限授予了就能访问。</strong> 权限只是第一道裁决。SELinux 域若不允许该进程访问目标类型，<code>allow</code> 未命中即拒绝，<code>dmesg</code> 里会出现 <code>avc: denied</code>。201 与 202 是两个独立开关，缺一不可。</p>
+<p><strong>误区二：`neverallow` 是编译期噪音。</strong> 它是策略合法性约束：规则集本身违反 <code>neverallow</code>，构建就失败。private＋public 的 <code>.te</code> 里共 1172 条，作用是把「不该出现的放行」在出厂前挡住，不是运行期检查。</p>
+<p><strong>误区三：签名只是防篡改。</strong> 看起来对，其实不完整。签名还决定升级资格（同一密钥才能覆盖安装）和权限等级（<code>signature</code> 298 条只对同签名者开放），改动签名等于同时改掉升级路径与权限面。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：我只关心应用层，能不能跳过 102？<strong>答</strong>：可以，读 101、201、202 就够日常判断；但涉及 OTA、定制系统或密钥托管，必须回到 102，否则无法判断设备是否处于可信状态。<strong>追问</strong>：那 401 呢？<strong>答</strong>：只要涉及密钥存储位置、指纹解锁后密钥可用性这类问题，401 不可跳。</p>
+<p><strong>问</strong>：本卷验证方式为什么只有 V1 和少量 V3？<strong>答</strong>：主体是静态源码分析（V1）；201/202 可叠加 V3，用 <code>adb shell dumpsys package</code>、<code>ps -Z</code>、<code>ls -Z</code>、<code>getenforce</code> 观察权限与域状态。本卷没有 V4 篇目。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>权限已授予但访问失败</td><td><code>adb shell dmesg | grep avc</code></td><td>是否有 <code>avc: denied</code> 及目标类型</td><td>转 <code>AND-P9-202</code> 查域与类型</td></tr><tr><td>不清楚进程挂在哪个域</td><td><code>adb shell ps -Z | grep &lt;包名&gt;</code></td><td>进程的 SELinux 域标签</td><td>对照 <code>seapp_contexts</code> 匹配规则</td></tr><tr><td>权限状态与预期不符</td><td><code>adb shell dumpsys package &lt;包名&gt;</code></td><td><code>grantedPermissions</code> 与 protectionLevel</td><td>转 <code>AND-P9-201</code> 查授予路径</td></tr><tr><td>设备是否处于强制模式</td><td><code>adb shell getenforce</code></td><td>返回 <code>Enforcing</code> 或 <code>Permissive</code></td><td>非强制则策略结论不可外推</td></tr><tr><td>文件标签是否正确</td><td><code>adb shell ls -Z &lt;路径&gt;</code></td><td>文件的类型标签</td><td>对照策略源中该类型的 <code>allow</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：威胁模型细节见 <code>AND-P9-101</code>；启动链验证见 <code>AND-P9-102</code>；权限模型见 <code>AND-P9-201</code>、<code>AND-P9-202</code>；签名与 APEX 见 <code>AND-P9-301</code>、<code>AND-P9-302</code>；Keystore 与数据加密见 <code>AND-P9-401</code>；网络安全配置见 <code>AND-P9-402</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P2-101</code>，及 §4.4 列出的四篇入卷衔接。</p>
+<p><strong>本篇后继</strong>：<code>AND-P9-101</code> 起的八篇正文。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>策略规模：平台策略源（private＋public）共 501 个 <code>.te</code>（private 356 ＋ public 145）；全树非 prebuilt 为 652 个，即 501 ＋ vendor 89 ＋ microdroid 61 ＋ <code>reqd_mask</code> 1。同口径规则数：<code>allow</code> 4591 条、<code>neverallow</code> 1172 条、<code>type</code> 1594 个（只数 <code>.te</code>、行首锚定，另有 <code>allowxperm</code> 148 条未计入）。口径为 2026-10-20 于本地 AOSP 树实测。</li><li>权限规模：1160 个 <code>&lt;permission&gt;</code> 元素、19 个 <code>&lt;permission-group&gt;</code> 元素（XML 元素口径；按行 <code>grep -c '&lt;permission '</code> 只数到 1116，漏掉 44 个属性换行的写法）。来源为 manifest 元数据。</li><li>沙箱 uid 区间：普通应用 10000–19999、SDK 沙箱 20000–29999、PCC（Private Compute Core，私有计算核心）30000–39999、隔离进程 99000–99999（另有 app Zygote 隔离段 90000–98999，<code>Process.java:348 FIRST_APP_ZYGOTE_ISOLATED_UID</code>）。来源为 <code>Process.java</code> 常量。</li><li>启动验证代码量：AVB 版本 1.4.0，<code>avb_slot_verify.c</code> 共 1819 行。来源为源码。</li><li>密钥侧代码量：Keystore 2 的 <code>.rs</code> 合计 51571 行、100 个文件。来源为源码统计；TEE 侧十个用户态应用的具体行数暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本</td><td>签名以 <code>v1</code>（JAR 签名）为主，权限授予集中在安装期</td><td>运行期授权与增量签名校验均不成立，本篇结论不适用</td></tr><tr><td>android17-release（本树实测）</td><td>平台策略源（private＋public）501 个 <code>.te</code>、<code>neverallow</code> 1172 条；权限 1160 个 <code>&lt;permission&gt;</code> 元素；Keystore 2 以 <code>.rs</code> 实现为主</td><td>本篇全部数量口径以此为准；换口径须同步换数</td></tr><tr><td>后续版本</td><td>暂无实测，列为待补</td><td>读时按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>security</code>、<code>verified boot</code>、<code>permissions</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>seapp_contexts</code>、<code>neverallow</code>、<code>keystore2</code>。</li><li>本仓关键路径：<code>system/sepolicy/private/seapp_contexts</code>、<code>frameworks/base/core/java/android/os/Process.java</code>、<code>system/security/keystore2/src/keystore2_main.rs</code>。</li><li>承接篇：<code>AND-P9-101</code>、<code>AND-P9-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

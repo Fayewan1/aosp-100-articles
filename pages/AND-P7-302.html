@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>相机元数据与流式配置：CaptureRequest 的语义</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>相机元数据与流式配置：CaptureRequest 的语义</h1>
+<div class="kv"><span>ID：AND-P7-302</span><span>卷：P7</span><span>章：7.3</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/hardware/camera2/CaptureRequest.java ；frameworks/base/core/java/android/hardware/camera2/CameraMetadata.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>CaptureRequest</code> 不是「一次拍照指令」，而是一个带类型的键值配置包：它用 <code>Key&lt;T&gt;</code> 把每一项拍摄参数（对焦模式、曝光、尺寸等）存进一个类型安全的 map，由 <code>Builder</code> 构造、<code>build()</code> 产出不可变请求；多摄场景下还用 <code>mLogicalCameraId</code> 区分逻辑相机与物理子摄。理解它的「键空间 + Builder + 逻辑/物理映射」三件事，才能正确配置相机而不踩类型与多摄的坑。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P7-301</code>（Camera2 框架到 HAL 的链路，本篇是其请求语义的细拆）、<code>AND-P7-G01</code>（本卷导航）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/android/hardware/camera2/CaptureRequest.java</code>（请求，约 4541 行）</li><li><code>frameworks/base/core/java/android/hardware/camera2/CameraMetadata.java</code>（键空间基类，约 4606 行）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「设了 <code>CONTROL_AF_MODE</code> 为什么不生效」「多摄手机怎么指定用哪颗镜头」「为什么 <code>get</code> 出来的值和 <code>set</code> 的不一样」——这些问题的根因在 <code>CaptureRequest</code> 的语义：键是带类型的、请求是不可变的、<code>build</code> 之后改动无效，多摄下逻辑相机与物理相机是两套 id。本文把这套键空间与构造机制讲清。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p><code>CaptureRequest</code> 继承自 <code>CameraMetadata</code>，其配置以 <code>Key&lt;T&gt;</code> 为键、以强类型值为内容；底层并不是一张 <code>Map&lt;Key, Object&gt;</code>——主配置由 <code>CameraMetadataNative</code>（<code>CaptureRequest.java:239</code>，一块 native metadata buffer，键经 <code>getNativeKey()</code> 映射后存取）承载，另有一个 <code>HashMap&lt;String, CameraMetadataNative&gt; mPhysicalCameraSettings</code>（<code>:240</code>）只在多摄场景按物理相机 id 分持各子摄设置。<code>CameraMetadata</code> 提供键空间的基底（构造 <code>CameraMetadata.java:75</code>、可用键枚举 <code>getKeys()</code> <code>:148</code>）。<code>CaptureRequest</code> 用 <code>mLogicalCameraId</code>（<code>CaptureRequest.java:237</code>）记录该请求属于哪个逻辑相机。</p>
+<p>图 1：CaptureRequest 的键值结构</p>
+<pre><code>CaptureRequest = { Key&lt;AF_MODE&gt;: AUTO, Key&lt;EXPOSURE&gt;: 100, ... }
+   Builder.set(Key, value) -&gt; build() -&gt; 不可变 CaptureRequest</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>构造：用 <code>Builder</code>（<code>CaptureRequest.java:842</code>）逐项 <code>set</code>（<code>Builder.set</code> <code>:913</code>）写入键值，最后 <code>build()</code>（<code>:1039</code>）产出请求。读取：<code>get(Key)</code>（<code>CaptureRequest.java:432</code> / <code>Builder.get</code> <code>:927</code>）取回配置。失败路径：对不支持的键 <code>set</code>（被忽略或报错）、<code>build</code> 后修改请求（无效，因不可变）、多摄下把物理 id 当逻辑 id 用（路由错相机）。</p>
+<p>图 2：逻辑相机与物理子摄的映射</p>
+<pre><code>逻辑相机(mLogicalCameraId) --setPhysicalCameraKey--&gt; 物理子摄设置
+   预览/拍照经逻辑相机下发，物理参数按子摄分别指定</code></pre>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p><code>CaptureRequest.java</code>：<code>Builder</code> 类在 <code>:842</code> 定义，<code>set</code>（<code>Builder.set</code> <code>:913</code>）以类型安全方式写入，<code>get</code>（<code>Builder.get</code> <code>:927</code>）回读，<code>build</code>（<code>CaptureRequest.java:1039</code>）闭合为不可变对象；<code>mLogicalCameraId</code>（<code>:237</code>）在构造时绑定逻辑相机身份，多摄场景下用于把请求正确路由。<code>get(Key)</code>（<code>:432</code>）是请求对象的读取入口。</p>
+<p>基类 <code>CameraMetadata.java</code>：构造 <code>:75</code>，<code>getKeys()</code>（<code>:148</code>）返回当前设备支持的键集合——这是「哪些键可用」的权威来源，应用应只 <code>set</code> 设备支持的键，否则易被忽略。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与 <code>AND-P7-301</code> 的关系：301 讲「通道怎么建、请求怎么提交」，本篇讲「请求里到底写了什么、为什么这么写」。</li><li>与相机 HAL（<code>AND-P4-401</code>）的关系：请求里的键最终由 HAL 解释执行；键空间是框架与 HAL 之间的约定层。</li><li>与图形卷的关系：请求关联的 <code>Surface</code> 决定采集结果去向（见 <code>AND-P6-102</code>）。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>请求</td><td><code>frameworks/base/core/java/android/hardware/camera2/CaptureRequest.java</code></td><td><code>Builder</code>、<code>set</code>、<code>get</code>、<code>build</code>、<code>mLogicalCameraId</code></td><td>配置包本体</td></tr><tr><td>键空间基类</td><td><code>frameworks/base/core/java/android/hardware/camera2/CameraMetadata.java</code></td><td><code>getKeys</code>、<code>CameraMetadata</code></td><td>键值语义基底</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望得到 <code>94b4c163b7df</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;public final static class Builder\|public &lt;T&gt; void set\|public &lt;T&gt; T get\|public CaptureRequest build\|mLogicalCameraId&quot; \
+  frameworks/base/core/java/android/hardware/camera2/CaptureRequest.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>Builder</code> <code>:842</code>、<code>set</code> <code>:913</code>、<code>get</code> <code>:927</code>、<code>build</code> <code>:1039</code>、<code>mLogicalCameraId</code> <code>:237</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;protected CameraMetadata\|public List&lt;TKey&gt; getKeys&quot; \
+  frameworks/base/core/java/android/hardware/camera2/CameraMetadata.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：构造 <code>:75</code>、<code>getKeys</code> <code>:148</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「<code>build</code> 之后再改请求就能改配置」。请求不可变，<code>build</code> 后改动无效，必须重新 <code>Builder.set</code> 再 <code>build</code>。</li><li>「所有键都能 <code>set</code>」。API 层面确实不校验——<code>CameraMetadataNative.set</code> 会把任何 <code>Key</code> 原样写进去（<code>:532-542</code>，查不到对应 <code>SetCommand</code> 就落到 <code>setBase</code>）；但<strong>值不生效</strong>的裁决权在设备能力一端：<code>getKeys()</code>（<code>CameraMetadata.java:148</code>）给出设备支持的键集合，不在此列的键会被下游按能力裁剪或忽略。所以准确说法是「都能写进去，但只有设备支持的才生效」。</li><li>「看起来对其实是错的」：以为逻辑相机 id 等于物理镜头 id。多摄下二者不同，<code>mLogicalCameraId</code>（<code>:237</code>）是逻辑身份，物理子摄需另行指定。</li><li>「<code>get</code> 出来一定等于 <code>set</code> 进去的」。默认值、设备能力裁剪都会让回读值不同于写入值。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：设了对焦模式不生效怎么办？ <strong>答</strong>：先查该键是否在设备 <code>getKeys()</code> 支持列表里，并在合适的 <code>CaptureRequest</code> 模板上设置；<code>build</code> 后不要在旧对象上改。 <strong>追问</strong>：多摄怎么指定镜头？ <strong>答</strong>：通过逻辑相机 id 与物理子摄的分别配置，确认 <code>mLogicalCameraId</code> 路由正确。</p>
+<p><strong>问</strong>：为什么读取参数和设置不一致？ <strong>答</strong>：可能是设备不支持该值被裁剪为默认值，或读取的是不同请求实例。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>键不生效</td><td><code>dumpsys media.camera</code></td><td>请求键与设备支持列表</td><td>查 <code>getKeys</code>，转 §4.3</td></tr><tr><td>多摄选错</td><td>查请求 id</td><td><code>mLogicalCameraId</code></td><td>转 §4.2</td></tr><tr><td>配置被忽略</td><td>对比 set/get</td><td>是否 build 后改</td><td>转 §4.1</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/base rev-parse HEAD</code></td><td>是否 <code>94b4c163b7df</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Camera2 通道建立（301）、相机 HAL 契约（AND-P4-401）、预览流上屏（AND-P6-102）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P7-301</code>、<code>AND-P7-G01</code>。</li><li><strong>本篇后继</strong>：<code>AND-P6-102</code>（Surface 消费）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>CaptureRequest.java</code> 约 4541 行、<code>CameraMetadata.java</code> 约 4606 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>键空间以 <code>Key&lt;T&gt;</code> 强类型承载，可用键由 <code>getKeys()</code>（<code>:148</code>）按设备枚举（口径：源码符号）。</li><li>请求对象不可变：<code>build()</code>（<code>:1039</code>）返回的是 <code>new CaptureRequest(mRequest)</code>——拷贝构造会为各物理相机重建 <code>CameraMetadataNative</code>（<code>:349-354</code>），且 <code>CaptureRequest</code> 类本身没有任何公开写入入口（口径：源码符号）。</li><li>多摄以逻辑/物理 id 区分，暂无统一数量级，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>CaptureRequest.java</code> 约 4541 行，<code>Builder</code> 在 <code>:842</code></td><td>本篇行号基准</td></tr><tr><td>API 21+</td><td><code>Camera2</code> 全量，<code>CaptureRequest</code> 键空间随版本扩充</td><td>旧键可能新增/弃用</td></tr><tr><td>多摄演进</td><td>逻辑/物理相机映射随多摄硬件普及而重要</td><td><code>mLogicalCameraId</code> 语义关键</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：developer.android.com 站内检索 <code>CaptureRequest</code>、<code>CameraMetadata</code>、<code>CameraCharacteristics</code>；source.android.com 站内检索 <code>camera2</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>CaptureRequest.java</code>。</li><li>承接篇：<code>AND-P7-301</code>、<code>AND-P4-401</code>、<code>AND-P6-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

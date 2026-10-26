@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choreographer 与帧调度：VSYNC 回调与丢帧分析</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Choreographer 与帧调度：VSYNC 回调与丢帧分析</h1>
+<div class="kv"><span>ID：AND-P6-301</span><span>卷：P6</span><span>章：6.3</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/view/Choreographer.java ；frameworks/base/core/java/android/view/ViewRootImpl.java ；frameworks/base/core/java/android/view/DisplayEventReceiver.java ；frameworks/native/libs/gui/DisplayEventDispatcher.cpp ；frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp ；frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp ；frameworks/native/libs/gui/FrameTimestamps.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Choreographer 不是一个计时器，而是应用进程侧的 vsync 消费端：它向 SurfaceFlinger 的 EventThread 预约下一次 vsync，收到回调后在同一个 <code>doFrame</code> 里按固定顺序跑输入、动画、插值动画、traversal、commit 五类回调。丢帧的本质不是 <code>doFrame</code> 慢，而是「上一帧的工作没在下一个 vsync 到来前做完」，导致 <code>scheduleFrameLocked</code> 预约的那一次 vsync 被浪费。判断丢帧要看的是预约时刻、回调触发时刻、<code>FrameTimestamps</code> 里各阶段 fence 的完成时刻三者的相对位置，而不是单看某一帧耗时。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P6-201</code>——先有 SurfaceFlinger 侧合成与 EventThread 的全局图景，才看得懂本文「应用进程怎么消费 vsync」的边界。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/android/view/Choreographer.java</code></li><li><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></li><li><code>frameworks/base/core/java/android/view/DisplayEventReceiver.java</code></li><li><code>frameworks/native/libs/gui/DisplayEventDispatcher.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></li><li><code>frameworks/native/libs/gui/FrameTimestamps.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>线上帧率面板显示某个页面在动画期间每隔几帧就掉一帧，但抓 trace 看 <code>doFrame</code> 自身耗时只有 3–5 ms，远小于 16.6 ms 的预算。开发者因此困惑：既然每帧干的活都不多，帧率为什么还是不满。也有人发现 <code>Choreographer</code> 的 <code>FrameCallback</code> 时间戳「时快时慢」，怀疑是系统在抖动。这两类问题的答案都不在 <code>doFrame</code> 内部，而在 vsync 的预约、供给与回填这条链路上。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念构成一条单向链：</p>
+<ul><li>vsync 供给端：SurfaceFlinger 的 <code>EventThread</code>，按 <code>VSyncPredictor</code> 预测的下一次 vsync 时刻投递事件。</li><li>进程内接收端：<code>DisplayEventReceiver</code> 及其 native 侧 <code>DisplayEventDispatcher</code>，负责 fd 上的读事件与 <code>requestNextVsync</code>。</li><li>调度器：<code>Choreographer</code>，持有两个 token，把回调按类型排进五个阶段。</li><li>消费者：<code>ViewRootImpl</code>，通过 <code>mChoreographer.postVsyncCallback</code> 挂 traversal。</li></ul>
+<p>图 1：vsync 从 SurfaceFlinger 到应用 traversal 的消费链</p>
+<pre><code>EventThread --fd--&gt; DisplayEventDispatcher --&gt; onVsync
+    ^                                          |
+    |                                    scheduleFrameLocked
+    +---- requestNextVsync &lt;-- Choreographer &lt;-+
+                                               |
+                              doFrame: 0 -&gt; 1 -&gt; 2 -&gt; 3 -&gt; 4
+                                               |
+                                     ViewRootImpl.performTraversals</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>回调类型是一组同前缀常量，取值与顺序决定了同一帧内的执行次序。<code>CALLBACK_INPUT = 0</code>、<code>CALLBACK_ANIMATION = 1</code>、<code>CALLBACK_INSETS_ANIMATION = 2</code>、<code>CALLBACK_TRAVERSAL = 3</code>、<code>CALLBACK_COMMIT = 4</code>，范围止于 <code>CALLBACK_LAST = CALLBACK_COMMIT</code>。注意 2 号位不是留白：<code>CALLBACK_INSETS_ANIMATION</code>（定义在 <code>:344</code>）服务窗口插值动画（InsetsAnimation）控制器回调，<code>doFrame</code> 在 <code>:1206</code> 真正调到它，位置在 <code>CALLBACK_ANIMATION</code>（<code>:1205</code>）之后、<code>CALLBACK_TRAVERSAL</code>（<code>:1209</code>）之前。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>CALLBACK_INPUT</code></td><td>输入事件处理阶段</td><td><code>Choreographer.java:321</code></td></tr><tr><td><code>CALLBACK_ANIMATION</code></td><td>动画推进阶段</td><td><code>Choreographer.java:328</code></td></tr><tr><td><code>CALLBACK_INSETS_ANIMATION</code></td><td>窗口插值动画控制器回调，<code>doFrame</code> 内在 :1206 执行</td><td><code>Choreographer.java:344</code>（定义）、<code>:1206</code>（调用，该行行内即 <code>doCallbacks(Choreographer.CALLBACK_INSETS_ANIMATION);</code>，定义与调用同行可判）</td></tr><tr><td><code>CALLBACK_TRAVERSAL</code></td><td>视图树 measure/layout/draw</td><td><code>Choreographer.java:351</code></td></tr><tr><td><code>CALLBACK_COMMIT</code></td><td>帧提交阶段</td><td><code>Choreographer.java:363</code></td></tr><tr><td><code>CALLBACK_LAST</code></td><td>上界，等于 <code>CALLBACK_COMMIT</code></td><td><code>Choreographer.java:365</code></td></tr></tbody></table>
+<p><code>Choreographer</code> 用两个 token 区分回调来源：<code>FRAME_CALLBACK_TOKEN</code> 标记普通帧回调，<code>VSYNC_CALLBACK_TOKEN</code> 标记 vsync 回调。<code>USE_VSYNC</code> 是这套机制的总开关。<code>mFrameIntervalNanos = (long)(1000000000 / getRefreshRate())</code> 给出的是按刷新率折算出的帧预算。注意口径：<code>getRefreshRate()</code>（<code>:391</code>）返回 <code>float</code>，<code>1000000000 / getRefreshRate()</code> 是浮点除法，结果经 <code>(long)</code> 强制转换截断——不是整数除法，也不是整数运算意义上的向下取整。计算式在 <code>:379</code>。</p>
+<p>调度入口与执行点是 <code>scheduleFrameLocked(long now)</code> 与 <code>doFrame(long frameTimeNanos, int frame, ...)</code>。真正接 vsync 的是内部类 <code>FrameDisplayEventReceiver</code>，其 <code>onVsync</code> 是 vsync 到达应用进程后的第一个落点。</p>
+<p>链路的 Java 侧对端是 <code>DisplayEventReceiver</code>：<code>scheduleVsync</code> 发起预约，<code>nativeScheduleVsync</code> 是 native 调用，<code>onVsync</code> 是回调。native 侧 <code>DisplayEventDispatcher</code> 的 <code>scheduleVsync</code> 在 <code>:79</code>，<code>injectEvent</code> 在 <code>:105</code>；内部通过 <code>mReceiver.requestNextVsync()</code> 向 SurfaceFlinger 要下一次 vsync，用 <code>mReceiver.sendEvents(&amp;event, 1)</code> 把事件送上去。</p>
+<p>SurfaceFlinger 侧的供给由 <code>EventThread::onVsync(nsecs_t vsyncTime, nsecs_t wakeupTime, nsecs_t readyTime)</code> 完成，<code>EventThreadConnection::postEvent</code> 负责投递到具体连接。时刻由 <code>VSyncPredictor::nextAnticipatedVSyncTimeFrom</code> 预测——所以应用看到的 vsync 时间是「预测值」，不是硬件回读值。</p>
+<p><code>ViewRootImpl</code> 一侧，<code>mChoreographer</code> 字段在 <code>:692</code> 声明、在 <code>:1440</code> 初始化；<code>scheduleTraversals</code> 在 <code>:3307</code> 里调 <code>mChoreographer.postVsyncCallback</code>（<code>:3330</code>），最终由 <code>performTraversals</code>（<code>:3351</code>）消费这一帧。注意 traversal 不是直接 <code>postFrameCallback</code>，而是 vsync 回调，语义更靠近「下一次 vsync 一定叫我」。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设一次 animator 推进导致需要重绘。应用侧走的是：<code>scheduleTraversals</code> → <code>postVsyncCallback</code> → <code>scheduleFrameLocked(now)</code> → native 侧 <code>requestNextVsync</code>。SurfaceFlinger 的 <code>nextAnticipatedVSyncTimeFrom</code> 给出下一次 vsync 时刻 T。T 到达时 <code>FrameDisplayEventReceiver.onVsync</code> 被调，<code>doFrame</code> 依次跑 <code>CALLBACK_INPUT=0</code>、<code>CALLBACK_ANIMATION=1</code>、<code>CALLBACK_INSETS_ANIMATION=2</code>、<code>CALLBACK_TRAVERSAL=3</code>、<code>CALLBACK_COMMIT=4</code>。</p>
+<p>如果这次 <code>CALLBACK_ANIMATION</code> 里的动画计算把时间拖过了 T + <code>mFrameIntervalNanos</code>，那么下一次预约仍在，但 GPU 侧提交赶不上 T+1 的合成，表现为该帧被丢。trace 上看到的现象是 <code>doFrame</code> 时长正常，但两次 <code>onVsync</code> 之间的间隔变成两个帧周期——这就是「<code>doFrame</code> 不慢却掉帧」的典型形态。这里要把可锚定与推断的部分分开说：CPU 侧有源码级日志直接对应此机制——<code>doFrame</code> 在 <code>Choreographer.java:1131</code> 计算 <code>skippedFrames = jitterNanos / frameIntervalNanos</code>，超过阈值时（<code>:1132-1136</code>）打印 <code>Skipped N frames! The application may be doing too much work on its main thread.</code>；GPU→SurfaceFlinger 一段为黑盒，属设计语义推断，本树静态分析不可直接核验。</p>
+<p>帧轨迹侧，<code>FrameEventHistory::INITIAL_MAX_FRAME_HISTORY</code>（<code>:171</code>）决定历史容量，<code>getFrame</code>（<code>:179</code>）取帧，<code>checkFencesForCompletion</code>（<code>:201</code>）检查 fence 是否已落地，<code>ProducerFrameEventHistory::updateAcquireFence</code>（<code>:254</code>）回填 acquire fence。渲染执行的回填点在 <code>ThreadedRenderer.syncAndDrawFrame</code>（<code>ThreadedRenderer.java:848</code>），属于渲染执行侧，本篇不展开。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>前置篇 <code>AND-P6-201</code> 讲 SurfaceFlinger 侧调度与合成，本文从 EventThread 投递之后接手，SurfaceFlinger 内部排布归 201。HWUI 的渲染执行（含 <code>syncAndDrawFrame</code> 之后发生了什么）归 <code>AND-P6-202</code>。jank 的指标定义、采集与归因方法论归 P10-202；本文只解释机制，不给分析流程。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>帧调度核心</td><td><code>frameworks/base/core/java/android/view/Choreographer.java</code></td><td><code>doFrame</code>、<code>scheduleFrameLocked</code>、<code>FrameDisplayEventReceiver</code></td><td>回调分阶段执行的唯一入口</td></tr><tr><td>traversal 触发</td><td><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td><code>scheduleTraversals</code>、<code>postVsyncCallback</code>、<code>performTraversals</code></td><td>视图树与 vsync 的接缝</td></tr><tr><td>Java 侧接收</td><td><code>frameworks/base/core/java/android/view/DisplayEventReceiver.java</code></td><td><code>scheduleVsync</code>、<code>nativeScheduleVsync</code>、<code>onVsync</code></td><td>预约与回调的 Java 壳</td></tr><tr><td>native 侧分发</td><td><code>frameworks/native/libs/gui/DisplayEventDispatcher.cpp</code></td><td><code>scheduleVsync</code>、<code>injectEvent</code></td><td>fd 事件到回调的桥</td></tr><tr><td>vsync 供给</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp</code></td><td><code>onVsync</code>、<code>EventThreadConnection::postEvent</code></td><td>谁在什么时刻发事件</td></tr><tr><td>vsync 预测</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></td><td><code>nextAnticipatedVSyncTimeFrom</code></td><td>时间戳的来源是模型而非回读</td></tr><tr><td>帧轨迹</td><td><code>frameworks/native/libs/gui/FrameTimestamps.cpp</code></td><td><code>getFrame</code>、<code>checkFencesForCompletion</code>、<code>updateAcquireFence</code></td><td>阶段时刻的对账数据</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">grep -n &quot;CALLBACK_INPUT\|CALLBACK_ANIMATION\|CALLBACK_INSETS_ANIMATION\|CALLBACK_TRAVERSAL\|CALLBACK_COMMIT\|CALLBACK_LAST&quot; \
+  frameworks/base/core/java/android/view/Choreographer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：六个常量分别落在 <code>:321</code>、<code>:328</code>、<code>:344</code>、<code>:351</code>、<code>:363</code>、<code>:365</code>，且 <code>CALLBACK_LAST</code> 等于 <code>CALLBACK_COMMIT</code>。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/core/java/android/view/Choreographer.java \
+      frameworks/base/core/java/android/view/DisplayEventReceiver.java \
+      frameworks/native/libs/gui/DisplayEventDispatcher.cpp \
+      frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp \
+      frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp \
+      frameworks/native/libs/gui/FrameTimestamps.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：依次为 1741、404、237、905、987、808。</p>
+<pre><code class="lang-bash">grep -n &quot;FRAME_CALLBACK_TOKEN\|VSYNC_CALLBACK_TOKEN\|mFrameIntervalNanos =\|USE_VSYNC&quot; \
+  frameworks/base/core/java/android/view/Choreographer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：两个 token 在 <code>:186</code>、<code>:189</code>，<code>USE_VSYNC</code> 在 <code>:160</code>，<code>mFrameIntervalNanos</code> 计算式在 <code>:379</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;scheduleFrameLocked\|doFrame\|class FrameDisplayEventReceiver\|onVsync&quot; \
+  frameworks/base/core/java/android/view/Choreographer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>scheduleFrameLocked</code> 在 <code>:919</code>，<code>doFrame</code> 在 <code>:1074</code>，<code>FrameDisplayEventReceiver</code> 在 <code>:1579</code>，其 <code>onVsync</code> 在 <code>:1594</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;mChoreographer\|scheduleTraversals\|postVsyncCallback\|performTraversals&quot; \
+  frameworks/base/core/java/android/view/ViewRootImpl.java | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>mChoreographer</code> 字段在 <code>:692</code>、初始化在 <code>:1440</code>，<code>scheduleTraversals</code> 在 <code>:3307</code>，<code>postVsyncCallback</code> 调用在 <code>:3330</code>，<code>performTraversals</code> 在 <code>:3351</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;requestNextVsync\|sendEvents\|scheduleVsync\|injectEvent&quot; \
+  frameworks/native/libs/gui/DisplayEventDispatcher.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>scheduleVsync</code> 在 <code>:79</code>，<code>requestNextVsync</code> 在 <code>:93</code>，<code>injectEvent</code> 在 <code>:105</code>，<code>sendEvents</code> 在 <code>:106</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;nextAnticipatedVSyncTimeFrom&quot; \
+  frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：命中 <code>:380</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`doFrame` 耗时小于帧周期就不会掉帧。</strong> 错。<code>doFrame</code> 只覆盖 CPU 侧的测量与录制，GPU 提交与合成还在后面。判断依据是这条管线整体是否在下一个 vsync 前闭环。</p>
+<p><strong>误区二：vsync 时间戳是硬件真实回读值。</strong> 错。应用侧拿到的时间来自 <code>nextAnticipatedVSyncTimeFrom</code> 的预测，它随刷新率与历史间隔变化，因此会看到「时快时慢」。</p>
+<p><strong>误区三：`Choreographer` 是一个 16 ms 定时器。</strong> 看起来对，其实是错的。它是事件驱动：只有在有回调登记时才 <code>scheduleFrameLocked</code> 去要 vsync，没有工作时不会空转。所谓「16 ms」只是 <code>mFrameIntervalNanos</code> 这个折算值。</p>
+<p><strong>误区四：traversal 和动画回调必然同一帧。</strong> 未必。两者虽然都在同一个 <code>doFrame</code> 里按 <code>0/1/2/3/4</code> 顺序执行，但如果在 <code>CALLBACK_ANIMATION</code> 里新登记了 traversal 回调，它进入的是下一次调度，而不是当前这一帧。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>postVsyncCallback</code> 与 <code>postFrameCallback</code> 行为不同？ <strong>答</strong>：两者用不同 token（<code>VSYNC_CALLBACK_TOKEN</code> 与 <code>FRAME_CALLBACK_TOKEN</code>）标识来源，前者语义是「下一次 vsync 一定通知我」，对齐的是 vsync 事件本身。 <strong>追问</strong>：那 traversal 为什么选后者？ <strong>答</strong>：<code>ViewRootImpl.scheduleTraversals</code> 走 <code>postVsyncCallback</code>，因为它需要的是「被 vsync 准时叫醒」而不是「下一帧的回调槽位」。</p>
+<p><strong>问</strong>：<code>onVsync</code> 间隔突然变成两帧是怎么回事？ <strong>答</strong>：上一次预约的 vsync 对应的帧没能在下一次合成前完成，SurfaceFlinger 侧没有可合成的新内容，于是应用侧看到的有效触发被推后。CPU 侧这一步有源码锚点：<code>doFrame</code> 在 <code>Choreographer.java:1124</code> 发现 <code>jitterNanos &gt;= frameIntervalNanos</code> 后把 <code>frameTimeNanos</code> 修正为 <code>startNanos</code> 并回退 <code>lastFrameOffset</code>（<code>:1129-1130</code>），<code>:1131</code> 据此算出 <code>skippedFrames</code>，超过 <code>SKIPPED_FRAME_WARNING_LIMIT</code> 时打印 <code>Skipped N frames!</code>（<code>:1132-1136</code>）——「两次 <code>onVsync</code> 之间跨了两个帧周期」在应用进程内有直接日志可点；GPU 提交到 SurfaceFlinger 合成的那一段仍是黑盒。 <strong>追问</strong>：<code>doFrame</code> 里能直接看出吗？ <strong>答</strong>：不一定，要结合 <code>FrameTimestamps</code> 里 <code>checkFencesForCompletion</code> 的结果看 fence 何时落地。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>回调取值为奇数跳过</td><td><code>grep -n &quot;CALLBACK_INSETS_ANIMATION = 2&quot; frameworks/base/core/java/android/view/Choreographer.java</code></td><td>命中 <code>:344</code>，且 <code>doFrame</code> 在 <code>:1206</code> 调到它</td><td>2 号位已定义为插值动画回调，不要按「连续枚举缺口」假设</td></tr><tr><td>帧预算算错</td><td><code>grep -n &quot;mFrameIntervalNanos =&quot; frameworks/base/core/java/android/view/Choreographer.java</code></td><td><code>:379</code> 的 <code>(long)(1000000000 / getRefreshRate())</code>，浮点除法后截断</td><td>用 <code>getRefreshRate()</code> 的实际返回值核算</td></tr><tr><td>怀疑 traversal 未挂上 vsync</td><td><code>grep -n &quot;postVsyncCallback&quot; frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td><code>scheduleTraversals</code> 内确有调用</td><td>追 <code>scheduleTraversals</code> 是否被调用</td></tr><tr><td>vsync 时间戳可疑</td><td><code>grep -n &quot;nextAnticipatedVSyncTimeFrom&quot; frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></td><td>时间来自预测函数</td><td>转 <code>AND-P6-201</code> 看预测器输入</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：SurfaceFlinger 侧调度与合成（<code>AND-P6-201</code>）；HWUI 渲染执行（<code>AND-P6-202</code>）；jank 分析方法（P10-202）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P6-201</code>。</li><li><strong>本篇后继</strong>：<code>AND-P6-202</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>回调类型取值 0/1/2/3/4，上界为 <code>CALLBACK_COMMIT</code>——来源：源码常量，<code>Choreographer.java:321</code>–<code>:365</code>。</li><li>帧预算由 <code>(long)(1000000000 / getRefreshRate())</code> 浮点除法后截断得出——来源：源码表达式，<code>:379</code>（<code>getRefreshRate()</code> 返回 <code>float</code>，<code>:391</code>）。</li><li>帧历史容量由 <code>INITIAL_MAX_FRAME_HISTORY</code> 定——来源：源码常量，<code>FrameTimestamps.cpp:171</code>。</li><li><code>Choreographer.java</code> 规模 1741 行——来源：实测 <code>wc -l</code>，口径 <code>android17-release</code>。</li><li>vsync 实际抖动幅度：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早于本树的历史版本</td><td>本篇不对历史版本的回调位构成做断言（单版本树无法核验，<code>CALLBACK_COMMIT</code> 的引入版本无本树出处）</td><td>读者按符号 grep 重锚，勿按本文行号跨版本套用</td></tr><tr><td><code>android17-release</code>（本树）</td><td>本树实测：<code>CALLBACK_COMMIT = 4</code> 且 <code>CALLBACK_LAST = CALLBACK_COMMIT</code>；<code>CALLBACK_INSETS_ANIMATION = 2</code> 已定义并进入 <code>doFrame</code>（:1206）</td><td>提交阶段与插值动画阶段都是本树的正式回调位，<code>doFrame</code> 末段有独立切入点</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>；developer.android.com 站内检索 <code>frame timing</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>Choreographer</code>、<code>DisplayEventDispatcher</code>、<code>VSyncPredictor</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/view/Choreographer.java</code>、<code>frameworks/native/libs/gui/DisplayEventDispatcher.cpp</code>、<code>frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp</code>。</li><li>承接篇：<code>AND-P6-201</code>、<code>AND-P6-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

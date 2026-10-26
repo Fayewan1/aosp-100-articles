@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图形与显示：DRM/KMS、vsync 与 TE 信号</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>图形与显示：DRM/KMS、vsync 与 TE 信号</h1>
+<div class="kv"><span>ID：AND-P5-401</span><span>卷：P5</span><span>章：5.4</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：external/kernel-headers/original/uapi/drm/drm.h ；external/kernel-headers/original/uapi/drm/drm_mode.h ；frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp ；frameworks/native/services/surfaceflinger/Scheduler/VSyncDispatch.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>显示子系统对用户态的契约只有两份 uapi 头文件：<code>external/kernel-headers/original/uapi/drm/drm.h</code>（1491 行）与 <code>drm_mode.h</code>（1552 行）。能不能等 vsync、等哪种 vsync，由 <code>DRM_IOCTL_GET_CAP</code> 返回的能力位和 <code>enum drm_vblank_seq_type</code> 的位组合共同决定，不是由 SurfaceFlinger 猜的。一次 vblank 到达在用户态可见两次：同步的 <code>union drm_wait_vblank</code> 回填 <code>sequence</code> 与 <code>tval_sec</code>／<code>tval_usec</code>，异步的 <code>struct drm_event_vblank</code> 经读事件队列送达。触摸面板的 TE 信号与 CRTC 的 vblank 是两条不同来源，前者不经过 DRM uapi，后者才落到 <code>drm_wait_vblank_reply</code>。抖动要分层看：先分清是 vblank 时间戳本身的离散，还是拿到时间戳之后的调度延迟。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P5-G01</code>，先建立「内核层对用户态只暴露 uapi 契约」的基本视角，本篇的所有断言都限定在这个面。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>external/kernel-headers/original/uapi/drm/drm.h</code></li><li><code>external/kernel-headers/original/uapi/drm/drm_mode.h</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/Scheduler/VSyncDispatch.h</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>线上反馈「滑动偶尔掉一帧」，你能拿到的是掉帧时刻的帧时间线和一条 vsync 时间戳。麻烦在于这条时间戳是同步等来的还是事件送达的，来源是哪个 CRTC，时间基是单调时钟还是别的，决定了你该去看应用侧调度还是看显示侧信号。第二个常见困惑是触摸采样率与刷新率对不上时，有人说「等 TE 信号」，但 TE 信号在 DRM uapi 里根本没有对应 ioctl。这两个问题都要回到头文件才能定论。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：CRTC（显示控制器管道的扫描单元）、vblank（垂直消隐期，一次扫描结束的标记）、TE（面板自刷新同步信号，由面板侧给出）。用户态只能通过 ioctl 与事件读接口触达前两者；TE 不经 DRM uapi，框架侧只能间接观察其效果。</p>
+<p>图 1：用户态到显示信号的可见面</p>
+<pre><code>用户态(框架/合成器)
+   |  ioctl(DRM_IOCTL_GET_CAP / SET_CLIENT_CAP)
+   |  ioctl(DRM_IOCTL_WAIT_VBLANK) -&gt; 同步回填 sequence
+   |  read(event fd)             -&gt; drm_event_vblank 异步送达
+   v
+DRM uapi 契约面 (drm.h / drm_mode.h)
+   |
+   v
+显示驱动 / 面板 (不在本树核验范围)</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>先定命名空间。<code>#define DRM_IOCTL_BASE 'd'</code>（drm.h:1094）是所有 ioctl 号的字符基址，四个构造宏 <code>DRM_IO</code>／<code>DRM_IOR</code>／<code>DRM_IOW</code>／<code>DRM_IOWR</code>（:1095-1098）按方向组合出具体命令号。方向宏决定载荷是只读、只写还是双向，这直接影响你能否信任回填字段。</p>
+<p>版本与能力协商分两步。<code>DRM_IOCTL_VERSION</code>（:1100）载荷是 <code>struct drm_version</code>（:139），拿到驱动名与版本串；<code>DRM_IOCTL_GET_CAP</code>（:1125）载荷是 <code>struct drm_get_cap</code>（:817），逐位问能力。能力位是「有没有」，不是「用不用」——用不用由后面的客户端能力声明决定。</p>
+<p>下面的表把本篇涉及的同族常量集中列出。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>DRM_CAP_DUMB_BUFFER</code> <code>0x1</code></td><td>支持 dumb buffer 分配</td><td>drm.h:665</td></tr><tr><td><code>DRM_CAP_VBLANK_HIGH_CRTC</code> <code>0x2</code></td><td>高位 CRTC 编号可用于 vblank</td><td>drm.h:674</td></tr><tr><td><code>DRM_CAP_DUMB_PREFERRED_DEPTH</code> <code>0x3</code></td><td>dumb buffer 首选色深</td><td>drm.h:688</td></tr><tr><td><code>DRM_CAP_DUMB_PREFER_SHADOW</code> <code>0x4</code></td><td>是否倾向影子缓冲</td><td>drm.h:700</td></tr><tr><td><code>DRM_CAP_PRIME</code> <code>0x5</code></td><td>PRIME 共享能力位</td><td>drm.h:713</td></tr><tr><td><code>DRM_CAP_TIMESTAMP_MONOTONIC</code> <code>0x6</code></td><td>vblank 时间戳用单调时钟</td><td>drm.h:743</td></tr><tr><td><code>DRM_CAP_ASYNC_PAGE_FLIP</code> <code>0x7</code></td><td>支持异步翻页</td><td>drm.h:750</td></tr></tbody></table>
+<p>上表是<strong>节选，不是穷举</strong>。本头文件的能力位定义实际有 15 个，从 <code>0x1</code> 排到 <code>DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP</code> <code>0x15</code>（drm.h:814）；本篇只取 <code>0x1</code>–<code>0x7</code>，因为它们与 vsync 等待直接相关。</p>
+<p>客户端能力声明走 <code>DRM_IOCTL_SET_CLIENT_CAP</code>（:1126），一次声明一类行为。位值 <code>DRM_CLIENT_CAP_STEREO_3D</code> <code>1</code>（:832）、<code>DRM_CLIENT_CAP_UNIVERSAL_PLANES</code> <code>2</code>（:843）、<code>DRM_CLIENT_CAP_ATOMIC</code> <code>3</code>（:859）、<code>DRM_CLIENT_CAP_ASPECT_RATIO</code> <code>4</code>（:870），其后还有 <code>WRITEBACK_CONNECTORS</code> <code>5</code>（:882）、<code>CURSOR_PLANE_HOTSPOT</code> <code>6</code>（:907）、<code>PLANE_COLOR_PIPELINE</code> <code>7</code>（:922），共 7 个。注释明确写了 ATOMIC 会隐式启用 UNIVERSAL_PLANES 与 ASPECT_RATIO（:846-850）——这是最容易漏读的一条，声明 ATOMIC 等于一次拿到三项。</p>
+<p>主控权是两个成对的老式 ioctl：<code>DRM_IOCTL_SET_MASTER</code> <code>0x1e</code>（:1145）与 <code>DRM_IOCTL_DROP_MASTER</code> <code>0x1f</code>（:1146）。它们管的是「谁是当前 DRM 主控」，与 vblank 等待无关，别混用。</p>
+<p>vblank 等待的语义由 <code>enum drm_vblank_seq_type</code>（drm.h:477）编码。<code>_DRM_VBLANK_ABSOLUTE</code> <code>0x0</code>（:478）与 <code>_DRM_VBLANK_RELATIVE</code> <code>0x1</code>（:479）是序号解释基准，二者互斥。<code>_DRM_VBLANK_EVENT</code> <code>0x4000000</code>（:482）把等待改为事件注册，不阻塞。<code>_DRM_VBLANK_FLIP</code> <code>0x8000000</code>（:483）绑定翻页。<code>_DRM_VBLANK_NEXTONMISS</code> <code>0x10000000</code>（:484）处理错过目标的语义。<code>_DRM_VBLANK_SECONDARY</code> <code>0x20000000</code>（:485）选次 CRTC。<code>_DRM_VBLANK_SIGNAL</code> <code>0x40000000</code>（:486）注释直接标了 unsupported，不要在代码里依赖它。</p>
+<p>类型与标志的分界由掩码给出：<code>_DRM_VBLANK_TYPES_MASK</code>（:490）实际只覆盖 bit 0——它是 <code>_DRM_VBLANK_ABSOLUTE | _DRM_VBLANK_RELATIVE</code>，即 <code>0x1</code>，<strong>单比特</strong>；<code>_DRM_VBLANK_FLAGS_MASK</code>（:491-492）覆盖 <code>0x4000000</code> 及以上的行为标志；bit 1 到 bit 6 既不属于前两者，由 <code>_DRM_VBLANK_HIGH_CRTC_MASK</code> <code>0x0000003e</code>（:481）界定，专放高位 CRTC 编号（<code>_DRM_VBLANK_HIGH_CRTC_SHIFT</code> <code>1</code>，:488）。构造请求时三段各归各位，否则组合出的语义不可预期。</p>
+<p>上面那串位值可以按分区记，不用逐个背：</p>
+<p>图 2：vblank 请求 type 的三段分区</p>
+<pre><code>   request.type (__u32) 由三段拼成，语义不可混放
+
+     bit 0                    TYPES 区（序号基准，掩码 0x1，仅此一位）
+      _DRM_VBLANK_ABSOLUTE 0x0    指定 sequence
+      _DRM_VBLANK_RELATIVE 0x1    相对当前，二者互斥
+                             ----
+     bits 1-6                 高位 CRTC 编号区（掩码 0x3e）
+      _DRM_VBLANK_HIGH_CRTC_SHIFT 1    编号左移量
+      _DRM_VBLANK_HIGH_CRTC_MASK  0x3e  这一段专放高位 CRTC 编号
+                             ----
+     0x4000000 及以上          FLAGS 区（行为标志）
+      _DRM_VBLANK_EVENT      0x4000000   注册事件，不阻塞
+      _DRM_VBLANK_FLIP       0x8000000   绑定翻页
+      _DRM_VBLANK_NEXTONMISS 0x10000000  错过目标时的取法
+      _DRM_VBLANK_SECONDARY  0x20000000  选次 CRTC
+      _DRM_VBLANK_SIGNAL     0x40000000  注释标 unsupported，勿依赖
+
+    分区掩码：_DRM_VBLANK_TYPES_MASK(0x1) / _DRM_VBLANK_HIGH_CRTC_MASK(0x3e)
+              / _DRM_VBLANK_FLAGS_MASK</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>载荷三个结构体配套：<code>struct drm_wait_vblank_request</code>（:494）是入参，<code>struct drm_wait_vblank_reply</code>（:500）是同步回填，<code>union drm_wait_vblank</code>（:512）把二者映射在同一内存布局上。同步回填的字段是 <code>type</code>、<code>sequence</code>、<code>tval_sec</code>、<code>tval_usec</code>（:500-505）——<strong>时间戳字段名是 `tval_` 前缀，不是 `tv_`</strong>。异步路径用 <code>struct drm_event_vblank</code>（:1423），字段为 <code>base</code>＋<code>user_data</code>＋<code>tv_sec</code>／<code>tv_usec</code>＋<code>sequence</code>＋<code>crtc_id</code>。两条路径字段名不同，读代码时容易看混。CRTC 归属也要分清：<code>drm_wait_vblank_reply</code> 里没有 <code>crtc_id</code>，但本树另有两个同步 IOWR ioctl 的回填显式带 <code>crtc_id</code> 与 <code>sequence_ns</code>（<code>DRM_IOCTL_CRTC_GET_SEQUENCE</code>，:1209；<code>DRM_IOCTL_CRTC_QUEUE_SEQUENCE</code>，:1210）——「同步回填一律无 crtc_id」是以偏概全。</p>
+<p>模式侧，<code>drm_mode.h</code> 的两组位要先分清。类型位：<code>DRM_MODE_TYPE_PREFERRED</code> <code>(1&lt;&lt;3)</code>（:52）、<code>DRM_MODE_TYPE_DEFAULT</code> <code>(1&lt;&lt;4)</code>（:53，注释 deprecated）、<code>DRM_MODE_TYPE_USERDEF</code> <code>(1&lt;&lt;5)</code>（:54）、<code>DRM_MODE_TYPE_DRIVER</code> <code>(1&lt;&lt;6)</code>（:55），聚合位 <code>DRM_MODE_TYPE_ALL</code>（:57-59）。极性位：<code>DRM_MODE_FLAG_PHSYNC</code> <code>(1&lt;&lt;0)</code>（:71）、<code>DRM_MODE_FLAG_NHSYNC</code> <code>(1&lt;&lt;1)</code>（:72）、<code>DRM_MODE_FLAG_PVSYNC</code> <code>(1&lt;&lt;2)</code>（:73）、<code>DRM_MODE_FLAG_NVSYNC</code> <code>(1&lt;&lt;3)</code>（:74）、<code>DRM_MODE_FLAG_INTERLACE</code> <code>(1&lt;&lt;4)</code>（:75）。极性位影响的是扫描时序，与 vblank 序号是否连续无关——两件事别互相推断。</p>
+<p>承载结构是 <code>struct drm_mode_crtc</code>（drm_mode.h:277），它内嵌 <code>struct drm_mode_modeinfo mode</code>（:289）；<code>struct drm_mode_modeinfo</code>（:242）才是模式信息本体。也就是说 CRTC 状态里直接带模式，不需要另开一次查询。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设一个合成器要等下一拍 vblank 并拿到时间戳。步骤：</p>
+<p>先 <code>DRM_IOCTL_VERSION</code>（:1100）确认驱动，再 <code>DRM_IOCTL_GET_CAP</code>（:1125）问 <code>DRM_CAP_TIMESTAMP_MONOTONIC</code> <code>0x6</code>（:743）。返回位有效，说明同步回填的 <code>tval_sec</code>／<code>tval_usec</code> 与异步事件的 <code>tv_sec</code>／<code>tv_usec</code> 都走单调时钟，可以和应用侧的时钟直接比对；若该位无效则必须换算，否则掉帧归因会整体偏移。</p>
+<p>然后 <code>DRM_IOCTL_SET_CLIENT_CAP</code>（:1126）声明 <code>DRM_CLIENT_CAP_ATOMIC</code> <code>3</code>（:859）。按注释（:846-850），这一步同时启用了 UNIVERSAL_PLANES 与 ASPECT_RATIO，不必再发两次。</p>
+<p>最后填 <code>union drm_wait_vblank</code>（:512）：<code>request.type</code> 写 <code>_DRM_VBLANK_RELATIVE</code> <code>0x1</code>（:479）表示「下一拍」，或写 <code>_DRM_VBLANK_ABSOLUTE</code> <code>0x0</code>（:478）表示「指定序号」。若不想阻塞，加 <code>_DRM_VBLANK_EVENT</code> <code>0x4000000</code>（:482），改从事件 fd 读 <code>struct drm_event_vblank</code>（:1423），用其中的 <code>sequence</code> 与 <code>crtc_id</code> 两条信息做多屏归因。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置：<code>AND-P5-G01</code> 提供内核层与用户态契约的总视角。</li><li>下游：SurfaceFlinger 怎么把拿到的 vsync 分发给各合成者、怎么排调度，归 <code>AND-P6-201</code>；本篇只到「时间戳到手」为止。</li><li>边界：HWC 的提交协议归 <code>AND-P4-202</code>，本篇不涉及图层合成语义。</li><li>本篇与二者共享同一条时间轴的上下游，但断言互不重叠。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>ioctl 命名空间与版本</td><td><code>external/kernel-headers/original/uapi/drm/drm.h</code></td><td><code>DRM_IOCTL_BASE</code>、<code>DRM_IO</code>／<code>DRM_IOR</code>／<code>DRM_IOW</code>／<code>DRM_IOWR</code>、<code>DRM_IOCTL_VERSION</code></td><td>命令号构造规则</td></tr><tr><td>能力与客户端声明</td><td><code>external/kernel-headers/original/uapi/drm/drm.h</code></td><td><code>struct drm_get_cap</code>、<code>DRM_CAP_*</code>、<code>DRM_CLIENT_CAP_*</code></td><td>能力位与声明位分离</td></tr><tr><td>vblank 等待语义</td><td><code>external/kernel-headers/original/uapi/drm/drm.h</code></td><td><code>enum drm_vblank_seq_type</code>、<code>_DRM_VBLANK_TYPES_MASK</code>／<code>_DRM_VBLANK_HIGH_CRTC_MASK</code>／<code>_DRM_VBLANK_FLAGS_MASK</code></td><td>序号基准、高位 CRTC 与行为标志三段分区</td></tr><tr><td>vblank 载荷与事件</td><td><code>external/kernel-headers/original/uapi/drm/drm.h</code></td><td><code>union drm_wait_vblank</code>、<code>struct drm_event_vblank</code></td><td>同步回填与异步送达</td></tr><tr><td>模式信息载体</td><td><code>external/kernel-headers/original/uapi/drm/drm_mode.h</code></td><td><code>struct drm_mode_modeinfo</code>、<code>struct drm_mode_crtc</code></td><td>CRTC 状态内嵌模式</td></tr><tr><td>模式类型与极性位</td><td><code>external/kernel-headers/original/uapi/drm/drm_mode.h</code></td><td><code>DRM_MODE_TYPE_*</code>、<code>DRM_MODE_FLAG_*</code></td><td>类型与扫描时序分属两族</td></tr><tr><td>框架侧对照点</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></td><td><code>AidlComposer::namesAnAidlComposerService</code></td><td>双栈选择点，仅作对照</td></tr><tr><td>框架侧 vsync 分派</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/VSyncDispatch.h</code></td><td>分派接口声明</td><td>时间戳到手之后的事，归 <code>AND-P6-201</code></td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：external/kernel-headers:68a96878f2ce</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">wc -l external/kernel-headers/original/uapi/drm/drm.h \
+      external/kernel-headers/original/uapi/drm/drm_mode.h</code></pre>
+<p>期望输出 <code>1491</code> 与 <code>1552</code> 两行，对上事实 1 的行数。</p>
+<pre><code class="lang-bash">grep -n &quot;DRM_IOCTL_BASE\|define DRM_IO\b\|define DRM_IOR\|define DRM_IOW\|define DRM_IOWR&quot; \
+  external/kernel-headers/original/uapi/drm/drm.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>'d'</code> 与四个构造宏，行号集中在 1094–1098。</p>
+<pre><code class="lang-bash">grep -n &quot;DRM_CAP_DUMB_BUFFER\|DRM_CAP_VBLANK_HIGH_CRTC\|DRM_CAP_TIMESTAMP_MONOTONIC\|DRM_CAP_ASYNC_PAGE_FLIP&quot; \
+  external/kernel-headers/original/uapi/drm/drm.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望四个 <code>#define</code> 各带 <code>0x1</code>／<code>0x2</code>／<code>0x6</code>／<code>0x7</code>。若改用 <code>grep -c '^#define DRM_CAP_'</code>，本树命中 15，末行为 <code>DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP 0x15</code>（:814）——本篇表格只节选 <code>0x1</code>–<code>0x7</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;DRM_CLIENT_CAP_&quot; external/kernel-headers/original/uapi/drm/drm.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到七个定义（位值 1–7，末行为 <code>PLANE_COLOR_PIPELINE</code>），及注释里 ATOMIC 隐式启用另两项的说明行。</p>
+<pre><code class="lang-bash">grep -n &quot;_DRM_VBLANK_&quot; external/kernel-headers/original/uapi/drm/drm.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出 <code>0x0</code>／<code>0x1</code>／<code>0x4000000</code>／<code>0x8000000</code>／<code>0x10000000</code>／<code>0x20000000</code>／<code>0x40000000</code> 七个类型／标志值，加四个掩码与移位常量：<code>HIGH_CRTC_SHIFT</code> <code>1</code>（:488）、<code>HIGH_CRTC_MASK</code> <code>0x3e</code>（:481）、<code>TYPES_MASK</code>（:490，仅 bit 0）、<code>FLAGS_MASK</code>（:491-492）。</p>
+<pre><code class="lang-bash">grep -n &quot;struct drm_wait_vblank_request\|struct drm_wait_vblank_reply\|union drm_wait_vblank\|struct drm_event_vblank&quot; \
+  external/kernel-headers/original/uapi/drm/drm.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望四处命中，对上一节载荷描述。</p>
+<pre><code class="lang-bash">grep -n &quot;DRM_MODE_TYPE_PREFERRED\|DRM_MODE_FLAG_INTERLACE\|struct drm_mode_modeinfo\|struct drm_mode_crtc&quot; \
+  external/kernel-headers/original/uapi/drm/drm_mode.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望类型位、极性位、模式载体与 CRTC 结构各命中至少一处。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。驱动实现不在本树核验范围。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 `DRM_IOCTL_SET_MASTER` 和 vblank 等待是一套。</strong> 两者是不同面：主控权解决「谁独占 DRM」，vblank 等待解决「什么时候扫描完一拍」，一个工具进程可以只做后者。</p>
+<p><strong>误区二：以为声明了 ATOMIC 就只改了原子提交。</strong> 注释写明（:846-850）它会隐式启用 <code>DRM_CLIENT_CAP_UNIVERSAL_PLANES</code> 与 <code>DRM_CLIENT_CAP_ASPECT_RATIO</code>。你以为只开了一扇门，实际开了三扇。</p>
+<p><strong>误区三（看着对其实错）：以为 `DRM_CAP_VBLANK_HIGH_CRTC` 有效就代表能等到所有 CRTC 的高位编号。</strong> 它只说明高位编号可以放进请求，具体某个 CRTC 是否可用还要看该 CRTC 是否被当前主控占有、是否已启用。能力位是必要条件，不是充分条件。</p>
+<p><strong>误区四：以为 TE 信号有对应的 DRM ioctl。</strong> <code>drm.h</code> 里没有 TE 相关的命令。面板 TE 由面板侧产生，用户态只能通过驱动的间接效果观察，不能直接等。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：同步等和事件等，时间戳会不一样吗？ <strong>答</strong>：两者都回传 <code>sequence</code> 与一对秒／微秒字段，时钟基由 <code>DRM_CAP_TIMESTAMP_MONOTONIC</code> <code>0x6</code>（:743）决定，与等待方式无关。差别在字段名与送达时机：同步路径用 <code>tval_sec</code>／<code>tval_usec</code>（<code>struct drm_wait_vblank_reply</code>，:503-504），返回时已有值；事件路径用 <code>tv_sec</code>／<code>tv_usec</code>（<code>struct drm_event_vblank</code>，:1426-1427），要等读事件 fd 才拿到。<strong>追问</strong>：那抖动该怪谁？<strong>答</strong>：若两条路径的时间戳本身一致，抖动就发生在拿到时间戳之后的调度段，那属于 <code>AND-P6-201</code> 的范围。</p>
+<p><strong>问</strong>：多个 CRTC 时怎么知道回填的序号属于谁？ <strong>答</strong>：<code>union drm_wait_vblank</code> 的同步回填里没有 CRTC 标识，<code>struct drm_event_vblank</code>（:1423）里有 <code>crtc_id</code>，多屏归因优先走事件路径。<strong>追问</strong>：那同步路径能补救吗？<strong>答</strong>：能，且不止 <code>_DRM_VBLANK_SECONDARY</code> <code>0x20000000</code>（:485）一条路——本树还有两个走同步 IOWR、回填显式带 <code>crtc_id</code> 与 <code>sequence_ns</code> 的 ioctl：<code>DRM_IOCTL_CRTC_GET_SEQUENCE</code>（:1209）与 <code>DRM_IOCTL_CRTC_QUEUE_SEQUENCE</code>（:1210）。也就是说「同步回填一律无 crtc_id」并不成立，多屏归因有第二条同步路径可选。若仍用 <code>union drm_wait_vblank</code>，则只能在请求侧用 <code>_DRM_VBLANK_SECONDARY</code> 或高位 CRTC 编号把请求绑到某个 CRTC，靠自己记账区分。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑时间戳时钟基不对</td><td><code>grep -n &quot;DRM_CAP_TIMESTAMP_MONOTONIC&quot; external/kernel-headers/original/uapi/drm/drm.h</code></td><td>定义与注释里的时钟语义</td><td>在运行侧读 <code>struct drm_get_cap</code> 返回值，确认该位是否置起</td></tr><tr><td>等待请求被拒</td><td><code>grep -n &quot;_DRM_VBLANK_TYPES_MASK|_DRM_VBLANK_HIGH_CRTC_MASK|_DRM_VBLANK_FLAGS_MASK&quot; external/kernel-headers/original/uapi/drm/drm.h</code></td><td>三个掩码的行号与取值</td><td>检查请求 <code>type</code> 是否把基准位、高位 CRTC 与标志位叠错区</td></tr><tr><td>用了 <code>_DRM_VBLANK_SIGNAL</code> 无效果</td><td><code>grep -n &quot;_DRM_VBLANK_SIGNAL&quot; external/kernel-headers/original/uapi/drm/drm.h</code></td><td>该行注释</td><td>换 <code>_DRM_VBLANK_EVENT</code> <code>0x4000000</code> 路径</td></tr><tr><td>模式极性判断反了</td><td><code>grep -n &quot;DRM_MODE_FLAG_PHSYNC|DRM_MODE_FLAG_NVSYNC&quot; external/kernel-headers/original/uapi/drm/drm_mode.h</code></td><td>极性位定义</td><td>回到 <code>struct drm_mode_modeinfo</code> 里逐位解析，别用类型位代替</td></tr><tr><td>想确认内核头是否被本地改过</td><td><code>git log -1 --format=%H -- external/kernel-headers/original/uapi/drm/drm.h</code></td><td>最近一次提交</td><td>与上游对照，排除本地补丁</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：SurfaceFlinger 的 vsync 分发与调度（<code>AND-P6-201</code>）；HWC 提交协议（<code>AND-P4-202</code>）；DRM 驱动内部实现，包括 <code>drm_vblank.c</code> 与面板 TE 中断处理——这两处不在本树核验范围，本篇不作行级断言。</li><li><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>。</li><li><strong>本篇后继</strong>：<code>AND-P6-201</code>、<code>AND-P4-202</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>drm.h</code> 行数 1491、<code>drm_mode.h</code> 行数 1552，口径为 2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>（源码常量）。</li><li>vblank 请求 <code>type</code> 三段分区：序号基准只用 <code>0x0</code>／<code>0x1</code>（<code>TYPES_MASK</code> 仅 bit 0），高位 CRTC 编号占 bits 1-6（<code>HIGH_CRTC_MASK</code> <code>0x3e</code>，:481），行为标志占 <code>0x4000000</code>–<code>0x40000000</code>；口径为头文件常量定义。</li><li>能力位 15 个（<code>0x1</code>–<code>0x15</code>）、客户端能力位 7 个（1–7），本篇表格为节选；口径为 <code>grep -c</code> 实测。</li><li><code>DRM_CLIENT_CAP_ATOMIC</code> 隐式启用两项，口径为头文件注释（:846-850）。</li><li>一次 vblank 事件在事件 fd 上占用的字节数由 <code>struct drm_event_vblank</code> 布局决定，字段含 <code>base</code>／<code>user_data</code>／<code>tv_sec</code>／<code>tv_usec</code>／<code>sequence</code>／<code>crtc_id</code>；精确字节数取决于各字段位宽与对齐，暂无实测，列为待补。</li><li>面板 TE 信号周期与刷新率的关系属面板规格，DRM uapi 中无对应常量，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树实测）</td><td><code>drm.h</code> 1491 行、<code>drm_mode.h</code> 1552 行；能力位实际到 <code>DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP</code> <code>0x15</code>（本篇集中节选 <code>0x1</code>–<code>0x7</code>）；客户端能力位到 <code>DRM_CLIENT_CAP_PLANE_COLOR_PIPELINE</code> <code>7</code></td><td>本篇所有行号与取值以此次为准</td></tr><tr><td>更早版本（未在本树核验）</td><td>客户端能力位数量与注释措辞可能不同，ATOMIC 隐式启用的注释位置可能漂移</td><td>按符号 grep 重锚，不要按行号硬定位</td></tr><tr><td>任一版本</td><td><code>_DRM_VBLANK_SIGNAL</code> 长期标注 unsupported</td><td>跨版本都不应依赖该位</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>drm HWC</code>；kernel.org 站内检索 <code>drm uapi vblank</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>kernel-headers drm</code>、<code>vsync dispatch</code>。</li><li>本仓关键路径：<code>external/kernel-headers/original/uapi/drm/drm.h</code>、<code>external/kernel-headers/original/uapi/drm/drm_mode.h</code>、<code>frameworks/native/services/surfaceflinger/Scheduler/VSyncDispatch.h</code>。</li><li>承接篇：<code>AND-P6-201</code>、<code>AND-P4-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P5-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

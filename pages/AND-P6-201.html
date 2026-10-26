@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurfaceFlinger：合成策略、Buffer 队列与 vsync 模型</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>SurfaceFlinger：合成策略、Buffer 队列与 vsync 模型</h1>
+<div class="kv"><span>ID：AND-P6-201</span><span>卷：P6</span><span>章：6.2</span><span>难度：5</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp ；frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp ；frameworks/native/services/surfaceflinger/DisplayDevice.cpp ；frameworks/native/services/surfaceflinger/Scheduler/Scheduler.cpp ；frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp ；frameworks/native/services/surfaceflinger/Scheduler/RefreshRateSelector.cpp ；frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp ；frameworks/native/services/surfaceflinger/DisplayHardware/HWComposer.cpp ；frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp ；frameworks/native/libs/gui/SurfaceComposerClient.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>SurfaceFlinger 是一个以 vsync 为节拍的循环进程：<code>run()</code> 把主循环交给 <code>SurfaceFlinger::commit()</code>，后者按 pacesetter 显示屏的帧目标判断这一帧是否触发 HWC 背压，再决定这次是走合成、走 GPU 合成回退还是「等下一个 vsync」。丢帧计数（<code>didMissFrame()</code>）只进 <code>mTimeStats</code> 统计，不参与这个控制流。vsync 不是硬件直接送到应用的，而是由 <code>Scheduler</code> 创建的 <code>EventThread</code> 按 <code>VSyncPredictor</code> 外推的时间点分发。合成路径最终落到 <code>HWComposer</code>，由它把层组合成 <code>getDeviceCompositionChanges</code> 请求的 HWC 接口形态；驱动能不能接、接多少层，决定这一帧是 GPU 合成还是硬件合成。抖动的根因通常不在合成代码本身，而在 pacesetter 帧目标、vsync 预测周期与刷新率切换三者对不齐。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P6-102</code>（BufferQueue 的槽位、队列与释放节奏是理解「合成取到哪一帧」的前提）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/Scheduler/Scheduler.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/HWComposer.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></li><li><code>frameworks/native/libs/gui/SurfaceComposerClient.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任何近版本都可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个动画在 120Hz 屏上偶尔卡一帧，<code>dumpsys SurfaceFlinger</code> 里却看不出谁慢。另一种现象：滑动列表时帧率忽高忽低，帧间隔呈锯齿状，而应用侧 Choreographer 回调时间看起来是均匀的。再一种：接上外接屏后，主屏的动画节奏跟着变了。</p>
+<p>这三种现象指向同一个地方：SurfaceFlinger 进程内的帧节拍编排。它决定「这一帧什么时候被允许开始合成」「按哪个屏的 vsync 排队」「合成不成时是等还是丢」。本篇只讲 SurfaceFlinger 进程内的调度与合成编排，不展开队列内部实现，也不讲应用侧帧调度。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个角色：pacesetter 显示屏给出帧目标；<code>Scheduler</code> 管理 vsync 周期与 <code>EventThread</code>；<code>EventThread</code> 把 vsync 分发给应用与 SurfaceFlinger 自己；<code>HWComposer</code> 把这次合成提交给显示硬件。它们围绕同一个时间轴对齐。</p>
+<p>图 1：SurfaceFlinger 内 vsync 与合成的角色关系</p>
+<pre><code>  [ pacesetter 显示屏 ]
+          |
+          v
+  [ Scheduler ] --&gt; [ EventThread(&quot;app&quot;) ] --&gt; 应用侧
+      |                    |
+      |                    v
+      +-------------&gt; [ SurfaceFlinger 主循环 commit() ]
+                           |
+                           v
+                     [ HWComposer ] --&gt; 显示硬件</code></pre>
+<p><code>Scheduler</code> 持有 <code>VSyncSchedule</code>，<code>EventThread</code> 用它外推下一个 vsync 时刻。<code>commit()</code> 向 <code>Scheduler</code> 要 pacesetter 的帧目标，比对是否已经丢帧，再进入合成。合成结果经 <code>HWComposer</code> 提交。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>主循环的形状。</strong> 进程入口 <code>main_surfaceflinger.cpp:71</code> 调用 <code>ProcessState::self()-&gt;setThreadPoolMaxThreadCount(4)</code>，把 Binder 线程池显式设为 4；这对 SurfaceFlinger 有意义，因为 <code>SurfaceComposerClient</code> 的事务、<code>createSurface</code>、<code>setDisplayPowerMode</code> 等调用都要落到这个池里。<code>SurfaceFlinger::run()</code> 在 :626，<code>init()</code> 在 :938。主循环本身不含复杂逻辑，真正的编排在 <code>commit()</code>。</p>
+<p><strong>commit 的两段结构。</strong> <code>SurfaceFlinger::commit(PhysicalDisplayId pacesetterId, ...)</code> 在 :2996。入口处 :2998 即 <code>const scheduler::FrameTarget* pacesetterFrameTargetPtr = frameTargets.get(pacesetterId)-&gt;get()</code>——从传入的 <code>frameTargets</code> 取节拍主屏的帧目标指针，此后贯穿使用；:3143 与 :3186 的 <code>pacesetterFrameTargetPtr = mScheduler-&gt;pacesetterFrameTarget()</code> 是两次防御性重取：前者在 <code>updateLayerSnapshots</code>（:3138-3140）之后，源码注释明示「A display transaction for hotplug reconnect may have just destroyed the original.」；后者在分辨率切换块之后（:3184-3187），注释为「A resolution change without refresh required may have just destroyed the original.」。三级判定都发生在入口取指之后、两次重取之前，用的都是 :2998 的入口指针：:3014 的 <code>didMissFrame()</code> 只把结果交给 <code>mTimeStats-&gt;incrementMissedFrames()</code>（:3015），是丢帧计数，不是控制门；:3026-3030 显示屏已移除时 <code>return false</code> 并 <code>scheduleFrame()</code>；:3036-3043 有 mode set 未完成时同样提前返回。真正的合成跳过门在 :3059-3066：<code>pacesetterFrameTargetPtr-&gt;wouldBackpressureHwc()</code> 为真，且（<code>mBackpressureGpuComposition</code> 或 <code>pacesetterFrameTargetPtr-&gt;didMissHwcFrame()</code>）时，:3064 <code>scheduleCommit(FrameHint::kNone, slack)</code> 后 <code>return false</code>。三个查询方法的语义差异见 <code>FrameTargeter.h:64-66</code>：<code>wouldBackpressureHwc</code> 是 <code>mWouldBackpressureHwc</code>（控制流门），<code>didMissFrame</code> 是 <code>mFrameMissed</code>（仅供统计），<code>didMissHwcFrame</code> 是 <code>mHwcFrameMissed &amp;&amp; !mGpuFrameMissed</code>（驱动错帧门）。合成函数是 <code>CompositeResultsPerDisplay SurfaceFlinger::composite(...)</code>，在 :3330。于是「这一帧要不要做、做完算不算迟到」在进入合成之前就已经有结论。</p>
+<p><strong>Scheduler 的职责边界。</strong> <code>Scheduler.cpp</code> 构造函数在 :59；<code>Scheduler::createEventThread</code> 在 :583，内部 :585-586 执行 <code>std::make_unique&lt;android::impl::EventThread&gt;(&quot;app&quot;, getVsyncSchedule(), tokenManager, ...)</code>——注意名字字面量是 <code>&quot;app&quot;</code>，即面向应用的连接线程由 Scheduler 创建。<code>setVsyncConfig</code> 在 :802，<code>dispatchHotplug</code> 在 :612。热插拔走的是 <code>dispatchHotplug</code>，不是简单的「重新读一遍显示列表」。</p>
+<p><strong>vsync 是预测出来的。</strong> <code>VSyncPredictor.cpp</code> 构造函数在 :58，<code>VSyncPredictor::nextAnticipatedVSyncTimeFrom</code> 在 :380，内部转调 <code>VsyncTimeline::nextAnticipatedVSyncTimeFrom</code>（:851）。也就是说分发出去的 vsync 时刻是外推值，不是硬件中断到达时刻。这一层外推是「帧间隔看起来均匀但偶发错拍」的直接来源。</p>
+<p><strong>EventThread 的连接与请求。</strong> <code>EventThread::EventThread</code> 在 :311，<code>createEventConnection</code> 在 :365，<code>EventThreadConnection::requestNextVsync</code> 在 :264，<code>EventThread::onVsync</code> 在 :472。应用「要下一个 vsync」是一次显式请求，SurfaceFlinger 在对应时刻回调；请求与回调之间隔着预测器的外推。</p>
+<p><strong>刷新率选择器。</strong> <code>RefreshRateSelector.cpp</code> 构造函数在 :1422。它是 pacesetter 帧目标周期变化的来源之一，与 <code>Scheduler::setVsyncConfig</code> 配合决定周期。</p>
+<p><strong>HWC 侧。</strong> <code>HWComposer.cpp</code> 有两个构造函数，分别在 :84 与 :91；<code>setVsyncEnabled</code> 在 :502，<code>getDeviceCompositionChanges</code> 在 :537，<code>getMaxVirtualDisplayCount</code> 在 :192。<code>getDeviceCompositionChanges</code> 是「这一帧能不能整屏硬件合成」的询问点。<code>ComposerHal.cpp</code> 只有 34 行，<code>Composer::create(const std::string&amp; serviceName)</code> 在 :26，按服务名在 <code>AidlComposer</code> 与 <code>HidlComposer</code> 两个实现之间选择（类声明分别在 <code>AidlComposerHal.h:51</code> 与 <code>HidlComposerHal.h:162</code>，文件名带 Hal 后缀、类名不带）——composer HAL 的服务形态是运行期决定的。</p>
+<p><strong>DisplayDevice 与客户端入口。</strong> <code>DisplayDevice.cpp</code> 构造函数在 :59。客户端侧，<code>SurfaceComposerClient.cpp</code> 中 <code>getDefault</code> 在 :216、<code>Transaction::Transaction()</code> 在 :839、<code>createSurface</code> 在 :2678、<code>setDisplayPowerMode</code> 在 :3121；<code>ISurfaceComposer.h</code> 共 219 行，是被暴露给客户端的窄接口面。</p>
+<p>同族符号集中对照：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>pacesetterFrameTarget</code></td><td>节拍主屏的帧目标；:2998 入口取指并贯穿使用，:3143/:3186 为防御性重取</td><td><code>SurfaceFlinger.cpp:2998</code>；重取在 <code>:3143</code>、<code>:3186</code></td></tr><tr><td><code>didMissFrame</code></td><td>帧目标对象上的丢帧查询，只进 <code>mTimeStats</code> 统计</td><td><code>SurfaceFlinger.cpp:3014</code>；<code>FrameTargeter.h:65</code></td></tr><tr><td><code>wouldBackpressureHwc</code></td><td>HWC 背压查询，合成跳过的控制门</td><td><code>SurfaceFlinger.cpp:3059</code>；<code>FrameTargeter.h:64</code></td></tr><tr><td><code>didMissHwcFrame</code></td><td>HWC 错帧查询（GPU 未错时才为真）</td><td><code>SurfaceFlinger.cpp:3060</code>；<code>FrameTargeter.h:66</code></td></tr><tr><td><code>createEventThread</code></td><td>由 Scheduler 创建 vsync 分发线程</td><td><code>Scheduler.cpp:583</code></td></tr><tr><td><code>setVsyncConfig</code></td><td>设定 vsync 周期/配置</td><td><code>Scheduler.cpp:802</code></td></tr><tr><td><code>dispatchHotplug</code></td><td>显示热插拔事件入口</td><td><code>Scheduler.cpp:612</code></td></tr><tr><td><code>requestNextVsync</code></td><td>连接对象上申请下一个 vsync</td><td><code>EventThread.cpp:264</code></td></tr><tr><td><code>onVsync</code></td><td>vsync 到期后的分发回调</td><td><code>EventThread.cpp:472</code></td></tr><tr><td><code>getDeviceCompositionChanges</code></td><td>向 HWC 询问本帧合成方式</td><td><code>HWComposer.cpp:537</code></td></tr><tr><td><code>setVsyncEnabled</code></td><td>开关硬件 vsync 上报</td><td><code>HWComposer.cpp:502</code></td></tr></tbody></table>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设主屏是 pacesetter。某个 120Hz 周期内，应用在 <code>EventThreadConnection::requestNextVsync</code>（<code>EventThread.cpp:264</code>）登记了需求。<code>VSyncPredictor::nextAnticipatedVSyncTimeFrom</code>（<code>VSyncPredictor.cpp:380</code>）按当前周期外推出下一个时刻，<code>EventThread::onVsync</code>（:472）在预测时刻触发。</p>
+<p>应用完成一帧后提交缓冲区。SurfaceFlinger 主循环走到 <code>SurfaceFlinger::commit(PhysicalDisplayId pacesetterId, ...)</code>（<code>SurfaceFlinger.cpp:2996</code>），入口处 :2998 即从 <code>frameTargets</code> 取到 <code>pacesetterFrameTargetPtr</code>（<code>frameTargets.get(pacesetterId)-&gt;get()</code>）。下面三条路径的判定都使用这个入口指针——:3143 与 :3186 的 <code>mScheduler-&gt;pacesetterFrameTarget()</code> 是 <code>updateLayerSnapshots</code> 与分辨率切换之后的防御性重取，只影响其后的 VsyncTracker 回填与 trace，不参与下面的判定。</p>
+<ul><li>正常路径：没有提前返回条件时继续到 <code>composite(...)</code>（:3330），由 <code>HWComposer::getDeviceCompositionChanges</code>（<code>HWComposer.cpp:537</code>）决定合成路径并提交。</li><li>背压路径：入口指针的 <code>:3059</code> <code>wouldBackpressureHwc()</code> 为真且 <code>:3060</code>（<code>mBackpressureGpuComposition</code> 或 <code>didMissHwcFrame()</code>）成立时，<code>:3064</code> <code>scheduleCommit(FrameHint::kNone, slack)</code> 并 <code>return false</code>，这一帧不做合成，等下一个 vsync。</li><li>丢帧计数：入口指针的 <code>:3014</code> <code>didMissFrame()</code> 与上述两条路径都无关，只在 <code>:3015</code> 累加 <code>mTimeStats</code> 的 missed frames 统计。</li></ul>
+<p>如果此时 <code>RefreshRateSelector</code>（构造函数 :1422）刚好切了刷新率，或者 <code>dispatchHotplug</code>（:612）刚处理完一次热插拔，预测器的外推基线会变，下一次 <code>requestNextVsync</code> 到 <code>onVsync</code> 的间隔就与用户感知的动画周期不一致——这就是「帧间隔锯齿」的一种来源。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P6-102</code>：BufferQueue 的槽位与释放节奏，本篇只把它当作「合成从队列取到哪一帧」的前提，不展开内部。</li><li><code>AND-P4-202</code>：composer HAL 的接口契约与版本协商，本篇只说到 <code>Composer::create</code>（<code>ComposerHal.cpp:26</code>）为止。</li><li><code>AND-P6-301</code>：应用侧帧调度（Choreographer 与绘制时序），本篇从 <code>requestNextVsync</code> 那一端开始讲。</li><li><code>AND-P5-401</code>：内核侧 vsync/TE 信号产生，本篇从 <code>setVsyncEnabled</code>（<code>HWComposer.cpp:502</code>）向上开始讲。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>进程入口与线程池</td><td><code>frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp</code></td><td><code>setThreadPoolMaxThreadCount(4)</code></td><td>:71，Binder 线程池上限</td></tr><tr><td>主循环与合成编排</td><td><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></td><td><code>run</code>、<code>init</code>、<code>commit</code>、<code>composite</code></td><td>共 11072 行；<code>commit</code> 在 :2996，:2998 入口取 pacesetter 帧目标指针并贯穿使用，:3143/:3186 为防御性重取，<code>composite</code> 在 :3330</td></tr><tr><td>节拍与线程</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/Scheduler.cpp</code></td><td><code>createEventThread</code>、<code>setVsyncConfig</code>、<code>dispatchHotplug</code></td><td>共 1835 行</td></tr><tr><td>vsync 外推</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></td><td><code>nextAnticipatedVSyncTimeFrom</code>、<code>VsyncTimeline</code></td><td>共 987 行</td></tr><tr><td>刷新率决策</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/RefreshRateSelector.cpp</code></td><td>构造函数</td><td>共 1848 行</td></tr><tr><td>连接与分发</td><td><code>frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp</code></td><td><code>createEventConnection</code>、<code>requestNextVsync</code>、<code>onVsync</code></td><td>共 905 行</td></tr><tr><td>硬件合成对接</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/HWComposer.cpp</code></td><td><code>getDeviceCompositionChanges</code>、<code>setVsyncEnabled</code></td><td>共 1503 行</td></tr><tr><td>HAL 实现选择</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></td><td><code>Composer::create</code></td><td>共 34 行</td></tr><tr><td>显示设备对象</td><td><code>frameworks/native/services/surfaceflinger/DisplayDevice.cpp</code></td><td>构造函数</td><td>共 551 行</td></tr><tr><td>客户端入口</td><td><code>frameworks/native/libs/gui/SurfaceComposerClient.cpp</code></td><td><code>getDefault</code>、<code>createSurface</code>、<code>setDisplayPowerMode</code></td><td>共 3565 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/native rev-parse HEAD</code></pre>
+<p>期望输出 <code>ae266dcb70...</code>，与锚点一致。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp \
+      frameworks/native/services/surfaceflinger/Scheduler/Scheduler.cpp \
+      frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别为 11072、1835、987 行。</p>
+<pre><code class="lang-bash">grep -n &quot;pacesetterFrameTarget\|didMissFrame&quot; \
+  frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :2998 的入口取指（<code>frameTargets.get(pacesetterId)-&gt;get()</code>）与 :3014 的 <code>didMissFrame()</code>；:3143 与 :3186 还有两次 <code>mScheduler-&gt;pacesetterFrameTarget()</code> 重取，源码注释分别指向热插拔销毁与分辨率切换销毁场景。</p>
+<pre><code class="lang-bash">grep -n &quot;make_unique&lt;android::impl::EventThread&gt;&quot; \
+  frameworks/native/services/surfaceflinger/Scheduler/Scheduler.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :585-586，构造串首参为 <code>&quot;app&quot;</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;nextAnticipatedVSyncTimeFrom&quot; \
+  frameworks/native/services/surfaceflinger/Scheduler/VSyncPredictor.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中四行：:380 与 :851 是两个定义（<code>VSyncPredictor::</code> 与 <code>VsyncTimeline::</code> 两个版本），:402 与 :686 是两处调用点。</p>
+<pre><code class="lang-bash">grep -n &quot;Composer::create&quot; \
+  frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :26，确认 34 行文件里按服务名分支 <code>AidlComposer</code>/<code>HidlComposer</code>（类声明在 <code>AidlComposerHal.h:51</code> 与 <code>HidlComposerHal.h:162</code>）。</p>
+<pre><code class="lang-bash">grep -n &quot;setDeviceCompositionChanges\|getDeviceCompositionChanges\|setVsyncEnabled&quot; \
+  frameworks/native/services/surfaceflinger/DisplayHardware/HWComposer.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :537 与 :502。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：vsync 是硬件中断一到就立刻分发。</strong> 不是。分发时刻来自 <code>VSyncPredictor::nextAnticipatedVSyncTimeFrom</code>（<code>VSyncPredictor.cpp:380</code>）的外推，硬件上报只用于校正。预测基线在刷新率切换或热插拔后需要重新收敛。</p>
+<p><strong>误区二：只要应用在 Choreographer 里按时画完，就不会丢帧。</strong> 看起来对，其实错。SurfaceFlinger 侧的丢帧诊断来自 <code>mTimeStats</code>：<code>commit()</code> 在 <code>SurfaceFlinger.cpp:3014</code> 用 <code>pacesetterFrameTargetPtr-&gt;didMissFrame()</code> 判断，为真时在 <code>:3015</code> 累加 missed frames。应用画完但提交晚于 pacesetter 帧目标，仍然算错过。但要注意区分：这个查询只影响统计，决定这一帧走不走合成的是另一组门——<code>:3059</code> 的 <code>wouldBackpressureHwc()</code> 与 <code>:3060</code> 的 <code>didMissHwcFrame()</code>（语义见 <code>FrameTargeter.h:64-66</code>）。</p>
+<p><strong>误区三：`Scheduler` 只负责给应用发 vsync。</strong> <code>Scheduler::createEventThread</code>（<code>Scheduler.cpp:583</code>）创建的是名为 <code>&quot;app&quot;</code> 的线程；Scheduler 同时通过 <code>setVsyncConfig</code>（:802）管周期，SurfaceFlinger 自己的合成节拍与这个周期同源。</p>
+<p><strong>误区四：composer 的实现形态是编译期固定的。</strong> <code>Composer::create</code>（<code>ComposerHal.cpp:26</code>）按服务名在 AIDL 与 HIDL 两套实现间选择，运行期决定。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>setThreadPoolMaxThreadCount(4)</code> 只有 4 个线程，事务多了会不会排队？ <strong>答</strong>：它设的是 Binder 线程池上限，不是合成线程数；合成编排跑在 SurfaceFlinger 主循环与 Scheduler 的线程上。事务处理与合成不是同一批线程。 <strong>追问</strong>：那 <code>commit()</code> 阻塞会影响客户端调用吗？ <strong>答</strong>：会改变时序。客户端调 <code>SurfaceComposerClient</code> 的接口最终落到 SurfaceFlinger 处理，主循环忙时这些调用得不到及时响应，表现为客户端侧的一次等待。</p>
+<p><strong>问</strong>：<code>didMissFrame()</code> 返回真之后，这一帧就扔掉了吗？ <strong>答</strong>：不会。它只是帧目标对象上的状态查询（<code>FrameTargeter.h:65</code>，即 <code>mFrameMissed</code>），返回真时 <code>commit()</code> 只在 <code>SurfaceFlinger.cpp:3015</code> 累加一次 <code>mTimeStats</code> 的 missed frames 统计，既不扔内容也不改控制流。决定这一帧走不走合成的是另一组门：<code>:3059</code> 的 <code>wouldBackpressureHwc()</code> 与 <code>:3060</code> 的 <code>didMissHwcFrame()</code>。 <strong>追问</strong>：那我该看哪个数判断抖动？ <strong>答</strong>：先看 pacesetter 是哪个显示屏，再看它的帧目标周期是否被 <code>RefreshRateSelector</code> 改过。周期在跳，帧间隔当然呈锯齿。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>帧间隔忽长忽短</td><td><code>grep -n &quot;class RefreshRateSelector&quot; frameworks/native/services/surfaceflinger/Scheduler/RefreshRateSelector.cpp</code></td><td>该类是否存在、构造函数位置</td><td>确认当前 pacesetter 屏是否在切换刷新率，见 §4.4 的 <code>AND-P5-401</code></td></tr><tr><td>怀疑丢帧判定过严</td><td><code>grep -n &quot;didMissFrame|wouldBackpressureHwc|didMissHwcFrame&quot; frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></td><td>统计点 :3014 与控制门 :3059-3066</td><td>区分丢帧统计与合成跳过门，别把计数当控制流</td></tr><tr><td>热插拔后节奏异常</td><td><code>grep -n &quot;dispatchHotplug&quot; frameworks/native/services/surfaceflinger/Scheduler/Scheduler.cpp</code></td><td>入口位置</td><td>追 <code>setVsyncConfig</code> 是否随后被调用，见 :802</td></tr><tr><td>怀疑整屏硬件合成没走成</td><td><code>grep -n &quot;getDeviceCompositionChanges&quot; frameworks/native/services/surfaceflinger/DisplayHardware/HWComposer.cpp</code></td><td>请求点位置</td><td>到 <code>dumpsys SurfaceFlinger</code> 对账层数与合成方式</td></tr><tr><td>怀疑 HAL 走了非预期实现</td><td><code>grep -n &quot;AidlComposerHal|HidlComposerHal&quot; frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></td><td>分支条件</td><td>确认设备上实际注册的 composer 服务名</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：BufferQueue 槽位与释放细节见 <code>AND-P6-102</code>；composer HAL 接口契约与版本协商见 <code>AND-P4-202</code>；应用侧帧调度见 <code>AND-P6-301</code>；内核 vsync/TE 信号产生见 <code>AND-P5-401</code>。</li><li><strong>本篇前置依赖</strong>：<code>AND-P6-102</code>。</li><li><strong>本篇后继</strong>：<code>AND-P6-301</code>（应用侧时序接本篇的分发端）、<code>AND-P4-202</code>（从 <code>Composer::create</code> 往下钻 HAL 契约）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>Binder 线程池上限 4：来源为源码调用点 <code>main_surfaceflinger.cpp:71</code>，口径为 <code>android17-release</code>。</li><li><code>ComposerHal.cpp</code> 全文 34 行：来源为文件行数实测，说明这一层只是实现选择的分发点，契约在 <code>AND-P4-202</code>。</li><li><code>ISurfaceComposer.h</code> 共 219 行：来源为文件行数实测，客户端可见的接口面很窄。</li><li><code>getMaxVirtualDisplayCount</code>（<code>HWComposer.cpp:192</code>）：虚拟显示数量上限，具体值与设备相关，暂无实测，列为待补。</li><li>主循环 vsync 周期的具体数值不打表：由 <code>RefreshRateSelector</code> 与 <code>setVsyncConfig</code> 在运行期决定，本篇不断言。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td><code>composer</code> 实现按服务名在 <code>AidlComposer</code> 与 <code>HidlComposer</code> 间选择（<code>AidlComposerHal.h:51</code>／<code>HidlComposerHal.h:162</code>），分支点见 <code>ComposerHal.cpp:26</code>；该文件仅 34 行</td><td>服务形态是运行期事实，排障须先确认设备注册了哪个 composer 服务</td></tr><tr><td><code>android17-release</code>（本树）</td><td>进程入口显式 <code>setThreadPoolMaxThreadCount(4)</code>，见 <code>main_surfaceflinger.cpp:71</code></td><td>事务处理与合成共享 SurfaceFlinger 进程时序</td></tr><tr><td>更早版本</td><td>本次核实范围内不做断言；清单无版本史</td><td>——</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>、<code>surfaceflinger</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>SurfaceFlinger commit pacesetter</code>、<code>VSyncPredictor</code>、<code>RefreshRateSelector</code>。</li><li>本仓关键路径：<code>frameworks/native/services/surfaceflinger/Scheduler/</code>、<code>frameworks/native/services/surfaceflinger/DisplayHardware/</code>、<code>frameworks/native/libs/gui/</code>。</li><li>承接篇：<code>AND-P6-102</code>、<code>AND-P4-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

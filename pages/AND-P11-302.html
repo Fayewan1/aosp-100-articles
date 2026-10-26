@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>定制化与 OEM/ODM 适配实践</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>定制化与 OEM/ODM 适配实践</h1>
+<div class="kv"><span>ID：AND-P11-302</span><span>卷：P11</span><span>章：11.3</span><span>难度：3</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：device/generic/goldfish/AndroidProducts.mk ；device/generic/goldfish/product/phone.mk ；device/generic/goldfish/board/BoardConfigCommon.mk ；device/google_car/AndroidProducts.mk ；hardware/interfaces/boot ；system/core/libvndksupport/linker.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>OEM/ODM 的定制代码至少落在四类位置：<code>device/&lt;oem&gt;/&lt;product&gt;/</code> 的 product 配置、板级 <code>BoardConfig.mk</code>、<code>overlay</code>/<code>rro_overlays</code>/<code>sepolicy</code>/<code>sysconfig</code> 资源与策略叠加，以及设备侧原生代码与模块——goldfish 的 <code>hals/</code> 有九个目录共 11 个 <code>Android.bp</code>，<code>init/</code> 另有 <code>init.ranchu.rc</code>、<code>init.system_ext.rc</code>、<code>ueventd.rc</code> 与五个 <code>init.*.sh</code>。Treble 之后，framework 与 vendor 的分工由 <code>hardware/interfaces/</code> 里的 AIDL/HIDL 接口和 VINTF 声明固定下来，不再靠头文件巧合。</p>
+<p><code>libvndksupport</code> 提供的是 llndk 面的 sphal namespace 加载 API。<code>libvndksupport.map.txt</code> 里三个符号的标注并不相同：:4-5 的两个加载符号标 <code>llndk systemapi</code>，:3 的 <code>android_is_in_vendor_process</code> 另标 <code>llndk-deprecated=35 systemapi</code>。它的调用方也分散在多处，不是某一条固定通道——<code>libutils</code> 用它做双载去重（<code>system/core/libutils/misc.cpp</code> :76）、<code>libhidl</code> 用它加载 Passthrough 服务实现（<code>system/libhidl/transport/ServiceManagement.cpp</code> :541）、binder 与 gralloc 用它取厂商实现（<code>frameworks/native/libs/binder/IServiceManager.cpp</code> :569、<code>frameworks/native/libs/ui/Gralloc5.cpp</code> :108）、多媒体侧 OMX 也走它（<code>frameworks/av/media/libstagefright/omx/OMXStore.cpp</code> :77）。</p>
+<p>实现落点在 <code>system/core/libvndksupport/linker.cpp</code>（85 行）：<code>android_load_sphal_library()</code>（:64）先取 <code>get_vendor_namespace()</code>，再用 <code>android_dlopen_ext</code> 带上 <code>ANDROID_DLEXT_USE_NAMESPACE</code> 与 vendor namespace 句柄完成加载，取不到时才退回当前 namespace 并告警；<code>android_is_in_vendor_process()</code>（:52）靠 <code>vndk</code> namespace 的可见性反推当前是否在 vendor 进程，该函数在 <code>linker.h</code> :23-24 已标 deprecated。这是运行期动态加载，不是链接期行为。<code>device/sample/</code> 是 AOSP 给出的定制化模板，<code>device/generic/goldfish</code> 是可读的参考机型实现，<code>device/google_car/</code> 是 OEM 形态实例。本篇只讲落点与分工，构建产物未在本树验证。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读｜路径 C 只读 §1/§4.1/§9</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P11-301</code>——它讲 GMS 边界，决定了无 GMS 机型在定制范围上的起点差异。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>device/generic/goldfish/AndroidProducts.mk</code></li><li><code>device/generic/goldfish/product/phone.mk</code></li><li><code>device/generic/goldfish/board/BoardConfigCommon.mk</code></li><li><code>device/google_car/AndroidProducts.mk</code></li><li><code>hardware/interfaces/boot</code></li><li><code>system/core/libvndksupport/linker.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>接手一个新机型时，最常见的困惑是：厂商代码到底该放哪里。同一个「加一个开机服务」的需求，有人改 <code>device/</code> 下的 <code>.mk</code>，有人动 <code>BoardConfig.mk</code>，有人只丢一个 <code>overlay</code>。第二层困惑在分工：Treble 之后，vendor 侧改一行代码为什么会影响 framework 侧的兼容性校验。第三层是 VNDK——很多人知道它存在，但说不清它在运行期到底替谁做了什么。这三层疑问指向同一件事：定制化的落点边界。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：product 配置定义「这台设备装什么」，板级配置定义「这台设备的硬件与分区参数」，资源与策略叠加定义「这台设备在运行时表现成什么样」，VINTF 与 <code>hardware/interfaces/</code> 定义 framework 与 vendor 之间的契约。</p>
+<p>图 1：定制化落点与 Treble 契约面的关系</p>
+<pre><code>  device/&lt;oem&gt;/&lt;product&gt;/          hardware/interfaces/
+   ├─ AndroidProducts.mk           ├─ audio / bluetooth / camera
+   ├─ product/*.mk  ─┐             ├─ boot / gnss / automotive
+   │  （产品选择层）  │             └─ compatibility_matrices/
+   └─ board/*.mk   ──┤                          │
+      （板级参数层）  │                          │
+                     ▼                          ▼
+             构建出各分区镜像             VINTF 契约（AIDL/HIDL）
+                     │                          │
+   vendor/odm 分区 ◄──┴─────────────────────────►  system 分区 framework
+                     │
+        system/core/libvndksupport/linker.cpp（VNDK 运行期加载支撑）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键关系：<code>device/</code> 侧只做选择和参数，契约侧只做接口声明，两者通过 VINTF 对齐。vendor 分区里的实现只要满足 <code>hardware/interfaces/</code> 的接口与 <code>compatibility_matrices/</code> 的版本约束，就与 system 分区的 framework 解耦。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本树 <code>device/</code> 顶层有七类目录：<code>amlogic</code>、<code>common</code>、<code>generic</code>、<code>google</code>、<code>google_car</code>、<code>linaro</code>、<code>sample</code>。类别本身说明了分层意图：<code>common</code> 放跨机型共享片段，<code>generic</code> 放与具体厂商无关的参考实现，<code>google</code>/<code>google_car</code> 是实例，<code>sample</code> 是模板，<code>amlogic</code>/<code>linaro</code> 是平台方提供的参考。</p>
+<p><code>device/sample/</code> 下分 <code>apps</code>、<code>etc</code>、<code>frameworks</code>、<code>overlays</code>、<code>products</code>、<code>sdk_addon</code>、<code>skins</code> 七个子目录。这七个名字就是 AOSP 对「定制化可以往哪放」的官方枚举：应用、预置配置、framework 补丁、覆盖层、产品配置、SDK 附加件、皮肤。</p>
+<p><code>device/generic/goldfish</code> 是可读的完整参考：<code>product/</code> 有 11 项（<code>base_phone.mk</code>、<code>phone.mk</code>、<code>tablet.mk</code>、<code>generic.mk</code>、<code>versions.mk</code> 等 <code>.mk</code> 片段，另有一个 <code>bluetooth.prop</code> 属性文件），<code>board/</code> 有 12 个条目（<code>BoardConfigCommon.mk</code>、<code>emu64x</code>、<code>emu64a</code>、<code>fstab</code>、<code>kernel</code> 等），<code>AndroidProducts.mk</code> 声明 12 个产品（<code>sdk_phone64_x86_64</code>、<code>sdk_tablet_arm64</code>、<code>sdk_slim_x86_64</code> 等）。这份结构可以直接对照三家 OEM 的实际树形。</p>
+<p>OEM/ODM 实例看 <code>device/google_car/</code>：四个产品目录 <code>cheetah_car</code>、<code>husky_car</code>、<code>panther_car</code>、<code>tangorpro_car</code>，加一个 <code>common/</code>。<code>common/</code> 内含 <code>manifest.xml</code>、<code>sepolicy</code>、<code>overlay</code>、<code>rro_overlays</code>、<code>sysconfig</code>、<code>pre_google_car.mk</code>、<code>post_google_car.mk</code>、<code>unavailable_features.xml</code>。<code>AndroidProducts.mk</code> 自第 17 行起声明 <code>PRODUCT_MAKEFILES</code>。这份清单就是 §4.1 四类落点的实物对照：<code>manifest.xml</code> 是 VINTF 侧，<code>sepolicy</code>/<code>sysconfig</code>/<code>overlay</code>/<code>rro_overlays</code> 是叠加侧，<code>pre_</code>/<code>post_</code> 两个 <code>.mk</code> 是 product 配置的前后段注入。</p>
+<p>Treble 契约面在树内可直接数：<code>hardware/interfaces/</code> 下有 <code>audio</code>、<code>bluetooth</code>、<code>camera</code>、<code>boot</code>、<code>gnss</code>、<code>dumpstate</code>、<code>gatekeeper</code>、<code>automotive</code>、<code>contexthub</code>、<code>compatibility_matrices</code> 等。设备侧声明示例在 <code>device/generic/goldfish/manifest.xml</code> 首行：<code>&lt;manifest version=&quot;1.0&quot; type=&quot;device&quot; target-level=&quot;8&quot;&gt;</code>。</p>
+<p>VNDK 侧，<code>build/make/core/board_config.mk</code> :1019 起是 <code>check_vndk_version</code> 的定义（:1020-1023，检查 <code>prebuilts/vndk/v$(1)</code> 下有无 <code>Android.bp</code>）；<code>system/core/libvndksupport/linker.cpp</code> 共 85 行，提供 sphal namespace 的库加载 API（<code>android_load_sphal_library</code> :64），符号按 llndk 面导出，供 vendor 侧进程按名加载 sphal 变体（本树实际调用方是 <code>libutils</code> 的双载去重）。这是 VNDK 最容易被忽略的一层：它不只管库集合，还管「进程怎么按 namespace 取到库的另一份副本」。</p>
+<p>分区分工的直接证据：goldfish 的 <code>AB_OTA_UPDATER := none</code> 在 <code>board/BoardConfigCommon.mk</code> :39，是显式取反（该开关在 <code>build/make/core/board_config.mk</code> :973–:974 的默认值是 <code>true</code>）；而 <code>PRODUCT_USE_DYNAMIC_PARTITIONS</code> 开关在 <code>build/make/core/board_config.mk</code> :665。两个开关分属不同层、不同文件，改错位置就是典型的分工错误。</p>
+<p>三类落点归纳：</p>
+<table><thead><tr><th>落点</th><th>承载内容</th><th>出处</th></tr></thead><tbody><tr><td>product 配置</td><td>装什么、继承谁、前后段注入</td><td><code>device/&lt;oem&gt;/&lt;product&gt;/</code> 的 <code>.mk</code>；<code>pre_google_car.mk</code>/<code>post_google_car.mk</code></td></tr><tr><td>板级配置</td><td>硬件参数、分区开关、VNDK 版本</td><td><code>BoardConfigCommon.mk</code>；<code>build/make/core/board_config.mk</code> :1019、:665</td></tr><tr><td>资源与策略叠加</td><td>运行时表现与访问控制</td><td><code>overlay</code>、<code>rro_overlays</code>、<code>sepolicy</code>、<code>sysconfig</code></td></tr></tbody></table>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设要在车载形态上加一个产品。路径是：在 <code>AndroidProducts.mk</code> 里加一条 <code>PRODUCT_MAKEFILES</code> 声明（对齐 <code>device/google_car/AndroidProducts.mk</code> :17 起的写法），在 <code>common/</code> 里放共享片段，用 <code>pre_google_car.mk</code>/<code>post_google_car.mk</code> 的定位把本产品特有配置插在产品配置的前段与后段，硬件相关参数落 <code>BoardConfig.mk</code>，界面与能力差异落 <code>overlay</code>/<code>rro_overlays</code>/<code>sysconfig</code>，访问控制差异落 <code>sepolicy</code>。vendor 侧若要新增 HAL，只动 <code>hardware/interfaces/</code> 的接口实现与设备侧 <code>manifest.xml</code> 的 VINTF 声明，不碰 framework。这条路径的每一段都能在本树找到对应文件，但实际构建产物未在本树构建验证。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P11-201</code> 讲 product 继承语法——<code>inherit-product</code> 的展开顺序、变量覆盖规则。本篇只讲「哪类内容该落在哪类文件」，语法细节归 201。<code>AND-P11-301</code> 讲 GMS 边界，决定无 GMS 机型在 <code>overlay</code>/<code>sysconfig</code> 上的定制自由度差异。签名与 OTA 信任归 <code>AND-P11-202</code> 与 <code>AND-P9-301</code>，本篇提到 <code>AB_OTA_UPDATER</code> 只用于说明分区分工，不展开更新流程。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>产品声明入口</td><td><code>device/generic/goldfish/AndroidProducts.mk</code></td><td>12 个产品名</td><td>参考实现的产品清单写法</td></tr><tr><td>product 配置片段</td><td><code>device/generic/goldfish/product/phone.mk</code></td><td>手机形态配置</td><td>与 <code>tablet.mk</code>/<code>generic.mk</code> 并列</td></tr><tr><td>板级配置</td><td><code>device/generic/goldfish/board/BoardConfigCommon.mk</code></td><td><code>AB_OTA_UPDATER := none</code>（:39）</td><td>参考设备显式关 A/B（系统默认 true）</td></tr><tr><td>OEM 产品声明</td><td><code>device/google_car/AndroidProducts.mk</code></td><td><code>PRODUCT_MAKEFILES</code>（:17 起）</td><td>四产品共用 <code>common/</code></td></tr><tr><td>契约接口面</td><td><code>hardware/interfaces/boot</code></td><td>AIDL/HIDL 接口定义</td><td>与 <code>compatibility_matrices</code> 配合</td></tr><tr><td>VNDK 加载支撑</td><td><code>system/core/libvndksupport/linker.cpp</code></td><td>共 85 行</td><td>system 进程经 vendor namespace 加载 SP-HAL 库</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：device/generic/goldfish:296e55aa0244</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">ls device/</code></pre>
+<p>期望输出 <code>amlogic</code>、<code>common</code>、<code>generic</code>、<code>google</code>、<code>google_car</code>、<code>linaro</code>、<code>sample</code> 七项（对应事实 1）。</p>
+<pre><code class="lang-bash">ls device/generic/goldfish/product/ | wc -l
+ls device/generic/goldfish/board/ | wc -l</code></pre>
+<p>期望分别输出 11 与 12（对应事实 2）。</p>
+<pre><code class="lang-bash">grep -n 'AB_OTA_UPDATER' device/generic/goldfish/board/BoardConfigCommon.mk</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>AB_OTA_UPDATER := none</code>，行号 39（对应事实 6）。</p>
+<pre><code class="lang-bash">sed -n '17,30p' device/google_car/AndroidProducts.mk</code></pre>
+<p>期望看到 <code>PRODUCT_MAKEFILES</code> 的声明片段（对应事实 3）。</p>
+<pre><code class="lang-bash">head -1 device/generic/goldfish/manifest.xml</code></pre>
+<p>期望输出 <code>&lt;manifest version=&quot;1.0&quot; type=&quot;device&quot; target-level=&quot;8&quot;&gt;</code>（对应事实 4）。</p>
+<pre><code class="lang-bash">grep -n 'BOARD_VNDK_VERSION' build/make/core/board_config.mk
+wc -l system/core/libvndksupport/linker.cpp</code></pre>
+<p>期望第一命中 <code># Check BOARD_VNDK_VERSION</code>（行 1019），第二输出 85（对应事实 5）。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/ | head -30</code></pre>
+<p>期望看到 <code>audio</code>、<code>bluetooth</code>、<code>camera</code>、<code>boot</code>、<code>gnss</code>、<code>dumpstate</code>、<code>gatekeeper</code>、<code>automotive</code>、<code>contexthub</code>、<code>compatibility_matrices</code> 等（该目录共 63 项；<code>contexthub</code> 在 :21、<code>dumpstate</code> :24、<code>gatekeeper</code> :26、<code>gnss</code> :27，所以必须放到 head -30 才看得全，对应事实 4）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：定制就是把文件丢进 `device/` 就行。</strong> 纠正：<code>device/</code> 只承载 product 配置与板级配置，运行时差异要靠 <code>overlay</code>/<code>rro_overlays</code>/<code>sysconfig</code>/<code>sepolicy</code> 叠加，这些在 <code>device/google_car/common/</code> 里是分目录放的（内含 <code>audio_effects.xml</code>、<code>manifest.xml</code>、<code>overlay</code>、<code>post_google_car.mk</code>、<code>pre_google_car.mk</code>、<code>rro_overlays</code>、<code>sepolicy</code>、<code>sysconfig</code> 与两份 <code>unavailable_features*.xml</code>）。</p>
+<p><strong>误区二：VNDK 只是一份库清单。</strong> 纠正：<code>system/core/libvndksupport/linker.cpp</code> 存在说明它还有运行期加载职责——system 进程要取用 vendor 侧 SP-HAL 共享库，必须经 vendor namespace 的专门加载路径。</p>
+<p><strong>误区三（看起来对其实是错的）：`PRODUCT_USE_DYNAMIC_PARTITIONS` 与 `AB_OTA_UPDATER` 应该放一起。</strong> 纠正：前者在 <code>build/make/core/board_config.mk</code> 有引用（:665 是使用点，:672-675 才是两条 <code>$(error)</code>，含 <code>BOARD_SUPER_PARTITION_SIZE</code> 未定义校验；产品配置同样可以赋值，该文件只是校验点），后者在 <code>board/BoardConfigCommon.mk</code> :39。一个是构建系统的板级开关，一个是设备配置里的更新方式声明，层级不同。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：vendor 侧加一个 HAL，要不要动 <code>frameworks/base</code>？ <strong>答</strong>：不动。接口在 <code>hardware/interfaces/</code> 下，实现放 vendor 分区，设备侧在 <code>manifest.xml</code> 声明。 <strong>追问</strong>：那 framework 怎么知道 vendor 提供了什么？ <strong>答</strong>：通过 VINTF 声明与 <code>compatibility_matrices</code> 的版本匹配，构建期与运行期各自校验。</p>
+<p><strong>问</strong>：<code>device/generic/goldfish</code> 能不能直接当 OEM 树模板？ <strong>答</strong>：结构可以照抄，<code>product/</code> 11 项与 <code>board/</code> 12 个条目的分层方式就是模板（前者含 10 个 <code>.mk</code> 片段与 1 个 <code>bluetooth.prop</code>）。但它是模拟器参考实现，硬件参数与分区选择要换。 <strong>追问</strong>：<code>device/sample/</code> 呢？ <strong>答</strong>：该工程是 AOSP 提供的定制化模板，七个子目录对应七类可定制内容，适合看「能往哪放」，不适合看「完整机型长什么样」。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>产品名字在 lunch 列表里找不到</td><td><code>grep -rn 'PRODUCT_MAKEFILES' device/ --include=AndroidProducts.mk</code></td><td>该产品是否被声明</td><td>补 <code>PRODUCT_MAKEFILES</code> 条目</td></tr><tr><td>改了 <code>.mk</code> 但镜像行为没变</td><td><code>grep -rn '&lt;你的变量名&gt;' device/</code></td><td>变量是否被后段覆盖</td><td>检查 <code>pre_</code>/<code>post_</code> 注入顺序</td></tr><tr><td>系统进程取不到厂商 SP-HAL 库</td><td><code>sed -n '64,80p' system/core/libvndksupport/linker.cpp</code>；<code>ls system/linkerconfig/contents/namespace/</code>（生成规则源码，<code>sphal.cc</code> :75-76 调 <code>GetLink(&quot;vndk&quot;)</code>；产物在设备 <code>/linkerconfig</code> 下）</td><td><code>android_load_sphal_library</code> 走的是 vendor namespace 还是退回当前 namespace（后者会在 logcat 留 <code>instead of sphal namespace</code> 告警）</td><td>核 <code>BOARD_VNDK_VERSION</code>、VINTF 声明与 linkerconfig 生成的 namespace 配置</td></tr><tr><td>分区布局与预期不符</td><td><code>grep -n 'PRODUCT_USE_DYNAMIC_PARTITIONS' build/make/core/board_config.mk</code></td><td>动态分区开关位置</td><td>对齐板级配置而非 product 配置</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：product 继承语法细节（<code>AND-P11-201</code>）；签名与 OTA 信任链（<code>AND-P11-202</code>、<code>AND-P9-301</code>）；GMS 边界的具体条款（<code>AND-P11-301</code>）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P11-301</code>。另需注意产品入口在 <code>device/generic/goldfish/64bitonly/product/</code>（15 项中 12 个 <code>.mk</code> 由 <code>AndroidProducts.mk</code> 收录，另 3 个是 <code>*.prop_template</code>），同级的 <code>product/</code> 是被 <code>inherit-product</code> 的共享片段——照后者抄入口会找不到自己的产品。</p>
+<p><strong>本篇后继</strong>：无严格后继；<code>AND-P11-401</code> 讲形态差异时可对照本篇的落点框架读。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>device/</code> 顶层七类目录：源码目录枚举，口径为 2026-10-23 于 android17-release 静态核。</li><li>goldfish <code>product/</code> 11 项（10 个 <code>.mk</code> + 1 个 <code>bluetooth.prop</code>）、<code>board/</code> 12 个条目、<code>AndroidProducts.mk</code> 12 个产品：同上口径。</li><li><code>system/core/libvndksupport/linker.cpp</code> 85 行：同上口径。</li><li><code>manifest.xml</code> 的 <code>target-level=&quot;8&quot;</code>：VINTF 元数据，仅代表 goldfish 这一份声明，不代表其他设备的 level。</li><li>构建耗时、镜像体积、OTA 包大小：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>Treble 之前</td><td>framework 与 vendor 无强制接口契约，靠头文件与符号巧合</td><td>定制易碎，升级 framework 常断 vendor</td></tr><tr><td>android17-release（本树实测）</td><td><code>hardware/interfaces/</code> 提供 AIDL/HIDL 接口面，<code>compatibility_matrices</code> 约束版本；<code>check_vndk_version</code> 定义在 <code>build/make/core/board_config.mk</code> :1019-1023；VNDK 运行期加载支撑在 <code>system/core/libvndksupport/linker.cpp</code></td><td>定制落点被文件层级固定，vendor 侧实现可独立演进</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>Treble</code>、<code>VNDK</code>、<code>device configuration</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>vndk</code>、<code>board_config</code>。</li><li>本仓关键路径：<code>device/generic/goldfish/</code>（参考实现）、<code>device/google_car/common/</code>（OEM 实例）、<code>hardware/interfaces/</code>（契约面）。</li><li>承接篇：<code>AND-P11-201</code>、<code>AND-P11-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

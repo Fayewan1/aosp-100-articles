@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>启动镜像格式：boot/system/vendor 与 fastboot 链路</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>启动镜像格式：boot/system/vendor 与 fastboot 链路</h1>
+<div class="kv"><span>ID：AND-P8-102</span><span>卷：P8</span><span>章：8.1</span><span>难度：3</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/tools/mkbootimg/include/bootimg/bootimg.h ；system/tools/mkbootimg/mkbootimg.py ；system/core/fastboot/fastboot.cpp ；system/core/fastboot/task.cpp ；system/core/fastboot/task.h ；system/core/fastboot/main.cpp ；system/core/fastboot/bootimg_utils.cpp ；bootable/recovery/fastboot/fastboot.cpp ；external/avb/libavb/avb_vbmeta_image.c ；bootable/recovery/bootloader_message/bootloader_message.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>boot 镜像不是一个整体，而是「头 + 若干字节段」的结构化容器，各段边界由头里的 <code>kernel_size</code>、<code>ramdisk_size</code>、<code>second_size</code> 等字段共同定义。头格式的定义处是 <code>bootimg.h</code>：<code>BOOT_MAGIC</code> 为 <code>&quot;ANDROID!&quot;</code>，<code>VENDOR_BOOT_MAGIC</code> 为 <code>&quot;VNDRBOOT&quot;</code>，<code>boot_img_hdr</code> 是 <code>boot_img_hdr_v0</code> 的别名，即设备侧解析必须认历史布局。注意字段归属的版本差：<code>boot_img_hdr_v0</code>（:80-127）只有 magic、kernel/ramdisk/second 三组 size 加 page_size、header_version，<code>recovery_dtbo_size</code>（:170）与 <code>header_size</code>（:172）是 <code>boot_img_hdr_v1</code>（:169 起）才追加的字段——按最新版头解释 v0 镜像必然错位。宿主侧 <code>mkbootimg.py</code> 负责按该契约打包，<code>fastboot.cpp</code> 负责按同一契约分片下发。<code>fastboot flash</code> 一条命令背后是「解析命令 → <code>do_flash</code>（读镜像进缓冲、必要时先下发 <code>.sig</code>、<code>repack_ramdisk</code>）→ <code>flash_buf</code>（<code>copy_avb_footer</code> → 仅在 <code>--disable-verity</code>/<code>--disable-verification</code> 置位时 <code>rewrite_vbmeta_buffer</code>）→ 分片下发」的序列，链路上任何一环失败都不会启动。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P8-101</code>。先有「bootloader 交棒到内核」的时序，本篇的镜像格式才有落点。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/tools/mkbootimg/include/bootimg/bootimg.h</code></li><li><code>system/tools/mkbootimg/mkbootimg.py</code></li><li><code>system/core/fastboot/fastboot.cpp</code></li><li><code>system/core/fastboot/main.cpp</code></li><li><code>system/core/fastboot/bootimg_utils.cpp</code></li><li><code>bootable/recovery/fastboot/fastboot.cpp</code></li><li><code>external/avb/libavb/avb_vbmeta_image.c</code></li><li><code>bootable/recovery/bootloader_message/bootloader_message.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>手里拿到一个 <code>boot.img</code>，<code>unpack_bootimg</code> 拆出一堆 <code>kernel</code>、<code>ramdisk</code>、<code>second</code>，再加一个 DTB（device tree blob），但没人说得清这些段的先后顺序由谁决定。想做一条自动化刷机脚本，发现 <code>fastboot flash boot</code> 与 <code>fastboot flashall</code> 行为不一样：前者只写分区，后者还会动 <code>vbmeta</code> 和 slot。设备变砖后进 <code>fastbootd</code>，<code>getvar</code> 能看到 <code>is-userspace</code> 为真，但不知道自己此刻到底在 bootloader 还是 fastbootd 里、哪些命令在两侧语义不同。这些都是同一个问题的不同侧面：镜像的字节布局契约与刷机链路的分层契约。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四层：头格式（<code>bootimg.h</code> 定义结构体与魔数）、打包器（<code>mkbootimg.py</code> 按结构体写出字节）、下发链路（<code>fastboot</code> 宿主工具把镜像切片发给设备）、设备侧接收（bootloader 或 fastbootd）。四层共用同一份结构体定义，任何一层自行解释字段都会出现「能刷进去、起不来」。</p>
+<p>图 1：启动镜像与刷机链路的四层关系</p>
+<pre><code>  [bootimg.h 结构体/魔数]
+        |  定义布局
+  [mkbootimg.py] --产出 boot.img/vendor_boot.img--&gt; [fastboot.cpp 宿主]
+                                                          | USB
+                                          [bootloader | fastbootd]
+                                                          |
+                                                [BCB / vbmeta 校验]</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键概念：</p>
+<ul><li><strong>boot 镜像</strong>：<code>boot_img_hdr_v0</code> 打头的容器，承载 kernel 与 ramdisk。</li><li><strong>vendor_boot 镜像</strong>：以 <code>VENDOR_BOOT_MAGIC</code> 打头的另一类容器，承载厂商侧内容。</li><li><strong>vbmeta 镜像</strong>：AVB 的签名元数据，<code>avb_vbmeta_image.c</code> 负责其结构处理。</li><li><strong>BCB（bootloader control block）</strong>：bootloader 与系统互递状态的持久块，定义在 <code>bootloader_message.cpp</code>。</li></ul>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>镜像头字段。</strong> <code>bootimg.h</code> 共 433 行，<code>#define BOOT_MAGIC &quot;ANDROID!&quot;</code> 在 :34，<code>#define VENDOR_BOOT_MAGIC &quot;VNDRBOOT&quot;</code> 在 :40，<code>typedef struct boot_img_hdr_v0 boot_img_hdr</code> 在 :133。最后一个 typedef 是最容易被忽略的一句：代码里写 <code>boot_img_hdr</code> 的地方，实际用的是 v0 布局。设备侧若按「最新版头」去解释老镜像，字段会错位。</p>
+<p><strong>打包器。</strong> <code>mkbootimg.py</code> 共 666 行。它读取内核、ramdisk 等输入，按头结构依次写出魔数、各段长度、页大小、头版本，最后按 <code>--page-size</code> 对齐填充各段。页大小默认 2048，这一默认值在 fastboot 侧的用法文本里同样出现。</p>
+<p><strong>fastboot 命令族。</strong> 用法文本位于 <code>fastboot.cpp:553-659</code>，列出的命令族可归类如下：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>flash</code></td><td>把镜像写入具名分区</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>flash:raw</code></td><td>省去头，直接下发裸数据；实现上经 <code>LoadBootableImage</code>（:2519，定义 :664）组包，不经 <code>do_flash</code></td><td><code>fastboot.cpp:553-659</code>、<code>:2511</code></td></tr><tr><td><code>flashall</code></td><td>按脚本一次性刷整套分区</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>erase</code></td><td>擦除具名分区</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>format</code></td><td>格式化分区文件系统</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>update</code></td><td>用 zip 包执行更新流程</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>getvar</code></td><td>读取设备变量</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>boot</code></td><td>下载镜像并直接启动，不落盘</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>reboot</code> / <code>reboot-bootloader</code></td><td>重启到系统 / bootloader</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>flashing lock|unlock</code></td><td>切设备锁状态</td><td><code>fastboot.cpp:553-659</code></td></tr><tr><td><code>flashing get_unlock_ability</code></td><td>查询解锁能力位</td><td><code>fastboot.cpp:553-659</code></td></tr></tbody></table>
+<p><code>--page-size BYTES</code> 默认 2048，在 :618。</p>
+<p><strong>宿主侧关键函数。</strong> 全部在 <code>fastboot.cpp</code>（共 2684 行）。进程入口在 <code>main.cpp:31</code>，<code>int main(int argc, char* argv[])</code>，这一层只做入口，参数解析与分派在 <code>fastboot.cpp</code> 内。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>do_flash</code></td><td><code>flash</code> 命令主体：校验分区、切片、下发</td><td><code>fastboot.cpp:1509</code></td></tr><tr><td><code>set_active</code></td><td>写 slot 的 active 标记</td><td><code>fastboot.cpp:1542</code></td></tr><tr><td><code>is_userspace_fastboot</code></td><td>判断当前是否处于 fastbootd</td><td><code>fastboot.cpp:1555</code></td></tr><tr><td><code>reboot_to_userspace_fastboot</code></td><td>从 bootloader 切到 fastbootd</td><td><code>fastboot.cpp:1560</code></td></tr><tr><td><code>get_current_slot</code></td><td>读当前 slot 后缀</td><td><code>fastboot.cpp:1285</code></td></tr><tr><td><code>supports_AB</code></td><td>判断设备是否支持 A/B</td><td><code>fastboot.cpp:1302</code></td></tr><tr><td><code>rewrite_vbmeta_buffer</code></td><td>按实际分区状态重算 vbmeta 缓冲</td><td><code>fastboot.cpp:1079</code></td></tr><tr><td><code>copy_avb_footer</code></td><td>拷贝并处理 AVB footer</td><td><code>fastboot.cpp:1171</code></td></tr></tbody></table>
+<p><strong>设备侧与辅助件。</strong> <code>bootable/recovery/fastboot/fastboot.cpp</code> 共 107 行，是 fastbootd 在 recovery 侧的 UI 集成件（只暴露菜单动作与默认菜单项填充，链接 recovery UI）；fastbootd 守护进程主体不在本树。<code>system/core/fastboot/bootimg_utils.cpp</code> 共 130 行，提供宿主侧镜像头相关的工具函数。<code>external/avb/libavb/avb_vbmeta_image.c</code> 共 366 行，处理 vbmeta 结构。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以下按 2026-10-19 于本地 <code>android17-release</code> 树的实测口径走一遍 <code>fastboot flash boot boot.img</code>：</p>
+<ol><li><code>main.cpp:31</code> 的入口接收参数，交给 <code>fastboot.cpp</code> 分派。</li><li>命令被识别为 <code>flash</code>，但关键点在于：<code>flash</code> 不直接进 <code>do_flash</code>，中间还有一层任务对象。<code>fastboot.cpp</code> 先 <code>CollectTasks</code> 建出 <code>FlashTask</code>（<code>task.h:49</code>，<code>Run()</code> 在 <code>task.cpp:156</code>），由 <code>FlashTask::Run</code> 决定走哪条路：fastbootd 会话（<code>task.cpp:157</code> 的 <code>is_userspace_fastboot</code>）直接 <code>do_flash</code>（:165）；静态分区或带 <code>--force</code> 也 <code>do_flash</code>（:169）；动态分区且非 force 则改走 <code>FetchAndParseMetadata</code>（:175）→ <code>SparseForSuper</code>（:205）→ <code>flash_partition(fp_, &quot;super&quot;, ...)</code>（:213），这条路径不经 <code>do_flash</code>/<code>flash_buf</code>。走 <code>do_flash</code>（<code>fastboot.cpp:1509</code>）的那些情况，函数体（:1509-1538）才展开成四步。这个函数体（:1509-1538）主体是四步：经 <code>fp-&gt;source</code> 或 <code>load_buf</code> 把镜像读进 <code>fastboot_buffer</code>；对逻辑分区先 <code>ResizePartition</code>；<code>repack_ramdisk</code> 重打包 ramdisk；最后转 <code>flash_buf</code>（:1254）真正下发。第一步还有一条旁支：读镜像时若同目录存在同名 <code>.sig</code> 文件（:1524），会先 <code>Download</code>/<code>RawCommand</code> 把签名单独下发（:1526-1527），这一步与主流程并行存在，不属于四步主体。</li><li><code>flash_buf</code>（:1254）内部先 <code>copy_avb_footer</code>（:1171）拷贝并处理 AVB footer。随后只有 <code>g_disable_verity || g_disable_verification</code> 为真（即带了 <code>--disable-verity</code>/<code>--disable-verification</code>）时，才调 <code>rewrite_vbmeta_buffer</code>（:1079）按实际分区状态重算 vbmeta。若 <code>apply_vbmeta</code> 为假、设备又没有独立 vbmeta 分区、目标又是 boot/boot_a/boot_b，这一步走 <code>vbmeta_in_boot</code> 变体。次序不能反：footer 先就位，vbmeta 重算才有输入。</li><li>数据切片下发，设备侧按 <code>bootimg.h</code> 的布局解释头部，并按 <code>--page-size</code> 对齐写入。默认 2048（<code>fastboot.cpp:618</code> 的用法文本给出默认值，实际取值约束在 <code>mkbootimg.py:537</code>）。</li><li>以上是 <code>flash</code>（单分区）路径的完整函数面。<code>is_userspace_fastboot</code>（:1555）、<code>reboot_to_userspace_fastboot</code>（:1560）、<code>set_active</code>（:1542）都不在这条路径上：前两者在 <code>fastboot.cpp</code> 全文没有除定义与内部互调（:1574）之外的调用点——注意范围限定：跨文件还有 <code>task.cpp:157</code> 的 <code>FlashTask::Run</code> 会调 <code>is_userspace_fastboot</code>，而它正是 <code>flashall</code> 逐分区路径的必经点；<code>set_active</code> 的写入动作至少在三处：<code>FlashAllTool::Flash</code>（:1799/:1801）、<code>FastBootTool::Main</code> 的 update 收尾（:2633-2634 的 <code>fb-&gt;SetActive(next_active)</code>），以及 <code>FB_CMD_SET_ACTIVE</code> 命令分支（:2549-2551，即 <code>fastboot set-active &lt;slot&gt;</code> 这条用户命令：<code>:2550</code> 先 <code>verify_slot</code>，<code>:2551</code> 直接 <code>fb-&gt;SetActive(slot)</code>）。而 :2407-2421 那段（<code>if (fp-&gt;wants_set_active)</code> 的完整闭合块）只是 <code>wants_set_active</code> 标志的判定与 <code>next_active</code> 取值，不是写入动作本身。</li><li>若换 <code>flashall</code>：<code>FlashAllTool::Flash</code>（:1792）先按 <code>slot_override</code> 调 <code>set_active</code>（内部先 <code>supports_AB</code>（:1543）判 A/B，再 <code>get_current_slot</code>（:1548）取当前槽），再 <code>DetermineSlot</code>、<code>CollectTasks</code>，最后才逐任务执行 <code>FlashTask::Run</code>（<code>task.cpp:156</code>）——注意不是直接 <code>do_flash</code>：<code>FlashTask::Run</code> 内部按分区类型分派，只有 fastbootd、静态分区或 <code>--force</code> 这三种情况才落到 <code>do_flash</code>（:165/:169），动态分区走 super 元数据那条路（:175-213）。也就是说 slot 动作发生在逐分区刷写之前，<code>do_flash</code> 也不是 <code>flashall</code> 的必经函数。</li><li>BCB（<code>bootloader_message.cpp</code> 的 <code>read_bootloader_message</code>/<code>write_bootloader_message</code>，:155/:169）是 recovery/bootloader 之间的独立状态接口：宿主 <code>fastboot.cpp</code> 全文不读写 BCB，刷写流程的状态推进不经过它。</li></ol>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P8-101</code> 给 bootloader 交棒时序，本篇给交棒前的镜像字节契约，两者是前置与承接。</li><li>镜像的<strong>构建产出</strong>（怎么生成、怎么打包进目标文件）归 <code>AND-P5-101</code> 与 <code>AND-P11</code>，本篇不重复。</li><li>A/B 与虚拟分区的<strong>策略层</strong>（何时切、如何回滚）归 <code>P11</code>；本篇只描述 <code>fastboot</code> 用哪些函数读这些状态。</li><li>系统服务编排（Zygote、SystemServer）属本卷后续篇（卷纲未立项编号前称「后续篇」），不在本篇范围。</li><li>厂商 bootloader 内部实现不在本树，本篇只能到 <code>bootloader_message.cpp</code> 的接口边界；BCB 属 recovery/bootloader 侧接口，宿主 flash 链路不读写。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>刷写任务层</td><td><code>system/core/fastboot/task.cpp</code> / <code>task.h</code></td><td><code>FlashTask::Run</code>（task.cpp:156）、<code>class FlashTask</code>（task.h:49）、<code>CollectTasks</code></td><td>flashall 的实际执行层；fastbootd/静态/动态三条分派在此</td></tr><tr><td>头格式定义</td><td><code>system/tools/mkbootimg/include/bootimg/bootimg.h</code></td><td><code>BOOT_MAGIC</code>、<code>VENDOR_BOOT_MAGIC</code>、<code>boot_img_hdr</code>、<code>boot_img_hdr_v0</code>–<code>v4</code>、<code>vendor_boot_img_hdr_v3</code>/<code>v4</code></td><td>433 行；七套头结构并存：<code>boot_img_hdr_v0</code>（:80）/<code>v1</code>（:169，继承 v0）/<code>v2</code>（:212，继承 v1）/<code>v3</code>（:263，独立重起）/<code>v4</code>（:413，继承 v3），加 <code>vendor_boot_img_hdr_v3</code>（:299）/<code>v4</code>（:417，继承 v3）</td></tr><tr><td>镜像打包</td><td><code>system/tools/mkbootimg/mkbootimg.py</code></td><td>头字段写出、页对齐填充</td><td>666 行，决定镜像字节序</td></tr><tr><td>宿主刷机主流程</td><td><code>system/core/fastboot/fastboot.cpp</code></td><td><code>do_flash</code>、<code>set_active</code>、<code>rewrite_vbmeta_buffer</code></td><td>2684 行，命令分派与下发</td></tr><tr><td>宿主进程入口</td><td><code>system/core/fastboot/main.cpp</code></td><td><code>int main(int argc, char* argv[])</code></td><td>入口在 :31</td></tr><tr><td>宿主镜像工具</td><td><code>system/core/fastboot/bootimg_utils.cpp</code></td><td>头解析与切片辅助</td><td>130 行</td></tr><tr><td>设备侧 fastboot</td><td><code>bootable/recovery/fastboot/fastboot.cpp</code></td><td>fastbootd 的 recovery UI 集成件</td><td>107 行，菜单胶水</td></tr><tr><td>vbmeta 处理</td><td><code>external/avb/libavb/avb_vbmeta_image.c</code></td><td>vbmeta 结构编解码</td><td>366 行</td></tr><tr><td>BCB 状态块</td><td><code>bootable/recovery/bootloader_message/bootloader_message.cpp</code></td><td><code>bootloader control</code> 结构</td><td>bootloader 与系统互递状态</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e381｜bootable/recovery:080f671785c8｜external/avb:ba2dec4b035b</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">git -C system/core rev-parse HEAD</code></pre>
+<p>期望输出以 <code>545d2487e381</code> 开头，对上文锚点。</p>
+<pre><code class="lang-bash">grep -n 'BOOT_MAGIC\|VENDOR_BOOT_MAGIC\|typedef struct boot_img_hdr_v0' \
+  system/tools/mkbootimg/include/bootimg/bootimg.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中三行，分别在 :34、:40、:133。</p>
+<pre><code class="lang-bash">wc -l system/tools/mkbootimg/include/bootimg/bootimg.h \
+      system/tools/mkbootimg/mkbootimg.py \
+      system/core/fastboot/fastboot.cpp \
+      system/core/fastboot/bootimg_utils.cpp \
+      bootable/recovery/fastboot/fastboot.cpp \
+      external/avb/libavb/avb_vbmeta_image.c</code></pre>
+<p>期望依次为 433、666、2684、130、107、366。</p>
+<pre><code class="lang-bash">grep -n 'do_flash\|set_active(\|is_userspace_fastboot\|reboot_to_userspace_fastboot\|get_current_slot(\|supports_AB(\|rewrite_vbmeta_buffer\|copy_avb_footer' \
+  system/core/fastboot/fastboot.cpp | head -40</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中各函数定义 <code>:1509</code>、<code>:1542</code>、<code>:1555</code>、<code>:1560</code>、<code>:1285</code>、<code>:1302</code>、<code>:1079</code>、<code>:1171</code>；另应看到 <code>set_active</code> 的写入动作至少三处：<code>:1799</code>/<code>:1801</code>（<code>FlashAllTool::Flash</code>）、<code>:2633-2634</code>（<code>FastBootTool::Main</code> update 收尾的 <code>fb-&gt;SetActive(next_active)</code>）、<code>:2549-2551</code>（<code>FB_CMD_SET_ACTIVE</code> 分支的 <code>fb-&gt;SetActive(slot)</code>）；<code>:2407-2421</code> 只是 <code>wants_set_active</code> 标志判定与 <code>next_active</code> 取值；<code>is_userspace_fastboot</code> 在 <code>fastboot.cpp</code> 内的唯一调用点是 <code>:1574</code>（<code>reboot_to_userspace_fastboot</code> 内部），跨文件另有四处：<code>task.cpp:157</code>（<code>FlashTask::Run</code>）、<code>:246</code>（<code>RebootTask::Run</code>）、<code>:411</code>（<code>UpdateSuperTask::Run</code>）、<code>:436</code>（<code>ResizeTask::Run</code>），其中 <code>:247</code>/<code>:412</code> 还分别调 <code>reboot_to_userspace_fastboot</code>；<code>do_flash</code> 函数体（:1509-1538）内不含这三个 slot/用户态函数——由此可自证 §4.3 的分层。</p>
+<pre><code class="lang-bash">sed -n '31p' system/core/fastboot/main.cpp</code></pre>
+<p>期望输出 <code>int main(int argc, char* argv[])</code>。</p>
+<pre><code class="lang-bash">sed -n '618p' system/core/fastboot/fastboot.cpp</code></pre>
+<p>期望看到 <code>--page-size</code> 及其默认值 2048 的说明文本。</p>
+<pre><code class="lang-bash">grep -n &quot;is_userspace_fastboot\|do_flash\|flash_partition&quot; system/core/fastboot/task.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:157</code>（<code>is_userspace_fastboot</code>）、<code>:165</code> 与 <code>:169</code>（两处 <code>do_flash</code>）、<code>:213</code>（<code>flash_partition(fp_, &quot;super&quot;, ...)</code>），对上 §4.3 步骤 2 的三路分派。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`boot_img_hdr` 是最新版本的头结构。</strong> 错。<code>bootimg.h:133</code> 写的是 <code>typedef struct boot_img_hdr_v0 boot_img_hdr</code>，即别名指向 v0。v0（:80-127）里没有 <code>recovery_dtbo_size</code> 与 <code>header_size</code>，这两个字段要到 <code>boot_img_hdr_v1</code>（:169-173）才出现；按「最新字段」写解析代码必然错位。</p>
+<p><strong>误区二：`fastboot flash` 和 `fastboot flashall` 只是刷的分区数量不同。</strong> 不完全对。<code>flashall</code> 由 <code>FlashAllTool::Flash</code>（:1792）驱动，会在逐分区刷写<strong>之前</strong>先 <code>set_active</code>（:1542，内部先 <code>supports_AB</code> 判 A/B、再 <code>get_current_slot</code> 取当前槽）。单分区 <code>flash</code> 走 <code>do_flash</code>（:1509-1538）→ <code>flash_buf</code>（:1254），不碰 slot。vbmeta 重算（<code>rewrite_vbmeta_buffer</code>，:1079）也不在 <code>flash</code> 的常规路径上自动发生——只有 <code>--disable-verity</code>/<code>--disable-verification</code> 置位时才触发。触发时它始终排在 <code>copy_avb_footer</code>（:1171）之后。</p>
+<p><strong>误区三：设备上只有一个 fastboot。</strong> 错。宿主侧 <code>fastboot.cpp</code> 与设备侧 <code>bootable/recovery/fastboot/fastboot.cpp</code>（107 行）是两套代码，后者是 fastbootd 在 recovery 侧的 UI 集成件（菜单胶水），fastbootd 守护进程主体不在本树。用 <code>is_userspace_fastboot</code>（:1555）才能区分当前在哪一侧。</p>
+<p><strong>误区四（看起来对其实是错的）：`--page-size` 只是个性能参数。</strong> 它同时是镜像布局参数。默认 2048（<code>fastboot.cpp:618</code> 的用法文本给出该默认值，取值约束在 <code>mkbootimg.py:537</code>），打包与下发两侧必须一致，否则设备按错位解释头部。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>boot</code> 与 <code>flash</code> 都下发镜像，差别在哪？ <strong>答</strong>：<code>boot</code> 下载后直接启动，不落盘；<code>flash</code> 走 <code>do_flash</code>（:1509）写入具名分区。 <strong>追问</strong>：那调试时为什么不都用 <code>boot</code>？ <strong>答</strong>：<code>boot</code> 不验证「写盘后的实际布局」，落盘路径的问题只能靠 <code>flash</code> 复现。</p>
+<p><strong>问</strong>：<code>getvar is-userspace</code> 返回真，说明设备已经在 fastbootd 里了吗？ <strong>答</strong>：是。<code>is_userspace_fastboot</code>（:1555）就是这一判断的代码落点：它向设备 <code>GetVar(&quot;is-userspace&quot;)</code> 并比对返回值。返回真表示当前会话走的是用户态 fastboot；设备侧对应 <code>bootable/recovery/fastboot/fastboot.cpp</code> 那套 recovery UI 集成件（fastbootd 守护进程主体不在本树）。 <strong>追问</strong>：此时 <code>flashing unlock</code> 还能用吗？ <strong>答</strong>：取决于当前执行体。命令是否被接受由当前执行的一侧决定，不能只看命令名。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td><code>flash</code> 报分区不存在</td><td><code>fastboot getvar all</code></td><td>输出里是否有目标分区名与 slot 后缀</td><td>用 <code>get_current_slot</code> 对应规则确认分区名拼写</td></tr><tr><td>刷完起不来，无报错</td><td><code>fastboot getvar is-userspace</code></td><td>当前处于 bootloader 还是 fastbootd</td><td>若为真，改从 bootloader 侧重执行 <code>flashall</code></td></tr><tr><td><code>flashall</code> 中途停住</td><td><code>fastboot getvar current-slot</code></td><td>slot 是否在刷写中被切换</td><td>复核 <code>set_active</code>（:1542）的调用时序</td></tr><tr><td>镜像头解析错位</td><td><code>grep -n 'BOOT_MAGIC' system/tools/mkbootimg/include/bootimg/bootimg.h</code></td><td>魔数定义位置与内容</td><td>按 <code>bootimg.h:34</code> 重对头字段顺序</td></tr><tr><td>校验失败但签名正确</td><td><code>grep -n 'rewrite_vbmeta_buffer|copy_avb_footer' system/core/fastboot/fastboot.cpp</code></td><td>两个函数是否在本次路径被触达</td><td>检查 vbmeta 是否随分区状态被重算</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：镜像的构建产出流程见 <code>AND-P5-101</code>、<code>AND-P11</code>；A/B 与虚拟分区的策略层见 <code>P11</code>；厂商 bootloader 内部实现不在本树。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P8-101</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P8-201</code>（init.rc 解析）；系统服务编排属本卷后续篇（卷纲未立项编号）。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>bootimg.h</code> 433 行、<code>fastboot.cpp</code> 2684 行、<code>mkbootimg.py</code> 666 行、<code>avb_vbmeta_image.c</code> 366 行、设备侧 <code>fastboot.cpp</code> 107 行、<code>bootimg_utils.cpp</code> 130 行——均为源码文件行数，口径为 2026-10-19 于 <code>android17-release</code> 实测。</li><li>页大小默认 2048 字节；命令行侧出处为 <code>fastboot.cpp:618</code> 的用法文本，实际生效的取值约束在 <code>mkbootimg.py:537</code>（<code>--pagesize</code> 仅接受 2^11 至 2^14 四档）。</li><li>头版本别名指向 v0，来源为 <code>bootimg.h:133</code>；<code>boot_img_hdr_v0</code> 定义在 :80-127，<code>recovery_dtbo_size</code>/<code>header_size</code> 属 <code>boot_img_hdr_v1</code>（:169-173）。</li><li>镜像各段最大尺寸受结构体字段位宽约束：<code>kernel_size</code>、<code>ramdisk_size</code>、<code>second_size</code>、<code>recovery_dtbo_size</code>、<code>header_size</code> 均为 <code>uint32_t</code>（<code>bootimg.h:84/:87/:90/:170/:172</code>），单段上界约 4 GiB；实际可用值还要过 flash 分区与页对齐两道裁剪。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>历史版本</td><td><code>boot_img_hdr</code> 曾以单一结构存在，vendor_boot 尚未成为独立镜像类型</td><td>老工具链不认 <code>VENDOR_BOOT_MAGIC</code></td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>BOOT_MAGIC</code> 在 <code>bootimg.h:34</code>、<code>VENDOR_BOOT_MAGIC</code> 在 :40、<code>boot_img_hdr</code> 别名为 v0 在 :133；v0 定义 :80-127，<code>recovery_dtbo_size</code>/<code>header_size</code> 属 v1（:169-173）；fastboot 命令族见 <code>fastboot.cpp:553-659</code>；<code>--page-size</code> 默认 2048 在 :618</td><td>解析方必须同时处理两类魔数与 v0 别名，且不得把 v1 字段套到 v0 头上</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>boot image</code>、<code>fastboot</code>、<code>AVB</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>mkbootimg</code>、<code>bootimg.h</code>、<code>fastbootd</code>、<code>vbmeta</code>。</li><li>本仓关键路径：<code>system/tools/mkbootimg/</code>、<code>system/core/fastboot/</code>、<code>external/avb/libavb/</code>。</li><li>承接篇：<code>AND-P8-101</code>、<code>AND-P5-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P8-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

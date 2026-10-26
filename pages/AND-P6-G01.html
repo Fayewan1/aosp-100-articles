@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：一帧画面的旅程</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：一帧画面的旅程</h1>
+<div class="kv"><span>ID：AND-P6-G01</span><span>卷：P6</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp ；frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp ；frameworks/native/libs/gui/BufferQueueProducer.cpp ；frameworks/base/libs/hwui/renderthread/RenderThread.cpp ；frameworks/base/core/java/android/view/Choreographer.java ；hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一帧画面从应用侧 <code>RenderThread</code> 画出来，经 Surface 排队、由 SurfaceFlinger 合成、最后交给 HWC 上屏。这四段各自有独立的时间预算与失败形态，出问题的地方决定该翻哪一篇。本卷 9 篇按这条链路排成 6.1–6.4 章：先看栈全景，再拆 Surface 与 BufferQueue，然后进 SurfaceFlinger 与 HWUI 两条主干，最后是帧调度、窗口体系、特殊合成与 Vulkan。读这篇导读能拿到路线图，不能拿到任何一段的细节。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P2-202</code>（WindowManagerService 与 Surface 分配）。不懂 Surface 由谁创建、归属哪个窗口，后面 102 和 302 都会悬空。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp</code></li><li><code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code></li><li><code>frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></li><li><code>frameworks/base/core/java/android/view/Choreographer.java</code></li><li><code>hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你手上有个界面，滑动时偶发掉一帧，<code>dumpsys gfxinfo</code> 里某一栏数字超标，但看不出是谁慢。有人告诉你「GPU 慢」，有人说是「合成器没跟上」，还有人让你查 vsync。这三个答案分属链路三段，不先分清段位，翻源码只会到处乱撞。本卷就是给这条链路分段，并告诉你每段该看哪个文件、哪个入口、哪篇正文。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>链路上四个角色：应用渲染线程（<code>RenderThread</code>）负责把视图树画进一块图形缓冲；Surface 是这块缓冲的持有者与排队口；SurfaceFlinger 把各层合成一帧；HWC 负责最终扫描上屏。</p>
+<p>图 1：一帧的四个阶段与对应篇号</p>
+<pre><code>应用画        Surface 流转     合成            上屏
+RenderThread → BufferQueue  → SurfaceFlinger → HWC
+   (202)         (102)           (201)          (201)</code></pre>
+<p>四段之间是排队关系，不是串行函数调用。任何一段拿不到资源或被推迟，整帧就滑到下一个 vsync 周期。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇的分工如下。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P6-G01</code></td><td>卷导读：一帧画面的旅程</td><td>入口与路线图</td></tr><tr><td><code>AND-P6-101</code></td><td>图形栈全景：从 OpenGL ES 到 Vulkan 的演进</td><td>定坐标：从应用到 HWC 的完整分层</td></tr><tr><td><code>AND-P6-102</code></td><td>Surface 与 BufferQueue：生产消费模型与队列流转</td><td>拆排队机制：生产者、消费者、共享核心</td></tr><tr><td><code>AND-P6-201</code></td><td>SurfaceFlinger：合成策略、Buffer 队列与 vsync 模型</td><td>锚点篇，合成主干</td></tr><tr><td><code>AND-P6-202</code></td><td>HWUI 与 RenderThread：DisplayList 与 Skia/Vulkan 后端</td><td>应用侧怎么把一帧画出来</td></tr><tr><td><code>AND-P6-301</code></td><td>Choreographer 与帧调度：VSYNC 回调与丢帧分析</td><td>谁决定这一帧什么时候开始画</td></tr><tr><td><code>AND-P6-302</code></td><td>窗口体系：Window、Token、动画与层级</td><td>层级、Z 序与 Surface 归属谁说了算</td></tr><tr><td><code>AND-P6-401</code></td><td>特殊合成场景：壁纸、悬浮窗、多屏与外接显示</td><td>壁纸、悬浮窗、多屏与外接显示等非常规合成路径</td></tr><tr><td><code>AND-P6-402</code></td><td>Vulkan 在 Android 的落地与差异</td><td>图形 API 的另一条分支</td></tr></tbody></table>
+<p>依赖链：<code>101</code> 给全景后可任选分支 → <code>102</code> 与 <code>202</code> 可分头读（前者看缓冲流转，后者看画的动作）→ 两篇都收敛到 <code>201</code>（锚点篇）→ <code>301</code> 和 <code>302</code> 分别从时间与层级两个方向补前置条件 → <code>401</code>、<code>402</code> 在主干之后收尾。只读一篇就选 <code>201</code>。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>系统启动到能合成，入口在 <code>frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp</code>：<code>int main()</code> 在 :61，随后 :71 执行 <code>ProcessState::self()-&gt;setThreadPoolMaxThreadCount(4)</code>——合成服务一上来就把 Binder 线程池上限设为 4。服务主体的 <code>SurfaceFlinger.cpp</code> 共 11072 行，全部合成逻辑与层管理都在这一个文件里。这就是 201 那篇要读的对象量级。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置：<code>AND-P2-202</code>（WindowManagerService 与 Surface 分配）是 G01 与 102／302 的共同前置；<code>AND-P4-202</code>（图形 HAL）是 201 的前置；<code>AND-P1-401</code>（View 渲染请求）是 202 的前置。</li><li>出卷：<code>301</code> → <code>P10-202</code>（jank 分析）；<code>101</code>／<code>102</code> → <code>P7-301</code>（相机预览流）；<code>201</code> 的 vsync 模型 → <code>P5-401</code>（内核 vsync／te）对读。</li><li>边界：本篇只给地图，图形 API 栈细节归 101，BufferQueue 机制归 102，合成归 201，HWUI 归 202，帧调度归 301，窗口体系归 302。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>合成服务主体</td><td><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></td><td>11072 行</td><td>201 的主战场</td></tr><tr><td>合成服务入口</td><td><code>frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp</code></td><td><code>int main()</code> :61、<code>setThreadPoolMaxThreadCount(4)</code> :71</td><td>服务启动口径</td></tr><tr><td>生产者侧排队</td><td><code>frameworks/native/libs/gui/BufferQueueProducer.cpp</code></td><td>2062 行</td><td>102 的入口</td></tr><tr><td>应用渲染线程</td><td><code>frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></td><td>512 行</td><td>202 的入口</td></tr><tr><td>帧调度</td><td><code>frameworks/base/core/java/android/view/Choreographer.java</code></td><td>1741 行</td><td>301 的入口</td></tr><tr><td>合成 HAL 接口</td><td><code>hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></td><td>991 行；<code>interface IComposerClient</code> :54；<code>void setPowerMode(long display, PowerMode mode)</code> :775</td><td>201 的 HAL 边界</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/native rev-parse HEAD</code></pre>
+<p>期望输出 <code>ae266dcb70</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp frameworks/native/libs/gui/BufferQueueProducer.cpp frameworks/native/libs/gui/BufferQueueConsumer.cpp frameworks/native/libs/gui/BufferQueueCore.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次得到 11072、2062、1011、523——对应合成主体与 BufferQueue 三件套的体量。</p>
+<pre><code class="lang-bash">grep -n &quot;setThreadPoolMaxThreadCount&quot; frameworks/native/services/surfaceflinger/main_surfaceflinger.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :71，与 <code>int main()</code>（:61）同处一个启动序列。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/libs/hwui/renderthread/RenderThread.cpp frameworks/base/core/java/android/view/Choreographer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 512 与 1741，即应用侧两条主干文件的规模。</p>
+<pre><code class="lang-bash">sed -n '54p;775p' hardware/interfaces/graphics/composer/aidl/android/hardware/graphics/composer3/IComposerClient.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别出现 <code>interface IComposerClient</code> 与 <code>void setPowerMode(long display, PowerMode mode)</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「掉帧就是 GPU 慢」。掉帧可能发生在排队、合成或 vsync 对齐上，只有先定位段位才有意义。</li><li>「Surface 就是一块显存」。Surface 是缓冲持有者与排队口，缓冲本身来自生产者分配。</li><li>「看起来对其实是错的」：以为 SurfaceFlinger 是应用进程的一部分。它在独立进程里，<code>main_surfaceflinger.cpp</code> 的 <code>int main()</code> 就是它自己的入口。</li><li>「帧调度归合成器管」。下发 vsync 与应用侧决定何时开始画是两件事，前者看 201，后者看 301。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：只想快速判断问题在哪一段，读哪篇？ <strong>答</strong>：先读 101 拿全景，再按现象选 202（画得慢）、102（排队卡）或 201（合成慢）。 <strong>追问</strong>：能不能跳过 101？ <strong>答</strong>：能，但 101 是唯一一次把四段摆在一起讲的地方，跳过容易把因果搞反。</p>
+<p><strong>问</strong>：为什么锚点篇是 201 而不是 101？ <strong>答</strong>：<code>SurfaceFlinger.cpp</code> 11072 行承载了合成、层管理与 HAL 交互的全部主干，是链路收敛点。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑合成慢</td><td><code>wc -l frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></td><td>是否 11072 行，确认树版本</td><td>版本不同则按符号重锚，转 201</td></tr><tr><td>怀疑排队卡住</td><td><code>grep -n &quot;dequeueBuffer&quot; frameworks/native/libs/gui/BufferQueueProducer.cpp</code></td><td>命中位置与调用上下文</td><td>转 102 读三件套分工</td></tr><tr><td>怀疑应用画得慢</td><td><code>wc -l frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></td><td>是否 512 行</td><td>转 202</td></tr><tr><td>怀疑 vsync 对齐</td><td><code>grep -n &quot;postCallback&quot; frameworks/base/core/java/android/view/Choreographer.java</code></td><td>回调投递点</td><td>转 301</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：图形 API 栈细节（101）、BufferQueue 机制（102）、合成（201）、HWUI 渲染（202）、帧调度（301）、窗口体系（302）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P2-202</code>、<code>AND-P4-202</code>、<code>AND-P1-401</code>。</li><li><strong>本篇后继</strong>：<code>AND-P6-101</code> 起至 <code>AND-P6-402</code> 共 8 篇；跨卷见 <code>P10-202</code>、<code>P7-301</code>、<code>P5-401</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>本卷篇数 9 篇，章节编号 6.1–6.4（口径：本卷编排）。</li><li><code>SurfaceFlinger.cpp</code> 11072 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>BufferQueue 三件套 2062／1011／523 行（同上口径）。</li><li>合成服务 Binder 线程池上限 4（口径：源码常量，<code>main_surfaceflinger.cpp</code> :71）。</li><li>单帧时间预算按屏幕刷新率推算，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>SurfaceFlinger.cpp</code> 11072 行；<code>main_surfaceflinger.cpp</code> 的 <code>int main()</code> 在 :61、线程池上限设在 :71</td><td>本篇所有行号与行数的基准</td></tr><tr><td>更早版本</td><td>合成 HAL 的 AIDL 接口行数与内容不同，<code>IComposerClient.aidl</code> 非 991 行</td><td>按符号 grep 重锚，行号不可跨版本沿用</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>；developer.android.com 站内检索 <code>frame pacing</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>surfaceflinger</code>、<code>BufferQueue</code>。</li><li>本仓关键路径：<code>frameworks/native/services/surfaceflinger/</code>、<code>frameworks/native/libs/gui/</code>、<code>frameworks/base/libs/hwui/</code>。</li><li>承接篇：<code>AND-P6-101</code>、<code>AND-P6-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>repo 工作流与 project.list：多仓库协同的日常</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>repo 工作流与 project.list：多仓库协同的日常</h1>
+<div class="kv"><span>ID：AND-P0-201</span><span>卷：P0</span><span>章：0.2</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：.repo/manifests/default.xml ；.repo/repo/repo ；build/make/envsetup.sh ；build/envsetup.sh</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>AOSP 不是一个大仓库，而是上千个独立 git 仓的集合，<code>repo</code> 是管这些仓的元工具。日常操作只有几条：<code>repo init</code> 建 <code>.repo</code>、<code>repo sync</code> 同步、<code>repo start</code> 开分支、<code>repo forall</code> 批处理。同步后 <code>.repo/project.list</code> 列出按当前 manifest 分组筛选后应存在的项目，本树 1084 行。真正决定同步行为的文件在 <code>.repo/manifests/</code> 下，<code>.repo/manifest.xml</code> 只是生成物。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P0-102，先知道源码树里各目录放什么，再谈怎么用 repo 操作它们。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>.repo/manifests/default.xml</code></li><li><code>.repo/manifest.xml</code></li><li><code>.repo/project.list</code></li><li><code>.repo/repo/repo</code></li><li><code>build/make/envsetup.sh</code></li><li><code>build/envsetup.sh</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树 + git/grep；验证方式为静态源码分析，不需要编译与真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p><code>repo sync</code> 跑完，屏幕上滚过几百行，然后你发现某个目录是空的。你以为是网络问题，重跑一遍还是空。另一种情况：想改同步的分支和并发数，顺手编辑 <code>.repo/manifest.xml</code>，下次 sync 后改动全没了。两个现象指向同一件事：没分清「生成物」与「输入源」。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：manifest（同步行为的输入源）、<code>.repo</code>（元数据目录）、project（一个独立 git 仓）、project.list（manifest 分组过滤后的项目清单）。</p>
+<p>图 1：repo init 到同步取树的流程</p>
+<pre><code>repo init -u &lt;url&gt; -b &lt;rev&gt;
+        |
+        v
+   .repo/manifests/ ---&gt; .repo/manifest.xml (生成物)
+                              |
+                       repo sync -j N
+                              |
+                              v
+                    各子仓 + .repo/project.list</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>manifest 的关键属性定义了整棵树的基线，读 <code>.repo/manifests/default.xml</code> 可直接确认：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>default revision</code></td><td>未显式指定时各仓共用的分支，本树为 <code>android17-release</code></td><td><code>.repo/manifests/default.xml</code></td></tr><tr><td><code>remote fetch</code></td><td>远端地址前缀，aosp 为 <code>..</code></td><td>同上</td></tr><tr><td><code>review</code></td><td>代码评审站点</td><td>同上</td></tr><tr><td><code>sync-j</code></td><td>默认并发数，本树 4</td><td>同上</td></tr></tbody></table>
+<p>同族命令的语义分工：</p>
+<table><thead><tr><th>命令</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>repo init -u &lt;manifest-url&gt; -b &lt;revision&gt;</code></td><td>拉 manifest 建 <code>.repo</code></td><td>repo 帮助</td></tr><tr><td><code>repo sync [-j N]</code></td><td>按 manifest 同步各仓并写出项目清单</td><td>repo 帮助</td></tr><tr><td><code>repo start &lt;branch&gt; --all</code></td><td>在各仓建工作分支</td><td>repo 帮助</td></tr><tr><td><code>repo forall -c '&lt;cmd&gt;'</code></td><td>跨仓批处理</td><td>repo 帮助</td></tr></tbody></table>
+<p>看单个仓时就是普通 git：在 <code>frameworks/base</code> 下执行 git 命令只影响该仓，跨仓一致性由 manifest 里各 project 的 revision 字段锁定。repo 工具自身也是一个 git 仓，位于 <code>.repo/repo</code>，入口 <code>.repo/repo/repo</code>，本树 HEAD 为 e1e215a（2026-09-23）。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>场景：某目录同步后为空。</p>
+<p>先看生成物 <code>.repo/manifest.xml</code>：头部写明 DO NOT EDIT，全文约 514 字节，由 repo 在 init/sync 时生成。接着看输入源 <code>.repo/manifests/default.xml</code>，它的 revision 是 <code>android17-release</code>、sync-j 为 4。</p>
+<p>再数 <code>.repo/project.list</code>：本树 1084 行，等于分组过滤后的全集（1087 − 3 notdefault），不等于成功清单。清单里没有的仓本地必为空——3 个 darwin 预编译项目因分组未选而不在其中；但清单内的项目也可能因 fetch 失败没落地，那才是故障。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P0-102 回答「树里有什么、各目录放什么」，本篇回答「怎么把这些仓拉到本地、怎么批量操作」，不复述目录分布。repo sync 的耗时不写在本篇；产品配置归后续构建卷。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>同步输入源</td><td><code>.repo/manifests/default.xml</code></td><td><code>android17-release</code>、fetch <code>..</code>、sync-j <code>4</code></td><td>改同步行为改这里</td></tr><tr><td>生成物</td><td><code>.repo/manifest.xml</code></td><td>DO NOT EDIT，约 514 字节</td><td>init/sync 时生成，勿手改</td></tr><tr><td>repo 工具</td><td><code>.repo/repo/repo</code></td><td>HEAD e1e215a</td><td>元工具自身入口</td></tr><tr><td>同步结果清单</td><td><code>.repo/project.list</code></td><td>1084 行</td><td>已同步项目列表</td></tr><tr><td>环境函数</td><td><code>build/make/envsetup.sh</code></td><td>提供 <code>lunch</code> 等</td><td><code>build/envsetup.sh</code> 符号链接至此</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1) 看 manifest 关键属性（对应 §4.2）
+grep -E 'revision|sync-j|fetch' .repo/manifests/default.xml | head
+
+# 2) 确认生成物带 DO NOT EDIT（对应 §4.3）
+head -c 120 .repo/manifest.xml
+
+# 3) 数已同步项目数（期望 1084）
+wc -l .repo/project.list
+
+# 4) 看单仓 HEAD，确认仓独立性（期望 94b4c163b7df）
+git -C frameworks/base rev-parse HEAD
+
+# 5) 确认 envsetup 是符号链接（指向 build/make/envsetup.sh）
+ls -l build/envsetup.sh
+
+# 6) 确认 repo 工具自身也检在仓里
+git -C .repo/repo rev-parse --short HEAD</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：改 `.repo/manifest.xml` 能改同步行为。</strong> 它是 init/sync 时生成的产物，下次同步即被覆盖；要改的是 <code>.repo/manifests/</code> 下的 manifest。</p>
+<p><strong>误区二：目录是空的说明 sync 失败。</strong> 看起来对，其实常常是错的：不在 <code>.repo/project.list</code> 里的项目本来就不会落地，本树 3 个 darwin 预编译项目即属此类。</p>
+<p><strong>误区三：在某个子仓里用 git 能影响整棵树。</strong> 每个子仓都是独立 git 仓，跨仓一致性由 manifest 的 revision 字段锁定。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>repo sync</code> 报错后，怎么知道哪些项目同步成功了？ <strong>答</strong>：看 <code>repo sync</code> 的退出码与输出里的 <code>Failing repos (network/checkout)</code>；<code>.repo/project.list</code> 只说明本次 manifest 的范围，与 fetch 成败无关。 <strong>追问</strong>：那我怎么知道构建时哪些目录该有内容？ <strong>答</strong>：以 manifest 的 project 全集减去 project.list，差集是分组未选的项目；清单内仍可能有 fetch 失败项，须核 sync 输出。</p>
+<p><strong>问</strong>：不编整棵树，只想用 <code>lunch</code> 选产品，要先做什么？ <strong>答</strong>：先 <code>source build/envsetup.sh</code>，它是指向 <code>build/make/envsetup.sh</code> 的符号链接。 <strong>追问</strong>：不 source 行不行？ <strong>答</strong>：不行，<code>lunch</code> 等函数由该脚本引入当前 shell。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>某目录为空</td><td><code>wc -l .repo/project.list</code></td><td>行数 1084 且目录仍空</td><td>查 sync 输出的失败仓列表</td></tr><tr><td>手改 manifest 后失效</td><td><code>head -c 120 .repo/manifest.xml</code></td><td>是否有 DO NOT EDIT</td><td>改到 <code>.repo/manifests/</code> 下</td></tr><tr><td><code>lunch</code> 命令找不到</td><td><code>ls -l build/envsetup.sh</code></td><td>符号链接是否指向 <code>build/make/envsetup.sh</code></td><td>重新 <code>source build/envsetup.sh</code></td></tr><tr><td>想知道当前分支基线</td><td><code>grep revision .repo/manifests/default.xml</code></td><td>是否为 <code>android17-release</code></td><td>按需切分支重同步</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：源码树的目录分布与各子目录职责，见 AND-P0-102。</p>
+<p><strong>本篇前置依赖</strong>：AND-P0-102。</p>
+<p><strong>本篇后继</strong>：构建与环境配置、跨仓提交与评审相关后续篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>.repo/project.list</code> 为 1084 行，由 <code>repo sync</code> 的 <code>UpdateProjectList</code> 写出（<code>.repo/repo/subcmds/sync.py</code> 约 1778 行；2026-10-14 实测）。</li><li>manifest 的 <code>sync-j</code> 为 4，口径为 <code>.repo/manifests/default.xml</code> 元数据。</li><li><code>.repo/manifest.xml</code> 约 514 字节（生成物文件大小，2026-10-14 实测）。</li><li><code>.repo/repo</code> HEAD 为 e1e215a（2026-09-23），口径为提交历史。</li><li>各仓 HEAD 提交日期跨 2020-04 至 2026-06，主体多在 2024-12 之后（project.list 内 1084 仓实测，不含 <code>.repo/repo</code>，其 HEAD 2026-09-23 在区间外，2026-10-14）。</li><li>未同步项目数 3，口径为 manifest 中 groups 含 <code>notdefault</code>/<code>darwin</code> 的 darwin 预编译项目。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树（android17-release）</td><td>default revision 为 <code>android17-release</code>，sync-j 为 4，project.list 1084 行</td><td>本篇基线，命令语义以实测为准</td></tr><tr><td>早期分支</td><td>分支名与同步项目集不同</td><td>project.list 行数随之变化</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>repo</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>envsetup</code> 或 <code>manifest</code>。</li><li>本仓关键路径：<code>.repo/manifests/default.xml</code>、<code>.repo/repo/repo</code>、<code>build/make/envsetup.sh</code>。</li><li>承接篇：AND-P0-102。</li></ul>
+</article>
+<footer>android-100 · AND-P0-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>输入子系统：evdev、多点触控与按键映射</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>输入子系统：evdev、多点触控与按键映射</h1>
+<div class="kv"><span>ID：AND-P5-302</span><span>卷：P5</span><span>章：5.4</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：bionic/libc/kernel/uapi/linux/input.h ；bionic/libc/kernel/uapi/linux/input-event-codes.h ；frameworks/native/services/inputflinger/reader/EventHub.cpp ；frameworks/native/services/inputflinger/reader/InputReader.cpp ；frameworks/native/services/inputflinger/InputManager.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>触摸和按键在内核侧统一成一种东西：<code>/dev/input/event*</code> 上按 8 字节时间戳加三个定长字段排列的事件流。用户态不「问」设备状态，而是 <code>read</code> 事件、用 <code>EVIOCG*</code> 系列 ioctl 查能力和常量、用 <code>EVIOCS*</code> 系列改配置。多点触控不是多个设备，而是同一设备上以 <code>ABS_MT_SLOT</code> 切换槽位、<code>ABS_MT_TRACKING_ID</code> 标记触点生死的协议。按键码不是内核规定的，内核只给 scancode，映射由 <code>input_keymap_entry</code> 描述、由上层查表翻译。一次手势的边界由 <code>SYN_REPORT</code> 划出：同一帧里槽位状态写全再报同步，上层才看到一个完整快照。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P5-G01</code>——先建立内核对上暴露的「文件描述符 + ioctl + 事件流」这层抽象，再看输入子系统怎么用它。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>bionic/libc/kernel/uapi/linux/input.h</code></li><li><code>bionic/libc/kernel/uapi/linux/input-event-codes.h</code></li><li><code>frameworks/native/services/inputflinger/reader/EventHub.cpp</code></li><li><code>frameworks/native/services/inputflinger/reader/InputReader.cpp</code></li><li><code>frameworks/native/services/inputflinger/InputManager.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>调试一次点击延迟，抓出 <code>/dev/input/eventX</code> 的原始字节，发现里面有一堆 <code>type</code>/<code>code</code>/<code>value</code> 三元组，却分不清哪几个属于同一根手指、哪几个属于同一个时间点。另一头，键盘上一个键按下去，<code>KEY_HOME</code> 这类常量在头文件里明明白白，可换个键盘型号行为就变了。这两个困惑指向同一件事：evdev 的 uapi 面到底约定了什么，哪些是内核给的、哪些是上层自己算的。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念。<strong>事件</strong>是唯一的数据载体，定长、成流。<strong>能力查询</strong>告诉用户态这台设备会发哪些 <code>type</code>、哪些 <code>code</code>、绝对轴的取值范围。<strong>配置写入</strong>改变设备行为（重复率、时钟源、按键映射、独占）。<strong>多点触控协议</strong>是 <code>EV_ABS</code> 上的一组 <code>ABS_MT_*</code> 约定，把「多根手指」编码进单条事件流。</p>
+<p>图 1：从设备到用户态的四个面</p>
+<pre><code>     /dev/input/eventN
+            |
+   +--------+--------+--------+
+   |        |        |        |
+ 事件流   能力查询  配置写入  抓取/撤销
+ read()  EVIOCG*  EVIOCS*  EVIOCGRAB
+   |        |        |     EVIOCREVOKE
+   +--------+--------+--------+
+            |
+      EventHub（epoll + inotify）</code></pre>
+<p>事件流和 ioctl 走的是同一个 fd，差别只在系统调用入口。<code>EVIOCGRAB</code> 与 <code>EVIOCREVOKE</code> 是互斥的一对：前者让本 fd 独占设备，后者让原持有者立刻失效。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>事件载体是 <code>struct input_event</code>（<code>bionic/libc/kernel/uapi/linux/input.h:14</code>）：<code>time</code>（<code>timeval</code>，32 位 time64 场景走 <code>__sec</code>/<code>__usec</code> 兼容分支）加 <code>__u16 type</code>、<code>__u16 code</code>、<code>__s32 value</code>。协议版本是 <code>EV_VERSION 0x010001</code>（同文件 :34），用户态拿它和内核比对，不匹配通常意味着头文件与内核不同代。</p>
+<p>设备身份用 <code>struct input_id</code>（:35），四个字段 bustype／vendor／product／version。绝对轴参数用 <code>struct input_absinfo</code>（:41），六个字段 value／minimum／maximum／fuzz／flat／resolution——注意 <code>fuzz</code> 和 <code>flat</code> 不是精度描述，是给上层做去抖和判定阈值的参数。</p>
+<p>按键映射用 <code>struct input_keymap_entry</code>（:49）：flags／len／index／keycode／scancode[32]，配合 <code>INPUT_KEYMAP_BY_INDEX (1 &lt;&lt; 0)</code>（:50）决定是按索引还是按 scancode 查。事件过滤用 <code>struct input_mask</code>（:57）：type／codes_size／codes_ptr。</p>
+<p>ioctl 面共 28 个宏，集中在 :62-:89。名字前缀已经把语义写死，<code>G</code> 读、<code>S</code> 写、<code>REVOKE</code> 撤销：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>EVIOCGVERSION</code></td><td>读协议版本</td><td><code>input.h:62</code></td></tr><tr><td><code>EVIOCGID</code></td><td>读 <code>input_id</code></td><td><code>input.h:63</code></td></tr><tr><td><code>EVIOCGREP</code> / <code>EVIOCSREP</code></td><td>读／写按键重复参数</td><td><code>input.h:64</code>／:65</td></tr><tr><td><code>EVIOCGKEYCODE</code> / <code>EVIOCGKEYCODE_V2</code></td><td>读按键映射（旧版／V2）</td><td><code>input.h:66</code>／:67</td></tr><tr><td><code>EVIOCSKEYCODE</code> / <code>EVIOCSKEYCODE_V2</code></td><td>写按键映射（旧版／V2）</td><td><code>input.h:68</code>／:69</td></tr><tr><td><code>EVIOCGNAME</code> / <code>EVIOCGPHYS</code> / <code>EVIOCGUNIQ</code></td><td>读名字／物理位置／唯一标识</td><td><code>input.h:70</code>／:71／:72</td></tr><tr><td><code>EVIOCGPROP</code></td><td>读设备属性位图</td><td><code>input.h:73</code></td></tr><tr><td><code>EVIOCGMTSLOTS</code></td><td>读多指槽位数据</td><td><code>input.h:74</code></td></tr><tr><td><code>EVIOCGKEY</code> / <code>EVIOCGLED</code> / <code>EVIOCGSND</code> / <code>EVIOCGSW</code></td><td>读当前按键／LED／声音／开关状态</td><td><code>input.h:75</code>／:76／:77／:78</td></tr><tr><td><code>EVIOCGBIT</code></td><td>读能力位图（按 type 取 code 集合）</td><td><code>input.h:79</code></td></tr><tr><td><code>EVIOCGABS</code> / <code>EVIOCSABS</code></td><td>读／写绝对轴参数</td><td><code>input.h:80</code>／:81</td></tr><tr><td><code>EVIOCSFF</code> / <code>EVIOCRMFF</code> / <code>EVIOCGEFFECTS</code></td><td>上传／删除／查询力反馈效果</td><td><code>input.h:82</code>／:83／:84</td></tr><tr><td><code>EVIOCGRAB</code> / <code>EVIOCREVOKE</code></td><td>独占／撤销访问</td><td><code>input.h:85</code>／:86</td></tr><tr><td><code>EVIOCGMASK</code> / <code>EVIOCSMASK</code></td><td>读／写事件掩码</td><td><code>input.h:87</code>／:88</td></tr><tr><td><code>EVIOCSCLOCKID</code></td><td>设定事件时间戳的时钟源</td><td><code>input.h:89</code></td></tr></tbody></table>
+<p>事件类型共 13 个：<code>EV_SYN 0x00</code>（<code>input-event-codes.h:19</code>）、<code>EV_KEY 0x01</code>（:20）、<code>EV_REL 0x02</code>（:21）、<code>EV_ABS 0x03</code>（:22）、<code>EV_MSC 0x04</code>（:23）、<code>EV_SW 0x05</code>（:24）、<code>EV_LED 0x11</code>（:25）、<code>EV_SND 0x12</code>（:26）、<code>EV_REP 0x14</code>（:27）、<code>EV_FF 0x15</code>（:28）、<code>EV_PWR 0x16</code>（:29）、<code>EV_FF_STATUS 0x17</code>（:30），另有 <code>EV_MAX 0x1f</code>（:31）／<code>EV_CNT</code>（:32）。同步事件 <code>SYN_REPORT 0</code>（:33）、<code>SYN_CONFIG 1</code>（:34）、<code>SYN_MT_REPORT 2</code>（:35）、<code>SYN_DROPPED 3</code>（:36）、<code>SYN_MAX 0xf</code>（:37）／<code>SYN_CNT</code>（:38）。<code>SYN_DROPPED</code> 值得单独记：它表示内核侧缓冲区溢出过，上层必须丢弃当前手势状态重来。</p>
+<p>多点触控的 15 个常量全在 <code>input-event-codes.h</code>：<code>ABS_MT_SLOT 0x2f</code>（:730）、<code>ABS_MT_TOUCH_MAJOR 0x30</code>（:731）、<code>ABS_MT_TOUCH_MINOR 0x31</code>（:732）、<code>ABS_MT_WIDTH_MAJOR 0x32</code>（:733）、<code>ABS_MT_WIDTH_MINOR 0x33</code>（:734）、<code>ABS_MT_ORIENTATION 0x34</code>（:735）、<code>ABS_MT_POSITION_X 0x35</code>（:736）、<code>ABS_MT_POSITION_Y 0x36</code>（:737）、<code>ABS_MT_TOOL_TYPE 0x37</code>（:738）、<code>ABS_MT_BLOB_ID 0x38</code>（:739）、<code>ABS_MT_TRACKING_ID 0x39</code>（:740）、<code>ABS_MT_PRESSURE 0x3a</code>（:741）、<code>ABS_MT_DISTANCE 0x3b</code>（:742）、<code>ABS_MT_TOOL_X 0x3c</code>（:743）、<code>ABS_MT_TOOL_Y 0x3d</code>（:744）。协议的核心是两件事：用 <code>ABS_MT_SLOT</code> 声明「接下来写哪个槽」，用 <code>ABS_MT_TRACKING_ID</code> 的取值区分「新触点」（赋新 id）、「触点更新」（同一 id）、「触点抬起」（值 <code>-1</code>）。整个触点生命周期只靠这一个字段表达，位置字段随槽位写出。</p>
+<p>把协议落到字节上，一帧里双指的完整写法是这样：</p>
+<p>图 2：多点触控一帧的事件编码顺序</p>
+<pre><code>  EV_ABS  ABS_MT_SLOT         0     &lt;- 先声明「接下来写 0 号槽」
+  EV_ABS  ABS_MT_TRACKING_ID  45    &lt;- 赋新 id，这是一个新触点
+  EV_ABS  ABS_MT_POSITION_X   320   &lt;- 该槽当前坐标
+  EV_ABS  ABS_MT_POSITION_Y   880
+  EV_SYN  SYN_REPORT          0     &lt;- 一帧结束，上层拿到完整快照
+  ...
+  EV_ABS  ABS_MT_SLOT         1     &lt;- 切到 1 号槽写第二根手指
+  EV_ABS  ABS_MT_TRACKING_ID  46
+  EV_ABS  ABS_MT_POSITION_X   610
+  EV_SYN  SYN_REPORT          0
+  ...
+  EV_ABS  ABS_MT_SLOT         0
+  EV_ABS  ABS_MT_TRACKING_ID  -1    &lt;- 0 号槽抬起
+  EV_SYN  SYN_REPORT          0
+
+  TRACKING_ID 三种取值：新 id=新触点 / 同 id=更新 / -1=抬起</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>常用键码：<code>BTN_TOUCH 0x14a</code>（:353）表示接触面按下，<code>KEY_HOME 102</code>（:140）、<code>KEY_BACK 158</code>（:199）、<code>KEY_BACKSPACE 14</code>（:53）、<code>KEY_HOMEPAGE 172</code>（:213）。注意 <code>KEY_HOME</code> 与 <code>KEY_HOMEPAGE</code> 是两个不同码，前者是传统 Home，后者是浏览器首页语义，映射到同一个行为是上层策略。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 EventHub 打开并挂载输入设备为例。它把设备目录写死为 <code>DEVICE_INPUT_PATH = &quot;/dev/input&quot;</code>（<code>EventHub.cpp:84</code>），父目录 <code>DEVICE_PATH = &quot;/dev&quot;</code>（:86）。epoll 实例来自 <code>mEpollFd = epoll_create1(EPOLL_CLOEXEC)</code>（:1020），目录监听来自 <code>mINotifyFd = inotify_init1(IN_CLOEXEC)</code>（:1023），注册 <code>inotify_add_watch(mINotifyFd, DEVICE_INPUT_PATH, IN_DELETE | IN_CREATE)</code>（:1087）。三个 fd 各司其职：inotify 管设备插拔，epoll 管已打开设备的可读，设备 fd 本身由 inotify 事件触发后打开。</p>
+<p>设备一打开，能力查询立刻按 type 铺开：<code>EVIOCGBIT</code>（:881）拿能力位图，<code>EVIOCGABS</code>（:675）拿轴参数，<code>EVIOCGKEY</code>（:656）、<code>EVIOCGSW</code>（:659）、<code>EVIOCGLED</code>（:944）拿当前键／开关／LED 状态。多指槽位走 <code>EVIOCGMTSLOTS</code>（:917、:1294），按键重复走 <code>EVIOCSREP</code>（:633），时钟源走 <code>EVIOCSCLOCKID</code>（:648）。这套调用顺序说明上层不猜测设备形态，全部靠 ioctl 现查。</p>
+<p>唤醒锁有个容易漏的点。<code>EventHub.cpp:2190-2191</code> 的注释点明：驱动释放内核唤醒锁之后，epoll 仍会持有唤醒锁，因为用了 <code>EPOLLWAKEUP</code>；唤醒锁由 epoll 在 <code>epoll_wait</code>（:2202）返回后释放。也就是说「设备没数据了但系统还不睡」在这个窗口内是预期行为，不是唤醒锁泄漏。驱动实现不在本树核验范围，这条结论以用户态可观测现象与注释口径为准。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>本篇只到 evdev 的 uapi 与多点触控协议。事件进入 EventHub 之后的读取、去抖、槽位跟踪在 <code>InputReader.cpp</code>，策略判定（按键该不该拦、手势该不该给某个窗口）归 P2 的输入分发链路。显示侧一帧的节拍由 <code>AND-P5-401</code> 的 vsync 负责，和输入时间戳是两条独立时钟——比对两者要用 <code>EVIOCSCLOCKID</code> 选定的时钟源，本篇不展开合成逻辑。内核侧如何把驱动事件推到 <code>/dev/input</code>、调度与中断上下文的行为，属于 P5 卷其他内核篇的范围。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>事件与 ioctl uapi</td><td><code>bionic/libc/kernel/uapi/linux/input.h</code></td><td><code>struct input_event</code>、<code>input_id</code>、<code>input_absinfo</code>、<code>input_keymap_entry</code>、<code>input_mask</code>、28 个 <code>EVIOC*</code></td><td>用户态与内核的唯一契约面</td></tr><tr><td>事件码常量</td><td><code>bionic/libc/kernel/uapi/linux/input-event-codes.h</code></td><td><code>EV_*</code>、<code>SYN_*</code>、<code>ABS_MT_*</code>、<code>KEY_*</code>、<code>BTN_TOUCH</code></td><td>所有 type/code 数值的来源</td></tr><tr><td>设备发现与能力查询</td><td><code>frameworks/native/services/inputflinger/reader/EventHub.cpp</code></td><td><code>epoll_create1</code>、<code>inotify_init1</code>、<code>EVIOCGBIT</code>、<code>EVIOCGABS</code>、<code>EVIOCGMTSLOTS</code></td><td>框架侧唯一直接碰 <code>/dev/input</code> 的地方</td></tr><tr><td>事件读取与加工</td><td><code>frameworks/native/services/inputflinger/reader/InputReader.cpp</code></td><td>原始事件到设备状态的转换</td><td>槽位跟踪与去抖在这一层</td></tr><tr><td>输入服务装配</td><td><code>frameworks/native/services/inputflinger/InputManager.cpp</code></td><td>各组件生命周期</td><td>看整体拓扑的入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：bionic:06356e41c5ed</p></blockquote>
+<p>验证方式：静态源码分析。在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;struct input_event&quot; bionic/libc/kernel/uapi/linux/input.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:14</code> 处的结构体定义，字段为 <code>time</code>、<code>type</code>、<code>code</code>、<code>value</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;EV_VERSION&quot; bionic/libc/kernel/uapi/linux/input.h</code></pre>
+<p>期望输出 <code>#define EV_VERSION 0x010001</code>，位于 <code>:34</code>。</p>
+<pre><code class="lang-bash">grep -cE &quot;^#define EVIOC(G|S|[GR][A-Z]*)&quot; bionic/libc/kernel/uapi/linux/input.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望结果与 :62-:89 区间的 28 个宏对上；若计数不同，先看宏名是否跨行定义。</p>
+<pre><code class="lang-bash">sed -n '62,89p' bionic/libc/kernel/uapi/linux/input.h | grep -c EVIOC</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 <code>28</code>，逐条对照可确认 <code>EVIOCGKEYCODE_V2</code> 这类带后缀的宏也在这段区间内。</p>
+<pre><code class="lang-bash">grep -n &quot;ABS_MT_SLOT\|ABS_MT_TRACKING_ID\|ABS_MT_POSITION_X&quot; bionic/libc/kernel/uapi/linux/input-event-codes.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别落在 <code>:730</code>、<code>:740</code>、<code>:736</code>，值依次为 <code>0x2f</code>、<code>0x39</code>、<code>0x35</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;DEVICE_INPUT_PATH\|inotify_add_watch\|EPOLLWAKEUP&quot; frameworks/native/services/inputflinger/reader/EventHub.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:84</code> 的路径常量、<code>:1087</code> 的 watch 注册，以及 <code>:2190-2191</code> 附近的唤醒锁注释。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`/dev/input/eventX` 里每个触点是一条独立事件流。</strong> 纠正：只有一条流。多指靠 <code>ABS_MT_SLOT</code> 选槽、<code>ABS_MT_TRACKING_ID</code> 标记身份，所有手指的事件交错在同一个 fd 里，靠 <code>SYN_REPORT</code> 切帧。</p>
+<p><strong>误区二：收到 `EV_ABS` 的 `ABS_MT_POSITION_X` 就等于有一根手指按下。</strong> 纠正：位置字段只表示槽位当前坐标，没有 <code>ABS_MT_TRACKING_ID</code> 赋新值，这个槽位不算新触点。反过来 <code>TRACKING_ID</code> 置 <code>-1</code> 才是抬起，位置最后值不代表手指还在。</p>
+<p><strong>误区三：按键码是内核按物理键位固定分配的。</strong> 纠正：内核发的是 scancode，映射由 <code>input_keymap_entry</code> 描述、由上层查表翻译。同一个 <code>KEY_HOME</code> 与 <code>KEY_HOMEPAGE</code> 落到同一行为，是上层策略的结果。</p>
+<p><strong>误区四：`EVIOCGRAB` 之后原持有者只是收不到事件。</strong> 纠正：配合 <code>EVIOCREVOKE</code> 时原 fd 会失效。这是「看起来对其实是错的」那条：抓取不是静音，是转移访问权。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么读到的 <code>input_event</code> 里 <code>time</code> 字段布局和我预期不一样？ <strong>答</strong>：32 位 time64 场景走 <code>__sec</code>/<code>__usec</code> 兼容分支，结构体不是简单的 <code>timeval</code> 展开。跨架构移植时按宏分支读，别硬解偏移。 <strong>追问</strong>：那时间戳的时钟源怎么确定？ <strong>答</strong>：由 <code>EVIOCSCLOCKID</code> 设定，EventHub 在 :648 就调它。不同时钟源下与其他子系统的时间戳不能直接相减。</p>
+<p><strong>问</strong>：epoll 明明没有新事件，为什么系统迟迟不睡？ <strong>答</strong>：驱动释放唤醒锁后 epoll 仍持有唤醒锁（用了 <code>EPOLLWAKEUP</code>），要等 <code>epoll_wait</code> 返回才释放。见 <code>EventHub.cpp:2190-2191</code> 的注释与 :2202 的调用。 <strong>追问</strong>：这是缺陷吗？ <strong>答</strong>：是设计上的窗口，不是泄漏。驱动实现不在本树核验范围，判断泄漏要看这段时间是否无限延长。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>触摸位置整体偏移</td><td><code>grep -n &quot;EVIOCGABS&quot; frameworks/native/services/inputflinger/reader/EventHub.cpp</code></td><td>轴参数是否在 :675 处读取并使用</td><td>比对 <code>input_absinfo</code> 的 minimum／maximum 与上报值</td></tr><tr><td>多指串指、抬指不干净</td><td><code>grep -n &quot;ABS_MT_TRACKING_ID&quot; bionic/libc/kernel/uapi/linux/input-event-codes.h</code></td><td>常量出处 :740</td><td>检查是否漏处理 <code>-1</code> 抬起</td></tr><tr><td>按键行为与键帽不符</td><td><code>grep -n &quot;INPUT_KEYMAP_BY_INDEX&quot; bionic/libc/kernel/uapi/linux/input.h</code></td><td><code>input_keymap_entry</code> 的查询方式 :50</td><td>确认走索引还是 scancode 查表</td></tr><tr><td>抓到 <code>SYN_DROPPED</code></td><td><code>grep -n &quot;SYN_DROPPED&quot; bionic/libc/kernel/uapi/linux/input-event-codes.h</code></td><td>常量出处 :36</td><td>丢弃当前手势状态重新同步</td></tr><tr><td>设备热插拔后无事件</td><td><code>grep -n &quot;inotify_add_watch&quot; frameworks/native/services/inputflinger/reader/EventHub.cpp</code></td><td>watch 掩码是否含 <code>IN_CREATE</code>（:1087）</td><td>检查新设备节点是否被重新打开</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：输入事件到窗口的分发与策略（P2 输入分发篇）；vsync 与帧节拍（<code>AND-P5-401</code>）；内核驱动内部实现与中断处理。</li><li><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>。</li><li><strong>本篇后继</strong>：P2 卷输入分发链路各篇；<code>AND-P5-401</code>（时间戳对齐语境）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>事件载体固定 4 个字段，标量宽度为 <code>__u16</code>／<code>__u16</code>／<code>__s32</code>（源码常量，<code>input.h:14</code>）。</li><li>ioctl 面 28 个宏（源码计数，<code>input.h:62-:89</code>）。</li><li>多点触控常量 15 个（源码计数，<code>input-event-codes.h:730-:744</code>）。</li><li><code>scancode[32]</code> 是映射项的上限（源码常量，<code>input.h:49</code>）。</li><li>单帧事件条数无固定上限，取决于驱动一次写入量——暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期 uapi</td><td><code>EVIOCGKEYCODE</code>／<code>EVIOCSKEYCODE</code> 单版本</td><td>无法按索引查询，映射表规模受限</td></tr><tr><td>后续增量</td><td>增加 <code>_V2</code> 变体与 <code>INPUT_KEYMAP_BY_INDEX</code></td><td>支持大映射表与按索引访问</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td>28 个 <code>EVIOC*</code> 宏并存，<code>EV_VERSION 0x010001</code></td><td>新旧接口同时可用，上层按能力选择</td></tr></tbody></table>
+<p>表中前两行为 uapi 演化的一般形态，未在本树核验具体引入提交；本树实测行以 <code>input.h</code> 的宏清单为准。</p>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>input event codes</code>；kernel.org 站内检索 <code>multi-touch protocol</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>EventHub</code>、<code>ABS_MT_TRACKING_ID</code>。</li><li>本仓关键路径：<code>bionic/libc/kernel/uapi/linux/input.h</code>、<code>bionic/libc/kernel/uapi/linux/input-event-codes.h</code>、<code>frameworks/native/services/inputflinger/reader/EventHub.cpp</code>。</li><li>承接篇：<code>AND-P5-G01</code>、<code>AND-P5-401</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P5-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

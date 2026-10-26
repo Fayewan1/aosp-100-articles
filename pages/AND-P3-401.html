@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Native 进程守护、ashmem/memfd 与内存共享</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Native 进程守护、ashmem/memfd 与内存共享</h1>
+<div class="kv"><span>ID：AND-P3-401</span><span>卷：P3</span><span>章：3.4</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/init/init.cpp ；system/core/init/service.cpp ；system/core/libcutils/ashmem-dev.cpp ；system/core/libcutils/include/cutils/ashmem.h ；frameworks/native/libs/binder/MemoryHeapBase.cpp ；bionic/libc/include/sys/mman.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>init 是 native 服务的父进程：<code>critical</code> 服务在崩溃窗口内反复退出时，init 会主动重启整机而不是单服务。ashmem 与 memfd 在用户态被统一到 <code>ashmem_create_region</code> 一个入口，具体走哪条路由 <code>use_memfd()</code> 决定。memfd 路径用 <code>__NR_memfd_create</code> 加 <code>F_ADD_SEALS</code> 封住尺寸，ashmem 路径走 <code>ASHMEM_SET_NAME</code>/<code>ASHMEM_SET_SIZE</code> 两个 ioctl。libbinder 的 <code>MemoryHeapBase</code> 是这两条路径的第一个大用户：<code>FORCE_MEMFD</code> 打开就换 memfd，否则回退 ashmem。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P3-101</code>。属性系统是 init 判定服务行为、区分 vendor 与应用运行环境的上游输入，先有它再读守护逻辑更省力。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>system/core/init/init.cpp</code></li><li><code>system/core/init/service.cpp</code></li><li><code>system/core/libcutils/ashmem-dev.cpp</code></li><li><code>system/core/libcutils/include/cutils/ashmem.h</code></li><li><code>frameworks/native/libs/binder/MemoryHeapBase.cpp</code></li><li><code>bionic/libc/include/sys/mman.h</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你写了个 native daemon，挂在 rc 里 <code>class core</code> 启动。某次它因为一个 nullptr 崩了，你预期的行为是「init 把它拉起来，日志里留一行」；实际结果是设备直接重启，甚至进了 bootloader。另一头，你把一块 buffer 换成 memfd 传给别的进程，对方拿到的 fd 尺寸不可写，<code>ftruncate</code> 报错——因为创建方加过 seal。这两类问题都不是「写错代码」，而是因为你没弄清 init 的崩溃策略和共享内存的创建契约。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念串起本篇：init 是服务守护者，ashmem 是传统匿名共享内存设备，memfd 是内核提供的无路径匿名文件。用户态通过 <code>ashmem_create_region</code> 统一入口，按 <code>use_memfd()</code> 分派到两套实现；<code>MemoryHeapBase</code> 再在其上做 binder 侧封装。</p>
+<p>图 1：守护与共享内存两条链路</p>
+<pre><code>init (main loop)
+  |-- start  ---&gt; native service (class core)
+  |-- ReapAnyOutstandingChildren -&gt; 回收 -&gt; 按 flags 决定重启策略
+  |
+libcutils ashmem_create_region()
+  |-- use_memfd() ? __memfd_create_region -&gt; syscall(__NR_memfd_create)
+  |                -&gt; ftruncate + F_ADD_SEALS
+  `-- else        __ashmem_create_region -&gt; open(/dev/ashmem)
+                   -&gt; ASHMEM_SET_NAME / ASHMEM_SET_SIZE</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>守护侧的关键在 flags 与策略分支。<code>SVC_CRITICAL = 0x020</code>（<code>system/core/init/service.h</code>）标记关键服务，注释写明持续崩溃会重启进 bootloader。<code>service.cpp</code> 的崩溃处理逻辑：在 <code>fatal_crash_window_</code> 内统计退出次数，超过 4 次或系统尚未开机完成，就调用 <code>SetFatalRebootTarget</code> 并 <code>LOG(FATAL) &lt;&lt; &quot;critical process '&lt;name&gt;' exited 4 times&quot;</code>。孤儿进程由 <code>ReapAnyOutstandingChildren</code>（<code>system/core/init/init.cpp</code>）在主循环中回收，再按每个服务的选项决定后续动作：<code>oneshot_on</code>/<code>oneshot_off</code> 控制一次性语义，<code>restart</code> 走 <code>DoControlRestart</code>。</p>
+<p>ashmem 与 memfd 的入口契约：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>ashmem_create_region</code></td><td>创建共享内存 region 的统一入口</td><td><code>system/core/libcutils/include/cutils/ashmem.h</code></td></tr><tr><td><code>ashmem_set_prot_region</code></td><td>设置 region 的 PROT 位</td><td><code>system/core/libcutils/include/cutils/ashmem.h</code></td></tr><tr><td><code>use_memfd()</code></td><td>判定是否走 memfd 实现</td><td><code>system/core/libcutils/ashmem-dev.cpp</code></td></tr><tr><td><code>__memfd_create_region</code></td><td>memfd 实现：syscall + ftruncate + seal</td><td><code>system/core/libcutils/ashmem-dev.cpp</code></td></tr><tr><td><code>__ashmem_create_region</code></td><td>ashmem 实现：open + 两个 ioctl</td><td><code>system/core/libcutils/ashmem-dev.cpp</code></td></tr><tr><td><code>is_memfd_fd</code></td><td>读链接看 <code>/memfd:</code> 前缀，区分 fd 来源</td><td><code>system/core/libcutils/ashmem-dev.cpp</code></td></tr></tbody></table>
+<p><code>__use_memfd</code>（<code>system/core/libcutils/ashmem-dev.cpp:58-106</code>）是一条覆盖开关加三个并列条件的判定：先查 <code>sys.use_memfd</code> 属性，为 true 直接走 memfd（优先级最高，<code>:61-66</code>）；否则要求 memfd_class sepolicy capability、设备 vendor API level ≥ 202604、应用 target SDK ≥ 37 三项<strong>同时</strong>满足才走 memfd，任一不满足都回退 ashmem（<code>:69-98</code>）。ashmem 侧设备路径带 boot_id 后缀（<code>/dev/ashmem</code> 加 <code>/proc/sys/kernel/random/boot_id</code> 内容），用于隔离重启前后的 region。memfd 侧调用形式为 <code>syscall(__NR_memfd_create, name, MFD_CLOEXEC | MFD_ALLOW_SEALING)</code>，随后 <code>ftruncate</code> 定尺寸，再 <code>F_ADD_SEALS(F_SEAL_GROW | F_SEAL_SHRINK)</code> 封死增长与收缩。ashmem 侧常量 <code>ASHMEM_SET_NAME</code>/<code>ASHMEM_SET_SIZE</code> 定义在 <code>bionic/libc/kernel/uapi/linux/ashmem.h</code>。</p>
+<p>bionic 对外声明的 <code>memfd_create</code> 在 <code>bionic/libc/include/sys/mman.h</code>，API 30 引入，也就是说直接用 libc 接口而非 <code>syscall</code> 时，低 API 目标要自己兜底。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 servicemanager 为例讲一圈。它的 rc 声明了 <code>service servicemanager /system/bin/servicemanager</code>、<code>class core animation</code>、<code>user system</code>、<code>group system readproc</code>、<code>critical</code>、<code>shutdown critical</code>、<code>file /dev/kmsg w</code>、<code>onrestart restart audioserver</code>、<code>task_profiles ProcessCapacityHigh</code>（<code>frameworks/native/cmds/servicemanager/servicemanager.rc</code>）。开机时 <code>init.rc</code> 的 <code>on init</code> 块（<code>system/core/rootdir/init.rc:116</code>）在 <code># Start essential services.</code> 注释后依次 <code>start servicemanager</code>、<code>start hwservicemanager</code>、<code>start vndservicemanager</code>（同文件 <code>:464-466</code>）——这是块内的裸 start 命令，不是 class 触发。</p>
+<p>因为它带 <code>critical</code>，如果它在窗口内连续退出 4 次，init 不会只重启它，而是设置 fatal reboot target 后 <code>LOG(FATAL)</code>。<code>onrestart</code> 里的 audioserver 只有在正常重启路径上才有意义——整机重启时这行不产生影响。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>属性系统归 <code>AND-P3-101</code>，本篇只把它当作 <code>__use_memfd</code> 判定条件的输入来源。<code>init.rc</code> 的语法、触发器与生产侧写法归 <code>AND-P8-201</code>，本篇只取「<code>on init</code> 块内 start 命令」这一条结果。ashmem 与 binder 的内核驱动实现归 P5 卷，VNDK 与分区对 native 库的约束归 <code>AND-P3-402</code>。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>主循环与孤儿回收</td><td><code>system/core/init/init.cpp</code></td><td><code>ReapAnyOutstandingChildren</code>、<code>oneshot_on</code>/<code>oneshot_off</code>、<code>DoControlRestart</code></td><td>回收与选项解析入口</td></tr><tr><td>崩溃策略</td><td><code>system/core/init/service.cpp</code></td><td><code>fatal_crash_window_</code>、<code>SetFatalRebootTarget</code>、<code>exited 4 times</code></td><td>critical 服务超限后的处理</td></tr><tr><td>共享内存用户态实现</td><td><code>system/core/libcutils/ashmem-dev.cpp</code></td><td><code>use_memfd</code>、<code>__memfd_create_region</code>、<code>__ashmem_create_region</code>、<code>is_memfd_fd</code></td><td>双路径主体</td></tr><tr><td>用户态公开 API</td><td><code>system/core/libcutils/include/cutils/ashmem.h</code></td><td><code>ashmem_create_region</code>、<code>ashmem_set_prot_region</code></td><td>上层唯一入口</td></tr><tr><td>binder 堆</td><td><code>frameworks/native/libs/binder/MemoryHeapBase.cpp</code></td><td><code>FORCE_MEMFD</code> 分支</td><td>首个大用户与回退逻辑</td></tr><tr><td>libc 声明</td><td><code>bionic/libc/include/sys/mman.h</code></td><td><code>memfd_create</code> 声明</td><td>API 30 才对外</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e38</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">grep -n &quot;ReapAnyOutstandingChildren&quot; system/core/init/init.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到定义与主循环两处命中，对应孤儿进程回收。</p>
+<pre><code class="lang-bash">grep -n &quot;oneshot_on\|oneshot_off\|DoControlRestart&quot; system/core/init/init.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>oneshot_on</code>、<code>oneshot_off</code> 与 <code>DoControlRestart</code> 三个符号。</p>
+<pre><code class="lang-bash">sed -n '370,420p' system/core/init/service.cpp | grep -n &quot;fatal_crash_window_\|exited 4 times&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到崩溃窗口计数与 <code>critical process</code> 的 FATAL 日志。</p>
+<pre><code class="lang-bash">grep -n &quot;SVC_CRITICAL&quot; system/core/init/service.h</code></pre>
+<p>期望看到 <code>SVC_CRITICAL = 0x020</code> 及其 bootloader 注释。</p>
+<pre><code class="lang-bash">grep -n &quot;use_memfd\|__NR_memfd_create\|F_ADD_SEALS&quot; system/core/libcutils/ashmem-dev.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到分派条件、syscall 与 seal 三处实现点。</p>
+<pre><code class="lang-bash">grep -n &quot;FORCE_MEMFD&quot; frameworks/native/libs/binder/MemoryHeapBase.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 memfd 与 ashmem 的分支选择。</p>
+<pre><code class="lang-bash">grep -n &quot;memfd_create&quot; bionic/libc/include/sys/mman.h</code></pre>
+<p>期望看到 libc 侧声明位置。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>错误认知</strong>：带 <code>critical</code> 的服务崩了会被更频繁地拉起来，可用性更高。 <strong>纠正</strong>：正相反。它在崩溃窗口内超过 4 次就触发 <code>LOG(FATAL)</code> 与 fatal reboot target，代价是整机。<code>critical</code> 表达的是「它不可用整机就没意义」，不是「它更需要被守护」。</p>
+<p><strong>错误认知</strong>：<code>onrestart restart audioserver</code> 意味着 servicemanager 挂了 audioserver 一定跟着重启。 <strong>纠正</strong>：这行只在 init 走「重启该服务」的路径时生效；critical 服务触发整机重启时，该 rc 选项不参与决策。</p>
+<p><strong>错误认知</strong>：<code>ashmem_create_region</code> 一定创建 ashmem 设备节点。 <strong>纠正</strong>：它只是统一入口，实际分派看 <code>use_memfd()</code>。调用方最终拿到的可能是 <code>/memfd:</code> 开头的 fd，用 <code>is_memfd_fd</code> 才能判定。</p>
+<p><strong>错误认知</strong>：memfd 创建后还能 <code>ftruncate</code> 扩大尺寸。 <strong>纠正</strong>：创建路径加了 <code>F_SEAL_GROW</code>，扩大被拒；同理 <code>F_SEAL_SHRINK</code> 禁止收缩。尺寸必须在 seal 前一次定好。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：我的 native 服务老是让设备重启，怎么定位是谁触发的？ <strong>答</strong>：先搜 logcat 里 <code>critical process</code> 与 <code>exited 4 times</code> 字样，再看该服务的 rc 里是否有 <code>critical</code>。 <strong>追问</strong>：去掉 <code>critical</code> 就正常了吗？ <strong>答</strong>：行为从「整机重启」变成「单服务反复重启」，问题本身仍在，得修崩溃点。</p>
+<p><strong>问</strong>：新代码该直接用 <code>memfd_create</code> 还是 <code>ashmem_create_region</code>？ <strong>答</strong>：跟随现有平台的封装更稳，<code>ashmem_create_region</code> 会替你处理分派，还与 libbinder 行为一致。 <strong>追问</strong>：直接调 libc 的 <code>memfd_create</code> 有什么坑？ <strong>答</strong>：声明是 API 30 引入的，低 target SDK 的应用可能没有该符号，需要自己兜底。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>设备开机后无故重启</td><td><code>grep -n &quot;critical&quot; frameworks/native/cmds/servicemanager/servicemanager.rc</code></td><td>该服务是否被标为 critical</td><td>复核崩溃栈，判断是否触到 4 次阈值</td></tr><tr><td>服务崩了不再被拉起</td><td><code>grep -n &quot;oneshot&quot; system/core/init/init.cpp</code></td><td><code>oneshot_on</code>/<code>oneshot_off</code> 语义</td><td>检查服务 rc 是否声明了 oneshot</td></tr><tr><td>共享 fd 无法改尺寸</td><td><code>grep -n &quot;F_SEAL_GROW|F_SEAL_SHRINK&quot; system/core/libcutils/ashmem-dev.cpp</code></td><td>seal 位是否被设置</td><td>创建侧提前定好最终尺寸</td></tr><tr><td>拿到的 fd 类型不符预期</td><td><code>grep -n &quot;is_memfd_fd&quot; system/core/libcutils/ashmem-dev.cpp</code></td><td><code>/memfd:</code> 前缀判定逻辑</td><td>按实际 fd 类型选对应 API</td></tr><tr><td>memfd 相关符号链接失败</td><td><code>grep -n &quot;memfd_create&quot; bionic/libc/include/sys/mman.h</code></td><td>API 30 的声明位置</td><td>检查 target SDK 与兼容分支</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：<code>init.rc</code> 语法、触发器与生产侧配置写法归 <code>AND-P8-201</code>；ashmem/binder 内核驱动实现归 P5 卷；VNDK 与分区边界归 <code>AND-P3-402</code>。</li><li><strong>本篇前置依赖</strong>：<code>AND-P3-101</code>。</li><li><strong>本篇后继</strong>：<code>AND-P3-402</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>critical 服务崩溃阈值 4 次，口径为源码日志字面量 <code>exited 4 times</code>（源码常量）。</li><li><code>SVC_CRITICAL</code> 标志值 <code>0x020</code>，口径为 <code>service.h</code> 源码常量。</li><li><code>memfd_create</code> 对外可用起点 API 30，口径为 <code>sys/mman.h</code> 声明处注释（官方头文件）。</li><li><code>F_ADD_SEALS</code> 组合为 <code>F_SEAL_GROW | F_SEAL_SHRINK</code>，不含 <code>F_SEAL_WRITE</code>（源码常量）；具体 seal 组合的上层影响暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树实测）</td><td><code>ashmem_create_region</code> 由 <code>use_memfd()</code> 分派 memfd 与 ashmem 双实现；<code>MemoryHeapBase</code> 以 <code>FORCE_MEMFD</code> 切换</td><td>同一份调用代码可能落在两套后端，fd 类型需用 <code>is_memfd_fd</code> 判定</td></tr><tr><td>API 30 起（libc 声明口径）</td><td><code>sys/mman.h</code> 提供 <code>memfd_create</code> 声明</td><td>低于该层级的调用方需自行 syscall 或兼容分支</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>init language service options</code>；man7.org 站内检索 <code>memfd_create</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ashmem-dev memfd</code>、<code>service critical reboot</code>。</li><li>本仓关键路径：<code>system/core/libcutils/ashmem-dev.cpp</code>、<code>system/core/init/service.cpp</code>、<code>frameworks/native/libs/binder/MemoryHeapBase.cpp</code>。</li><li>承接篇：<code>AND-P3-101</code>、<code>AND-P3-402</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P3-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

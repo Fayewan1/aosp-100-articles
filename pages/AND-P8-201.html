@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>init.rc 语法、触发器与服务分类</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>init.rc 语法、触发器与服务分类</h1>
+<div class="kv"><span>ID：AND-P8-201</span><span>卷：P8</span><span>章：8.2</span><span>难度：3</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/rootdir/init.rc ；system/core/rootdir/init.zygote64.rc ；system/core/init/action_manager.cpp ；system/core/init/action.cpp ；system/core/init/action_parser.cpp ；system/core/init/service_parser.cpp ；system/core/init/builtins.cpp ；system/core/init/init.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:14px"><a href="#h7-解析阶段登记了什么">解析阶段登记了什么</a></li><li style="margin-left:14px"><a href="#h8-服务的-class-分类">服务的 class 分类</a></li><li style="margin-left:14px"><a href="#h9-trigger-内建命令只是排队">trigger 内建命令只是排队</a></li><li style="margin-left:14px"><a href="#h10-动作的执行边界">动作的执行边界</a></li><li style="margin-left:14px"><a href="#h11-二阶段触发序列">二阶段触发序列</a></li><li style="margin-left:0px"><a href="#h12-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h13-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h14-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h15-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h16-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h17-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h18-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h19-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h20-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h21-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h22-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>init.rc</code> 不是脚本，是声明。它只声明三样东西：服务（<code>service</code>）、动作（<code>on</code>）、导入（<code>import</code>）；什么时候执行由触发器决定，不由文件顺序决定。</p>
+<p><code>init</code> 做两件事：解析全部 rc 并登记，然后按触发器把动作排队、逐条执行。<code>trigger</code> 命令不执行任何东西，只是把另一个触发器名塞进队列尾。</p>
+<p>开机主链是一条自排队的触发器链，但入口是二选一的：二阶段 <code>init</code> 在 <code>init.cpp:1279-1283</code> 按 <code>BootMode</code> 分流——<code>charger</code> 模式下只排 <code>charger</code>，其余模式排 <code>late-init</code>（<code>init.cpp:698</code> 还有 <code>RECOVERY_MODE</code> 分支）。<code>late-init</code> 动作里依次 <code>trigger</code> 出 <code>early-fs</code> → <code>fs</code> → <code>post-fs</code> → <code>late-fs</code> → <code>post-fs-data</code> → <code>load-bpf-programs</code> → <code>zygote-start</code> → <code>firmware_mounts_complete</code> → <code>early-boot</code> → <code>boot</code>。</p>
+<p>服务靠 <code>class</code> 分类，<code>start</code> 只启动一个服务，<code>class_start</code> 启动一整类。<code>zygote</code> 属 <code>class main</code>，<code>ueventd</code> 与 <code>console</code> 属 <code>class core</code>。但 <code>class_start main</code> 不在 <code>late-init</code> 链上，而在 <code>on nonencrypted</code>（<code>init.rc:1227</code>）里。把该触发器排入队列的是 C++ 侧的 <code>queue_fs_event</code>（<code>builtins.cpp:583</code>/<code>:601</code>），由 <code>do_mount_all</code>（<code>:617</code>）在 <code>queue_event</code> 门控（<code>:622</code>/<code>:625</code>）下调用；本树 rootdir 的 rc 里没有任何可执行的 <code>mount_all</code> 命令（<code>:521</code>/<code>:528</code>/<code>:530</code> 三处都只是注释），也没有 <code>on fs</code> 段，所以这条链在本树不可达——它的实际排入依赖设备侧 rc。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P8-102</code>（启动镜像格式与 fastboot 链路，知道 bootloader 侧交出的是什么）；<code>AND-P8-101</code>（bootloader 到 init 的交接，知道二阶段 <code>init</code> 进程是谁、<code>/system/bin/init</code> 从哪接手）。有这两篇打底，本篇才接得上。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>system/core/rootdir/init.rc</code></li><li><code>system/core/rootdir/init.zygote64.rc</code></li><li><code>system/core/init/action_manager.cpp</code></li><li><code>system/core/init/action.cpp</code></li><li><code>system/core/init/action_parser.cpp</code></li><li><code>system/core/init/service_parser.cpp</code></li><li><code>system/core/init/builtins.cpp</code></li><li><code>system/core/init/init.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在 <code>init.rc</code> 里加了一个 <code>on boot</code> 段，写了 <code>start myservice</code>，重启后服务没起来，<code>logcat</code> 里也没有任何报错。改成 <code>on late-init</code> 也没用。</p>
+<p>另一个常见困惑：明明 <code>init.rc</code> 里 <code>on boot</code> 写在 <code>on zygote-start</code> 后面，为什么 <code>zygote</code> 先起？还有人以为 rc 文件是从上往下当脚本读的，把 <code>start</code> 放在文件末尾就以为它最后执行。</p>
+<p>这些都指向同一个误解：把 rc 当命令行脚本。它不是。弄清 rc 的四种语法元素和 <code>init</code> 的排队模型，这类问题就不用猜。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：</p>
+<ul><li><strong>section</strong>：rc 文件的顶层块，只有三种——<code>import</code>、<code>on</code>、<code>service</code>。</li><li><strong>action</strong>：一个 <code>on &lt;trigger&gt;</code> 块，内含若干命令。它登记在 <code>ActionManager</code> 里，等触发器来叫。</li><li><strong>service</strong>：一个 <code>service &lt;name&gt; &lt;path&gt; &lt;args&gt;</code> 块，内含 <code>class</code>、<code>socket</code>、<code>critical</code> 等选项。它登记在 <code>ServiceList</code> 里，等 <code>start</code> 或 <code>class_start</code> 来叫。</li><li><strong>trigger</strong>：触发器名。两种来源——<code>trigger</code> 内建命令主动排队，或属性变化 <code>property:&lt;key&gt;=&lt;value&gt;</code> 被动匹配。</li></ul>
+<p>关系一句话：<strong>触发器选中动作，动作里的命令去动服务</strong>。动作自己从不主动跑。</p>
+<p>图 1：解析登记与触发执行两条路径</p>
+<pre><code>parse rc  --&gt; ActionManager (on blocks) --+
+          --&gt; ServiceList   (services)    |
+                                          |
+trigger 名 -&gt; QueueEventTrigger ----------+--&gt; 逐条执行命令
+property 变化 -&gt; QueuePropertyChange -----+        |
+                                                   +--&gt; start / class_start</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>QueueEventTrigger</code> 只在队尾追加一个名字（<code>action_manager.cpp:48</code>），属性变化走 <code>QueuePropertyChange</code>（<code>:53</code>），真正逐条跑是 <code>ExecuteOneCommand</code>（<code>:72</code>）。这条「先排队、后执行」的分界，是理解全部时序的钥匙。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<h3 id="h7-解析阶段登记了什么">解析阶段登记了什么</h3>
+<p><code>init.rc</code> 是 1320 行、8 个 <code>import</code>、7 个顶层 <code>service</code> 定义。<code>zygote</code> 服务不在 <code>init.rc</code> 里，而在被导入的文件里——具体是哪个文件由 <code>:12</code> 的 <code>import /system/etc/init/hw/init.${ro.zygote}.rc</code> 间接决定：<code>ro.zygote</code> 取值不同，导入的就是 <code>init.zygote64.rc</code>、<code>init.zygote32.rc</code> 或 <code>init.zygote64_32.rc</code>（后两者 <code>class main</code> 分别在 <code>:2</code> 与 <code>:4</code>）。写成「固定导入 init.zygote64.rc」会漏掉另外两种布局。</p>
+<p>两个 parser 各管一半：<code>action_parser.cpp</code>（183 行）解析 <code>on</code> 段，<code>service_parser.cpp</code>（735 行）解析 <code>service</code> 段。服务没写 <code>class</code> 时取默认值 <code>{&quot;default&quot;}</code>（<code>service.cpp:172</code>）——这条默认值解释了为什么很多服务能被一个 <code>class_start default</code> 带起来。</p>
+<h3 id="h8-服务的-class-分类">服务的 class 分类</h3>
+<p><code>ServiceParser::ParseClass</code>（<code>service_parser.cpp:94</code>）把 <code>class</code> 关键字收进服务的 classnames 集合。本篇涉及的三类：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>class core</code></td><td>核心服务类，<code>ueventd</code> 与 <code>console</code> 属此类；启动落点是 <code>init.rc:1221</code> 的 <code>class_start core</code>，位于 <code>on boot</code>（:1112-1221）段内，本树可达</td><td><code>init.rc:1266</code>（<code>service ueventd</code>）、<code>init.rc:1285</code>（<code>service console</code>）</td></tr><tr><td><code>class main</code></td><td>主服务类，<code>zygote</code> 属此类；<code>class_start main</code> 在 <code>on nonencrypted</code>（:1228），本树不可达（见下）</td><td><code>init.zygote64.rc:2</code>、<code>init.zygote32.rc:2</code>、<code>init.zygote64_32.rc:4</code></td></tr><tr><td><code>class default</code></td><td>未写 <code>class</code> 时的默认归类</td><td><code>service.cpp:172</code></td></tr></tbody></table>
+<p>注意 <code>zygote</code> 不在 <code>core</code> 也不在 <code>default</code>，它是 <code>main</code>。而 <code>class_start main</code> 写在 <code>on nonencrypted</code>（<code>init.rc:1227</code>）里（<code>:1228</code> <code>class_start main</code>、<code>:1229</code> <code>class_start late_start</code>），不在 <code>late-init</code> 链上。这个段的触发器名没有对应的 <code>trigger nonencrypted</code> 文本命令，而是 C++ 侧排入：<code>builtins.cpp:580</code> 的 <code>queue_fs_event</code> 在四种 fs_mgr 返回码（<code>DEV_NOT_ENCRYPTABLE</code>、<code>FILE_ENCRYPTED</code>、<code>IS_METADATA_ENCRYPTED</code>、<code>NEEDS_METADATA_ENCRYPTION</code>）下都调 <code>QueueEventTrigger(&quot;nonencrypted&quot;)</code>（<code>:583</code>/<code>:601</code>），另有一条 <code>NEEDS_RECOVERY</code> 分支（<code>:585</code>）走 reboot 不入列。</p>
+<p>这里有一条必须说清的边界：<code>queue_fs_event</code> 的唯一调用者是 <code>do_mount_all</code>（<code>builtins.cpp:617</code>，内建表注册在 <code>:1337</code>），且受 <code>queue_event</code> 门控（<code>:622</code> 初值 true、<code>:625</code> 在 <code>MOUNT_MODE_EARLY</code> 下置 false）。而本树 <code>system/core/rootdir/</code> 下的 rc（<code>init.rc</code>、<code>init.zygote64.rc</code> 等）里没有任何可执行的 <code>mount_all</code> 命令——<code>:521</code>/<code>:528</code>/<code>:530</code> 三处命中全是注释；<code>grep -n '^on '</code> 列出的段里也没有 <code>on fs</code>，只有 <code>on early-fs</code>（<code>:551</code>，仅 <code>start vold</code>）与 <code>on post-fs</code>（<code>:555</code>，仅 checkpoint 标记与 bind/remount）。也就是说 <code>on nonencrypted</code> 在本树不可达，它靠设备侧 rc 的 <code>mount_all</code> 调用才会被排入。所以「开机没起 zygote」时，该查的是设备侧 rc 里有没有 <code>mount_all</code>、fs_mgr 走到哪个返回码，而不是在 <code>late-init</code> 链或本树 rc 里找 <code>class_start main</code>。</p>
+<h3 id="h9-trigger-内建命令只是排队">trigger 内建命令只是排队</h3>
+<p><code>init.rc</code> 里那串 <code>trigger early-fs</code>、<code>trigger fs</code>、<code>trigger post-fs</code> 全部由 <code>do_trigger</code>（<code>builtins.cpp:769</code>）执行，实现就是一句 <code>QueueEventTrigger(args[1])</code>。<code>builtins.cpp</code> 共 1369 行，<code>trigger</code> 在其中的「内建命令表」里，不是 shell 语法。</p>
+<p>含义很清楚：<strong>执行到这一行时什么也没发生</strong>，只是名字进了队列。等当前动作的命令全部跑完，<code>init</code> 才会取出队首触发器，去执行它匹配的动作。</p>
+<h3 id="h10-动作的执行边界">动作的执行边界</h3>
+<p>单个动作的执行由 <code>Action::ExecuteOneCommand</code>（<code>action.cpp:146</code>）逐条推进，<code>ExecuteAllCommands</code>（<code>action.cpp:153</code>）跑到没有剩余命令。<code>action.cpp</code> 共 248 行。这意味着一个动作内部是严格串行的；跨动作的顺序才由队列决定。</p>
+<h3 id="h11-二阶段触发序列">二阶段触发序列</h3>
+<p>二阶段 <code>init</code> 在 <code>init.cpp</code> 里排的前两个触发器是无条件的：<code>early-init</code>（<code>:1239</code>）、<code>init</code>（<code>:1261</code>）。第三个是二选一的分支，不是序列上的又一环：</p>
+<pre><code class="lang-cpp">// init.cpp:1278
+// Don't mount filesystems or start core system services in charger mode.
+if (bootmode == BootMode::CHARGER_MODE) {
+    am.QueueEventTrigger(&quot;charger&quot;);   // :1280
+} else {
+    am.QueueEventTrigger(&quot;late-init&quot;); // :1282
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>bootmode</code> 由 <code>GetBootMode()</code>（<code>init.cpp:694</code>）给出，除 <code>CHARGER_MODE</code> 外还有 <code>RECOVERY_MODE</code>（<code>:699</code>）。充电模式下整条开机主链不执行——不挂文件系统、不起核心服务，本篇与 §4.3 的 late-init 叙述只在非 charger 分支成立。最后 <code>queue_property_triggers_action</code>（<code>:1286</code>）把属性匹配动作挂到队列尾。</p>
+<p>关键在最后一步：属性触发器整体排在事件触发器之后，而且它本身分两步——先 <code>QueueBuiltinAction(property_enable_triggers_action)</code>（<code>init.cpp:687-688</code>）把属性触发门控打开，再 <code>QueueAllPropertyActions()</code>（<code>:689</code>）经 <code>QueuePropertyChange(&quot;&quot;, &quot;&quot;)</code>（<code>action_manager.cpp:58-59</code>）把全部属性动作入队。门控初值为 0（<code>init.cpp:125</code>）、在这里置 1（<code>:682</code>）。这就是为什么 <code>on property:sys.boot_completed=1</code>（<code>init.rc:1237</code>）不可能早于 <code>boot</code> 执行——不是因为它「不在候选范围里」（<code>QueuePropertyChange</code> 与 <code>QueueEventTrigger</code> 共用同一个 <code>event_queue_</code>，它一直在候选范围），而是因为在门控打开之前它压根不会入队。</p>
+<h2 id="h12-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>把 <code>late-init</code> 到 <code>zygote</code> 启动这一路走一遍。</p>
+<p><code>init.cpp:1282</code> 排入 <code>late-init</code>（非 charger 模式）。该触发器命中 <code>init.rc:518</code> 的动作，<code>ExecuteAllCommands</code> 开始逐条跑，共 10 次 <code>trigger</code>：</p>
+<ul><li><code>init.rc:519</code> <code>trigger early-fs</code> → 名字入队</li><li><code>init.rc:525</code> <code>trigger fs</code> → 名字入队（<code>fs</code> 段在本树没有对应的 <code>on fs</code>，其挂载动作由设备侧 rc 承担；但这一环在排队骨架上不能漏）</li><li><code>init.rc:526</code> <code>trigger post-fs</code> → 名字入队</li><li><code>init.rc:533</code> <code>trigger late-fs</code> → 名字入队</li><li><code>init.rc:537</code> <code>trigger post-fs-data</code> → 名字入队</li><li><code>init.rc:540</code> <code>trigger load-bpf-programs</code> → 名字入队</li><li><code>init.rc:543</code> <code>trigger zygote-start</code> → 名字入队</li><li><code>init.rc:546</code> <code>trigger firmware_mounts_complete</code> → 名字入队</li><li><code>init.rc:548</code> <code>trigger early-boot</code> → 名字入队</li><li><code>init.rc:549</code> <code>trigger boot</code> → 名字入队</li></ul>
+<p>这些 <code>trigger</code> 执行时全是空动作，但队列里已经依次躺好了后续触发器。<code>late-init</code> 的命令跑完后，<code>init</code> 取出 <code>zygote-start</code>，命中 <code>init.rc:1091</code> 的动作：</p>
+<ul><li><code>wait_for_prop odsign.verification.done 1</code>（会阻塞，直到属性到位）</li><li><code>start statsd</code></li><li><code>start zygote</code></li><li><code>start zygote_secondary</code></li></ul>
+<p><code>start zygote</code> 找到 <code>init.zygote64.rc:1</code> 定义的服务：<code>service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-system-server --socket-name=zygote</code>。它的 socket 由 <code>init</code> 预先创建：<code>socket zygote stream 660 root system</code>（<code>init.zygote64.rc:6</code>）；<code>critical window=${zygote.critical_window.minute:-off} target=zygote-fatal</code>（<code>:20</code>）声明了它挂掉的重启窗口。</p>
+<p>这里要补一条容易漏的路径：<code>zygote</code> 在这里是被 <code>start</code> 点名拉起的，而 <code>class_start main</code> 这条更通用的机制在 <code>on nonencrypted</code>（<code>init.rc:1227</code>），由 <code>do_mount_all</code> → <code>queue_fs_event</code>（<code>builtins.cpp:617</code>/<code>:580</code>）排入，与上面 10 次 <code>trigger</code> 是两条不同的入队来源。但如前所述，后一条在本树不可达：本树 rc 只覆盖开机主链的排队骨架，挂载动作与 <code>on fs</code> 段都不在这里，读的时候不能把本树 rc 当成主链的全部。</p>
+<p>之后轮到 <code>boot</code>，命中 <code>init.rc:1112</code> 的动作：<code>ifup lo</code>、设主机名、调 <code>/proc/sys/vm</code> 参数、给 zram writeback 节点改属主与权限。这些都发生在 <code>zygote</code> 之后，不是之前。</p>
+<h2 id="h13-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P8-101</code> 给出 bootloader 到二阶段 <code>init</code> 的交接、<code>init</code> 进程本身在启动链中的位置；<code>AND-P8-102</code> 给出启动镜像格式与 fastboot 链路。本篇只谈 <code>init</code> 内部怎么调度。属性系统的读写、<code>property_service</code> 的权限模型归 <code>AND-P8-202</code>，本篇只用到「属性变化会生成触发器」这一个事实。一阶段挂载与 <code>/system</code>、<code>/vendor</code> 的分离归 <code>AND-P8-101</code>，本篇的 <code>early-fs</code>/<code>fs</code> 只谈它们的排队位置，不谈挂载细节。</p>
+<p>后继篇读 <code>zygote</code> 启动之后与 system_server 的服务编排，本篇停在 <code>start zygote</code> 发出那一刻。</p>
+<h1 id="h14-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>根 rc 与主触发链</td><td><code>system/core/rootdir/init.rc</code></td><td><code>on late-init</code>、<code>on zygote-start</code>、<code>on nonencrypted</code>、<code>on boot</code>、<code>on property:sys.boot_completed=1</code>、<code>service ueventd</code>、<code>service console</code></td><td>1320 行，8 个 <code>import</code>，7 个顶层 <code>service</code></td></tr><tr><td>zygote 服务定义</td><td><code>system/core/rootdir/init.zygote64.rc</code> / <code>init.zygote32.rc</code> / <code>init.zygote64_32.rc</code></td><td><code>service zygote</code>、<code>class main</code>、<code>socket zygote</code>、<code>critical</code></td><td>由 <code>init.rc:12</code> 的 <code>import ... init.${ro.zygote}.rc</code> 间接导入</td></tr><tr><td>class_start 落点</td><td><code>system/core/rootdir/init.rc</code></td><td><code>:642</code> early_hal、<code>:1219</code> hal、<code>:1221</code> core、<code>:1228</code> main、<code>:1229</code> late_start、<code>:1235</code> charger</td><td>只有 core 与 hal 落在本树可达的 <code>on boot</code> / <code>on early-init</code> 段内</td></tr><tr><td>触发器排队</td><td><code>system/core/init/action_manager.cpp</code></td><td><code>QueueEventTrigger</code>、<code>QueuePropertyChange</code>、<code>ExecuteOneCommand</code></td><td>文件 161 行</td></tr><tr><td>动作执行</td><td><code>system/core/init/action.cpp</code></td><td><code>ExecuteOneCommand</code>、<code>ExecuteAllCommands</code></td><td>文件 248 行</td></tr><tr><td><code>on</code> 段解析</td><td><code>system/core/init/action_parser.cpp</code></td><td>触发器语法</td><td>文件 183 行</td></tr><tr><td><code>service</code> 段解析</td><td><code>system/core/init/service_parser.cpp</code></td><td><code>ParseClass</code></td><td>文件 735 行</td></tr><tr><td>内建命令表</td><td><code>system/core/init/builtins.cpp</code></td><td><code>do_trigger</code>、<code>queue_fs_event</code></td><td>文件 1369 行</td></tr><tr><td>二阶段触发序列</td><td><code>system/core/init/init.cpp</code></td><td><code>early-init</code>、<code>init</code>、<code>charger</code>/<code>late-init</code> 二选一、<code>queue_property_triggers_action</code></td><td>序列在此排定；late-init 链里 <code>early-fs</code>/<code>fs</code>/<code>post-fs</code> 等段对应的挂载动作不在本树 rc 内（<code>on early-fs</code> 仅 <code>start vold</code>；<code>on post-fs</code>（:555-609）是重活段：<code>vdc checkpoint markBootAttempt</code>、rootfs 的 <code>remount bind ro</code>、<code>/storage</code> 的 bind+slave、<code>/sys/kernel/debug</code> 的 restorecon、<code>/cache</code> 及 <code>/cache/recovery</code>/<code>backup_stage</code> 的建目录与权限、<code>/proc</code> 下 vmallocinfo/allocinfo/slabinfo/pagetypeinfo/kmsg/sysrq-trigger/last_kmsg 的 chown/chmod、以及 <code>/sys/fs/selinux/policy</code> 的 chmod），无 <code>on fs</code> 段</td></tr></tbody></table>
+<h1 id="h15-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e381</p></blockquote>
+<p>验证方式：静态源码分析。全部命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l system/core/rootdir/init.rc</code></pre>
+<p>期望 <code>1320</code>，对上事实 1。</p>
+<pre><code class="lang-bash">grep -c '^import ' system/core/rootdir/init.rc</code></pre>
+<p>期望 <code>8</code>，对上事实 1。</p>
+<pre><code class="lang-bash">grep -n '^service ' system/core/rootdir/init.rc</code></pre>
+<p>期望 7 行命中，对上事实 1 的「7 个顶层 <code>service</code> 定义」。</p>
+<pre><code class="lang-bash">sed -n '518,549p' system/core/rootdir/init.rc</code></pre>
+<p>期望看到 <code>on late-init</code> 及其后的 10 次 <code>trigger</code>（519/525/526/533/537/540/543/546/548/549），对上事实 2。</p>
+<pre><code class="lang-bash">sed -n '1225,1230p' system/core/rootdir/init.rc
+sed -n '1276,1287p' system/core/init/init.cpp</code></pre>
+<p>前者期望看到 <code>on nonencrypted</code> 段内的 <code>class_start main</code>/<code>class_start late_start</code>；后者期望看到 <code>charger</code> 与 <code>late-init</code> 的 if/else 二选一，以及紧随其后的 <code>queue_property_triggers_action</code>。</p>
+<pre><code class="lang-bash">sed -n '1091,1100p' system/core/rootdir/init.rc</code></pre>
+<p>期望 <code>on zygote-start</code> 块内出现 <code>wait_for_prop odsign.verification.done 1</code>、<code>start statsd</code>、<code>start zygote</code>、<code>start zygote_secondary</code>，对上事实 3。</p>
+<pre><code class="lang-bash">sed -n '1,25p' system/core/rootdir/init.zygote64.rc</code></pre>
+<p>期望第一行是 <code>service zygote</code>、带 <code>--start-system-server</code>；<code>:2</code> 为 <code>class main</code>；<code>:6</code> 为 <code>socket zygote stream 660 root system</code>；<code>:20</code> 为 <code>critical</code>，对上事实 6。</p>
+<pre><code class="lang-bash">wc -l system/core/init/action_manager.cpp system/core/init/action.cpp \
+      system/core/init/action_parser.cpp system/core/init/service_parser.cpp \
+      system/core/init/builtins.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次为 <code>161</code>、<code>248</code>、<code>183</code>、<code>735</code>、<code>1369</code>，对上事实 7、9、10、8。</p>
+<pre><code class="lang-bash">grep -n 'QueueEventTrigger\|QueuePropertyChange\|ExecuteOneCommand' system/core/init/action_manager.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:48</code>、<code>:53</code>、<code>:72</code>。</p>
+<pre><code class="lang-bash">sed -n '769,771p' system/core/init/builtins.cpp</code></pre>
+<p>期望 <code>do_trigger</code> 体内就是 <code>QueueEventTrigger(args[1])</code>，对上事实 8。</p>
+<pre><code class="lang-bash">grep -n 'ParseClass' system/core/init/service_parser.cpp
+grep -n '&quot;default&quot;' system/core/init/service.cpp</code></pre>
+<p>期望前者命中 <code>:94</code>，后者命中 <code>:172</code>，对上事实 10。</p>
+<pre><code class="lang-bash">grep -n 'early-init\|&quot;init&quot;\|charger\|late-init\|queue_property_triggers_action\|property_enable_triggers_action' system/core/init/init.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:1239</code>、<code>:1261</code>、<code>:1280</code>、<code>:1282</code>、<code>:1286</code>，另可看到 <code>:682</code>/<code>:687-688</code> 的门控置位与入队两步，对上事实 11。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h16-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h17-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：rc 文件从上往下当脚本执行。</strong> 不是。解析阶段只做登记，执行阶段由触发器驱动。你在文件末尾写的 <code>start</code>，只有它所在的 <code>on</code> 段被触发时才跑。</p>
+<p><strong>误区二：`trigger` 命令会立刻执行目标动作。</strong> 不会。<code>do_trigger</code> 只是 <code>QueueEventTrigger(args[1])</code>，把名字放到队列尾。目标动作要等当前动作的命令跑完、<code>init</code> 取队首时才执行。</p>
+<p><strong>误区三：`on boot` 里 `start` 的服务一定在全部早期服务之后起。</strong> 看起来对，其实不完整。<code>boot</code> 是靠 <code>late-init</code> 里 <code>trigger boot</code>（<code>init.rc:549</code>）排进队列的，而队列里排在它前面的还有 <code>zygote-start</code> 等。更关键的是，<code>boot</code> 动作内部一旦有阻塞命令，后面的命令全等它；反之某个 <code>class_start</code> 失败也不影响它后面的命令继续跑。</p>
+<p><strong>误区四：服务不写 `class` 就是「没有 class」，必须单独 `start`。</strong> 默认是 <code>{&quot;default&quot;}</code>（<code>service.cpp:172</code>），会被 <code>class_start default</code> 带走。</p>
+<h2 id="h18-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>zygote</code> 比 <code>on boot</code> 里写的服务先起？ <strong>答</strong>：<code>on boot</code> 的触发名是 <code>late-init</code> 里 <code>trigger boot</code>（<code>init.rc:549</code>）排进队列的，而 <code>trigger zygote-start</code>（<code>:543</code>）排在它前面。队列是先进先出，<code>zygote-start</code> 先被取出。 <strong>追问</strong>：那两个 <code>trigger</code> 之间写别的命令会怎样？ <strong>答</strong>：插入的命令先于两个 <code>trigger</code> 执行，但不改变两个触发器的相对次序。 <strong>追问</strong>：取出队首时只执行一个动作吗？ <strong>答</strong>：不止一个。<code>action_manager.cpp:78-89</code> 的 while 循环会把队头事件一路弹出，每弹一次就遍历 <code>actions_</code> 把所有 <code>CheckEvent</code> 命中的动作压进 <code>current_executing_actions_</code>，直到队列空或队头换成新事件。所以「取出 <code>zygote-start</code>」实际是把所有监听该触发名的动作一次性排上，FIFO 指的是事件出队次序，不是「一次只出一个动作」。</p>
+<p><strong>问</strong>：<code>on property:sys.boot_completed=1</code> 和 <code>on boot</code> 谁先跑？ <strong>答</strong>：<code>boot</code> 一定先。属性匹配动作由 <code>queue_property_triggers_action</code>（<code>init.cpp:1286</code>）整体挂到队列尾，排在事件触发器之后；而且这一步本身是两步——先 <code>property_enable_triggers_action</code>（<code>init.cpp:687-688</code>）开门控，再 <code>QueueAllPropertyActions()</code>（<code>:689</code>）才真正入队。门控不开，属性动作连队列都进不去。 <strong>追问</strong>：那开机期间属性变化能被 <code>on property:</code> 即时捕获吗？ <strong>答</strong>：能，但执行时机是入队后按队列顺序，不是属性写入的瞬间。属性机制细节归 <code>AND-P8-202</code>。</p>
+<h2 id="h19-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>服务定义了但没起</td><td><code>grep -n -A5 '^service mysvc' $(grep -rl 'service mysvc' system/core/rootdir/)</code></td><td>是否有 <code>class</code> 行、<code>class</code> 名是什么</td><td>查是否有对应 <code>class_start</code> 或 <code>start mysvc</code> 且所在 <code>on</code> 段的触发器真被排过</td></tr><tr><td>动作顺序和预期不符</td><td><code>sed -n '518,549p' system/core/rootdir/init.rc</code></td><td><code>late-init</code> 里 <code>trigger</code> 的书写次序</td><td>按队列先进先出重排预期</td></tr><tr><td>属性触发的动作迟迟不跑</td><td><code>grep -rn 'on property:' system/core/rootdir/*.rc</code></td><td>属性名与期望值是否逐字一致</td><td>对照 <code>init.cpp</code> 里 <code>queue_property_triggers_action</code> 的挂载位置</td></tr><tr><td><code>zygote</code> 起不来</td><td><code>grep -n &quot;class_start&quot; system/core/rootdir/init.rc</code>；<code>sed -n '1,25p' system/core/rootdir/init.zygote64.rc</code></td><td>先看 <code>class_start</code> 落点：<code>:1221</code> 的 core 在 <code>on boot</code> 内可达，<code>:1228</code> 的 main 在 <code>on nonencrypted</code> 内本树不可达；再看 <code>socket</code> 行的 uid/gid 与 <code>critical</code> 的 <code>target</code></td><td>检查是否有别的服务抢同名 socket；若 <code>class_start main</code> 侧没动静，转查设备侧 rc 的 <code>mount_all</code> 与 fs_mgr 返回码（本树 rootdir 无 <code>mount_all</code>，<code>on nonencrypted</code> 在本树不可达）</td></tr></tbody></table>
+<h1 id="h20-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：属性存储与权限模型见 <code>AND-P8-202</code>；一阶段挂载与分区见 <code>AND-P8-101</code>；<code>zygote</code> 之后 system_server 的服务编排见本篇后继。</li><li><strong>本篇前置依赖</strong>：<code>AND-P8-102</code>（镜像格式与 fastboot 链路）；内容上还依赖 <code>AND-P8-101</code>（bootloader 到 init 的交接）。</li><li><strong>本篇后继</strong>：<code>AND-P8-202</code>（属性系统），以及 P8 卷中 system_server 服务启动相关篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>init.rc</code> 1320 行、8 个 <code>import</code>、7 个顶层 <code>service</code>——来源：本树静态计数（<code>wc</code>/<code>grep</code>）。</li><li><code>late-init</code> 链含 10 次 <code>trigger</code>——来源：逐行读取 <code>init.rc:518</code>–<code>:549</code>。</li><li><code>zygote</code> 服务完整定义 1 处（<code>init.zygote64.rc:1</code>），对应 64 位主实例——来源：文件内容。</li><li><code>action.cpp</code> 命令执行入口 2 个（单条 / 全部）——来源：源码常量，暂无其他实测，列为待补。</li><li>单个动作内命令条数上限：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h21-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>引入 <code>import</code> 语法的早期版本</td><td>rc 支持拆分与复用，<code>zygote</code> 定义从 <code>init.rc</code> 移出到独立文件</td><td>查 <code>service zygote</code> 必须连被导入文件一起看</td></tr><tr><td>引入 <code>critical window=... target=...</code> 形式的早期版本</td><td><code>critical</code> 从布尔变为可带窗口参数</td><td>旧写法与新语义不通用，需按本树写法读</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>init.rc</code> 为 1320 行、8 个 <code>import</code>、7 个顶层 <code>service</code>；<code>late-init</code> 链含 10 次 <code>trigger</code>（519/525/526/533/537/540/543/546/548/549）；<code>charger</code>/<code>late-init</code> 在 <code>init.cpp:1279-1283</code> 为 if/else 二选一；<code>class_start main</code> 位于 <code>on nonencrypted</code>（<code>init.rc:1227</code>）而非 <code>late-init</code> 链</td><td>本篇全部结论的口径</td></tr></tbody></table>
+<h1 id="h22-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>init language</code>、<code>boot flow</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>action_manager</code>、<code>service_parser</code>、<code>init language</code>。</li><li>本仓关键路径：<code>system/core/rootdir/init.rc</code>、<code>system/core/init/action_manager.cpp</code>、<code>system/core/init/service_parser.cpp</code>。</li><li>承接篇：<code>AND-P8-101</code>（bootloader 到 init 的交接、init 进程在启动链上的位置）、<code>AND-P8-202</code>（属性系统）。</li></ul>
+</article>
+<footer>android-100 · AND-P8-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

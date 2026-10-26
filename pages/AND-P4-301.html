@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音频 HAL：AudioFlinger 到 HAL 的完整通路</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>音频 HAL：AudioFlinger 到 HAL 的完整通路</h1>
+<div class="kv"><span>ID：AND-P4-301</span><span>卷：P4</span><span>章：4.3</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/av/services/audioflinger/AudioFlinger.cpp ；frameworks/av/media/libaudiohal/FactoryHal.cpp ；frameworks/av/media/libaudiohal/impl/DeviceHalAidl.cpp ；frameworks/av/media/libaudioclient/AudioSystem.cpp ；hardware/interfaces/audio/aidl/android/hardware/audio/core/IModule.aidl ；hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>应用的播放请求最终落到一个 <code>IModule</code> 远端代理上，中间隔着 AudioFlinger、一层 HAL（硬件抽象层）封装（<code>libaudiohal</code>）和一次跨进程调用。判断「请求在哪一层被丢掉」，关键是认清三段：AudioFlinger 的 Binder 方法表入口、<code>FactoryHal</code> 选出的 HAL 版本与实现、<code>DeviceHalAidl</code>／<code>IModule</code> 的打开与读写。真正被固化的是绑定关系——<code>mDevicesFactoryHal</code> 是 const 成员，初始化时（<code>onFirstRef</code>）选定 HIDL 还是 AIDL 实现，之后不再改；<code>getHalVersion()</code> 本身是每次调用都向 HAL 现查，返回值稳定只因为绑定没变。HAL 服务进程重启会连带重启 <code>audioserver</code>，所以你看到的「无声」可能是 HAL 进程退出而非音频通路阻塞。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P4-G01</code>，HAL 与 VINTF 的通用约定（HIDL/AIDL 服务注册、VINTF manifest 匹配）在本篇反复出现。</p>
+<p><strong>涉及源码</strong>（相对 AOSP 根）：</p>
+<ul><li><code>frameworks/av/services/audioflinger/AudioFlinger.cpp</code></li><li><code>frameworks/av/media/libaudiohal/FactoryHal.cpp</code></li><li><code>frameworks/av/media/libaudiohal/impl/DeviceHalAidl.cpp</code></li><li><code>frameworks/av/media/libaudioclient/AudioSystem.cpp</code></li><li><code>hardware/interfaces/audio/aidl/android/hardware/audio/core/IModule.aidl</code></li><li><code>hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>用户报「播放无声」，但你拿到的是 <code>audioserver</code> 的日志：没有报错，<code>createTrack</code> 返回成功，写入也没有返回负值。这时继续在应用侧找是徒劳的——请求已经交出去了，问题在 HAL 及其以下。另一种常见困惑：某台设备上 <code>mDevicesFactoryHal</code> 打开模块失败，换一台同版本 Android 却正常。两台机器的差别往往不在代码，而在 VINTF 里声明了哪个 HAL，以及 <code>audioserver</code> 有没有权限拿到那个服务。本篇只讲「AudioPolicy 决定之后到设备」这一段，把中间每一层的名字和失败形态摊开。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念。AudioFlinger 是 <code>media.audio_flinger</code> 服务的实现者，对外暴露 Binder 方法表。<code>mDevicesFactoryHal</code> 是 AudioFlinger 持有的 HAL 工厂抽象，实际类型是 <code>DevicesFactoryHalAidl</code> 或 <code>DevicesFactoryHalHidl</code>，由 <code>FactoryHal.cpp</code> 按可用性挑选。<code>DeviceHalAidl</code> 是 AIDL 实现下的设备封装，由工厂的 <code>openDevice</code> 产出（调用点在 AudioFlinger.cpp:2636），把 AudioFlinger 的调用翻译成对 <code>IModule</code> 的调用。<code>IModule</code> 是 vendor 侧真正干活的接口。</p>
+<p>图 1：从 Binder 入口到 vendor HAL 的调用链</p>
+<pre><code>app / AudioService
+      |
+      v  Binder (media.audio_flinger)
+AudioFlinger         BINDER_METHOD_ENTRY(createTrack) / (loadHwModule)
+      |              mDevicesFactoryHal（const 成员，初始化时定下实现）
+      v
+FactoryHal           选 HIDL 或 AIDL 实现
+      |
+      v
+DevicesFactoryHalAidl   openDevice（调用点 :2636）/ getHalVersion()
+      |
+      v
+DeviceHalAidl        openOutputStream / openInputStream / initCheck
+      |
+      v  hwbinder 或 binder
+IModule (vendor)     openOutputStream / getAudioPort / setModuleDebug</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>AudioFlinger 对外的入口是方法表，不是某个函数。<code>BINDER_METHOD_ENTRY(createTrack)</code>（AudioFlinger.cpp:175）与 <code>BINDER_METHOD_ENTRY(loadHwModule)</code>（:212）是两个关键项；<code>createTrack</code> 的实现体在 :1048。这意味着「应用能不能创建轨道」这件事，在 Binder 派发阶段就已定型，之后才走到 HAL 层。</p>
+<p>HAL 抽象入口是 <code>mDevicesFactoryHal</code>，它第一次被用是在 <code>onFirstRef()</code>（:343 起）里：:350-351 挂设备可用性回调，:353 读 <code>getHalVersion()</code> 决定 AAudio 的 burst 参数；此外 :405（<code>getMmapPolicyInfos</code>）、:810、:2709 也各读一次。所以「版本不变」不等于「只读一次」：<code>getHalVersion()</code> 每次调用都经 <code>mConfig-&gt;getInterfaceVersion()</code> 向 HAL 现查（<code>DevicesFactoryHalAidl.cpp:199-206</code>）。真正被固化的是绑定关系——<code>mDevicesFactoryHal</code> 是 const 成员，由 <code>DevicesFactoryHalInterface::create()</code> 在初始化时定下（<code>AudioFlinger.h:683-684</code>），之后同一进程内不会再换成另一种实现。</p>
+<p>工厂选择看接口名与包名：HIDL 接口名为 <code>&lt;&quot;android.hardware.audio&quot;, &quot;IDevicesFactory&quot;&gt;</code>（FactoryHal.cpp:43/63），AIDL 侧包名为 <code>android.hardware.audio.core</code>（:43 同段注释）。<code>createHalService</code>（:73）用 <code>createIDevicesFactory</code>／<code>createIEffectsFactory</code>（:76）取实现；可用性判定分别为 <code>hasAidlHalService</code>（:103）与 <code>hasHidlHalService</code>（:114），最终由 <code>createPreferredImpl</code>（:151）决定优先项。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>hasAidlHalService</code></td><td>AIDL 形式 HAL 服务是否可获取</td><td>FactoryHal.cpp:103</td></tr><tr><td><code>hasHidlHalService</code></td><td>HIDL 形式 HAL 服务是否可获取</td><td>FactoryHal.cpp:114</td></tr><tr><td><code>createPreferredImpl</code></td><td>在可用实现中选优先项</td><td>FactoryHal.cpp:151</td></tr><tr><td><code>createIDevicesFactory</code></td><td>构造设备工厂代理</td><td>FactoryHal.cpp:76</td></tr><tr><td><code>createIEffectsFactory</code></td><td>构造效果工厂代理</td><td>FactoryHal.cpp:76</td></tr></tbody></table>
+<p>图 2：工厂可用性与优先项判定</p>
+<pre><code>AudioFlinger 构造期：mDevicesFactoryHal = DevicesFactoryHalInterface::create()
+（AudioFlinger.h:683-684）
+   |
+   +--&gt; hasAidlHalService(android.hardware.audio.core) :103
+   +--&gt; hasHidlHalService(android.hardware.audio)      :114
+   |
+   v
+createPreferredImpl :151 --&gt; createHalService :73 --&gt; createIDevicesFactory :76
+   |
+   +--&gt; 两者都不可用：createPreferredImpl 返回 nullptr（:183）
+        mDevicesFactoryHal 为空 → onFirstRef :351 无判空直接解引用
+        → audioserver 启动即崩溃，不是「createTrack 成功但无声」</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>设备封装层的调用面：<code>DeviceHalAidl::openOutputStream</code>（DeviceHalAidl.cpp:535）、<code>openInputStream</code>（:640）、<code>setMasterVolume</code>（:224）、<code>initCheck</code>（:183）。<code>initCheck</code> 是打开模块后第一道自检，失败即放弃该模块。</p>
+<p>HAL 侧接口在 <code>IModule</code>：<code>interface IModule</code>（IModule.aidl:62）、<code>openOutputStream</code>（:492）、<code>getAudioPort</code>（:293）、<code>setModuleDebug</code>（:79）。客户端取 AudioFlinger 服务的名字是 <code>getServiceName()</code> 返回 <code>media.audio_flinger</code>（AudioSystem.cpp:143）。</p>
+<p>HAL 服务本身是一个独立进程：<code>service vendor.audio-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example</code>，<code>class hal</code>、<code>user audioserver</code>、<code>rlimit rtprio 10 10</code>、<code>onrestart restart audioserver</code>（android.hardware.audio.service-aidl.example.rc:1-12）。<code>user audioserver</code> 说明它以音频服务身份运行；<code>onrestart</code> 说明 HAL 崩溃牵连 <code>audioserver</code>。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一次无声排查。先在 <code>android.hardware.audio.service-aidl.xml</code> 里确认该 HAL 声明的实例是 <code>IModule/default</code> 与 <code>IConfig/default</code>，版本号 <code>&lt;version&gt;4&lt;/version&gt;</code>。如果 VINTF 完全匹配不上，<code>createPreferredImpl</code> 拿不到实现、返回 <code>nullptr</code>（FactoryHal.cpp:183），<code>mDevicesFactoryHal</code> 于是为空；后来 <code>onFirstRef()</code> 在 :351 直接调 <code>mDevicesFactoryHal-&gt;setCallbackOnce(...)</code>，没有判空，结果是 <code>audioserver</code> 启动即崩溃——这时的现象是日志里的 crash 与重启循环，而不是「createTrack 成功但无声」。走不到「成功但无声」的通常是另一种情况：工厂拿到了、模块也打开了，但 <code>initCheck</code> 或 <code>openOutputStream</code> 失败。</p>
+<p>再看 <code>initCheck</code>（DeviceHalAidl.cpp:183）。它返回失败时，AudioFlinger 会记录模块不可用并保留其他已成功打开的模块；落到失败模块上的写入再也进不了 <code>IModule::openOutputStream</code>，应用侧只看到写入不再被消费。</p>
+<p>最后看 HAL 进程。若 HAL 崩溃，<code>onrestart restart audioserver</code> 会重启 <code>audioserver</code>；应用侧的 AudioTrack 随之失效，表现为播放中断后重连。此时日志里没有音频错误，只有服务重启记录。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>本篇起点是 AudioPolicy 决策完成之后。策略如何选设备与通路见 <code>AND-P7-202</code>；应用侧 <code>AudioTrack</code>／<code>AudioRecord</code> 的行为见 <code>AND-P7-201</code>；音频焦点见 <code>AND-P7-102</code>。本篇不重复这三段。同章的小 HAL 对照样本见 <code>AND-P4-302</code>，那篇用更小的接口演示同一套 HIDL/AIDL 与 VINTF 规则。HAL 内部 DSP／ALSA 实现属 vendor 私有，本篇不覆盖。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>Binder 入口</td><td><code>frameworks/av/services/audioflinger/AudioFlinger.cpp</code></td><td><code>BINDER_METHOD_ENTRY(createTrack)</code>、<code>loadHwModule</code>、<code>mDevicesFactoryHal</code></td><td>方法表与 HAL 版本确定点</td></tr><tr><td>工厂选择</td><td><code>frameworks/av/media/libaudiohal/FactoryHal.cpp</code></td><td><code>createHalService</code>、<code>hasAidlHalService</code>、<code>hasHidlHalService</code>、<code>createPreferredImpl</code></td><td>HIDL／AIDL 判定与优先项</td></tr><tr><td>设备封装</td><td><code>frameworks/av/media/libaudiohal/impl/DeviceHalAidl.cpp</code></td><td><code>openOutputStream</code>、<code>openInputStream</code>、<code>initCheck</code>、<code>setMasterVolume</code></td><td>AudioFlinger 到 <code>IModule</code> 的翻译层</td></tr><tr><td>服务名</td><td><code>frameworks/av/media/libaudioclient/AudioSystem.cpp</code></td><td><code>getServiceName()</code> 返回 <code>media.audio_flinger</code></td><td>客户端取服务的字符串</td></tr><tr><td>HAL 接口</td><td><code>hardware/interfaces/audio/aidl/android/hardware/audio/core/IModule.aidl</code></td><td><code>interface IModule</code>、<code>openOutputStream</code>、<code>getAudioPort</code></td><td>vendor 侧契约</td></tr><tr><td>VINTF 声明</td><td><code>hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml</code></td><td><code>IModule/default</code>、<code>IConfig/default</code>、<code>&lt;version&gt;4&lt;/version&gt;</code></td><td>实例与版本号来源</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/av:475269ec44ac</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n 'BINDER_METHOD_ENTRY(createTrack)\|BINDER_METHOD_ENTRY(loadHwModule)' \
+  frameworks/av/services/audioflinger/AudioFlinger.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>createTrack</code> 在 175 行、<code>loadHwModule</code> 在 212 行两项，对上前提事实 1。</p>
+<pre><code class="lang-bash">grep -n 'getHalVersion\|mDevicesFactoryHal' frameworks/av/services/audioflinger/AudioFlinger.cpp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>mDevicesFactoryHal</code> 与 <code>getHalVersion()</code> 出现在 350-353 一带，确认版本首次读取发生在 <code>onFirstRef()</code> 里（另外 :405、:810、:2709 还有三处运行期调用）。</p>
+<pre><code class="lang-bash">grep -n 'hasAidlHalService\|hasHidlHalService\|createPreferredImpl\|createIDevicesFactory' \
+  frameworks/av/media/libaudiohal/FactoryHal.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>createIDevicesFactory</code>（76）、<code>hasAidlHalService</code>（103）、<code>hasHidlHalService</code>（114）、<code>createPreferredImpl</code>（151）。</p>
+<pre><code class="lang-bash">grep -n 'openOutputStream\|initCheck' frameworks/av/media/libaudiohal/impl/DeviceHalAidl.cpp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>initCheck</code>（183）、<code>openOutputStream</code>（535）等封装函数。</p>
+<pre><code class="lang-bash">grep -n 'onrestart\|user audioserver\|rtprio' \
+  hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.example.rc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>user audioserver</code>、<code>rlimit rtprio 10 10</code>、<code>onrestart restart audioserver</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：HAL 版本可以在运行期切换。</strong> 纠正：<code>getHalVersion()</code> 本身是活查询，每次调用都问 HAL；不能切换的是绑定——<code>mDevicesFactoryHal</code> 是 const 成员，初始化时定下 HIDL 还是 AIDL 实现，同一进程内不再变。要换实现只能重启 <code>audioserver</code>。</p>
+<p><strong>误区二：`createTrack` 返回成功就代表能出声。</strong> 纠正：<code>createTrack</code>（AudioFlinger.cpp:1048）只保证轨道对象建立，HAL 侧 <code>openOutputStream</code> 与 <code>initCheck</code> 是另外两道关。轨道成功而无声完全正常。</p>
+<p><strong>误区三（看起来对其实是错的）：AIDL 和 HIDL 会同时被使用。</strong> 纠正：<code>createPreferredImpl</code> 在可用实现中选一个优先项，最终只走一条路径。两者同时存在时是择一，不是双跑。</p>
+<p><strong>误区四：应用无声时先看 AudioTrack 的 state。</strong> 纠正：若 HAL 进程崩溃过，<code>onrestart restart audioserver</code> 会让 <code>audioserver</code> 重启，AudioTrack 的失败是结果而非原因。先查服务重启记录。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>mDevicesFactoryHal</code> 为空时，日志里能看到什么？ <strong>答</strong>：先是 <code>FactoryHal.cpp:177</code> 那句 <code>Found no HAL version, main(Device) ...</code>，紧接着就是崩溃——<code>onFirstRef()</code> 在 :351 对该空指针直接调方法，没有判空。所以这个状态下不存在「运行期静默」，<code>audioserver</code> 根本起不来。 <strong>追问</strong>：那怎么确认是这一步？ <strong>答</strong>：检查 VINTF manifest 里是否声明了 <code>IModule/default</code> 与 <code>IConfig/default</code>，版本号是否匹配 <code>&lt;version&gt;4&lt;/version&gt;</code>。</p>
+<p><strong>问</strong>：<code>initCheck</code> 失败会被重试吗？ <strong>答</strong>：不会。失败即放弃该模块，AudioFlinger 保留其他已成功打开的模块；若没有可替代的，表现为无输出。 <strong>追问</strong>：怎么定位是 <code>initCheck</code>？ <strong>答</strong>：在 <code>DeviceHalAidl.cpp</code> 的 <code>initCheck</code>（:183）处加日志，或比对模块打开前后的可用模块列表。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>无声且无报错</td><td><code>grep -n 'BINDER_METHOD_ENTRY(createTrack)' frameworks/av/services/audioflinger/AudioFlinger.cpp</code></td><td>方法表项是否存在</td><td>确认版本分支后查 <code>createTrack</code> 实现体</td></tr><tr><td>怀疑 HAL 层选错</td><td><code>grep -n 'hasAidlHalService|hasHidlHalService' frameworks/av/media/libaudiohal/FactoryHal.cpp</code></td><td>两条判定路径</td><td>对照 VINTF 声明的实例名</td></tr><tr><td>打开模块即失败</td><td><code>grep -n 'initCheck' frameworks/av/media/libaudiohal/impl/DeviceHalAidl.cpp</code></td><td>自检位置</td><td>检查 HAL 服务进程是否在跑</td></tr><tr><td>播放中途断掉</td><td><code>grep -n 'onrestart' hardware/interfaces/audio/aidl/default/*.rc</code></td><td>重启策略</td><td>查 HAL 进程崩溃记录</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：音频策略与设备选择见 <code>AND-P7-202</code>；应用侧 <code>AudioTrack</code>／<code>AudioRecord</code> 见 <code>AND-P7-201</code>；HAL 内部 DSP／ALSA 实现属 vendor，本篇不涉及。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P4-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P4-302</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>HAL 服务实时优先级上限 <code>rlimit rtprio 10 10</code>，来源：rc 文件元数据（android.hardware.audio.service-aidl.example.rc:1-12）。</li><li>VINTF 声明的 HAL 版本号为 <code>&lt;version&gt;4&lt;/version&gt;</code>，来源：manifest 元数据。</li><li><code>audioserver</code> 服务名为 <code>media.audio_flinger</code>，来源：AudioSystem.cpp:143 源码常量。</li><li>HAL 进程崩溃到 <code>audioserver</code> 重启的时延：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL 形态</td><td>接口名 <code>&lt;&quot;android.hardware.audio&quot;, &quot;IDevicesFactory&quot;&gt;</code></td><td>由 <code>hasHidlHalService</code> 判定</td></tr><tr><td>AIDL 形态</td><td>包名 <code>android.hardware.audio.core</code></td><td>由 <code>hasAidlHalService</code> 判定</td></tr><tr><td>android17-release（本树实测）</td><td>两者并存，<code>createPreferredImpl</code> 择一</td><td>同一模块只能走一条路径；绑定由 <code>createPreferredImpl</code> 在初始化时定下，换实现要重启 <code>audioserver</code></td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>audio hal aidl</code>、<code>vintf manifest</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>IModule audio aidl</code>、<code>FactoryHal</code>。</li><li>本仓关键路径：<code>frameworks/av/media/libaudiohal/</code>、<code>hardware/interfaces/audio/aidl/</code>、<code>frameworks/av/services/audioflinger/</code>。</li><li>承接篇：<code>AND-P4-302</code>（小 HAL 对照样本）、<code>AND-P7-202</code>（音频策略与通路）。</li></ul>
+</article>
+<footer>android-100 · AND-P4-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

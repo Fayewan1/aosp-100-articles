@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Android 体系百篇文</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Android 体系百篇文</h1>
+<div class="kv"><span>108 篇源码级 AOSP 体系文</span><span>96 篇正文＋12 篇卷导读</span><span>锚定 android17-release</span><span>保留所有权利</span></div>
+</header>
+<article>
+<blockquote><p>卷＝层与职责，篇＝一个可核验的问题。全书只记一张图：L1–L5 五层堆叠，加五条端到端调用链。全部结论锚定本地源码树，关键论断给「文件:行号」级证据，命令可复现。</p></blockquote>
+<h2>版权</h2>
+<p><strong>保留所有权利（All rights reserved）</strong>。本站内容可供个人阅读学习；转载、二次改编、商业使用需另行授权。</p>
+<h2>体系结构</h2>
+<table><thead><tr><th>卷</th><th>主题</th><th>篇数</th></tr></thead><tbody>
+<tr><td>P0</td><td>体系总览与学习方法</td><td>9</td></tr>
+<tr><td>P1</td><td>应用层：组件、UI、资源、数据</td><td>9</td></tr>
+<tr><td>P2</td><td>Java 框架层：系统服务与 Binder</td><td>9</td></tr>
+<tr><td>P3</td><td>Native 框架层与 ART 运行时</td><td>9</td></tr>
+<tr><td>P4</td><td>HAL 与 VINTF 硬件接口</td><td>9</td></tr>
+<tr><td>P5</td><td>Linux 内核层（Android 视角）</td><td>9</td></tr>
+<tr><td>P6</td><td>图形、窗口与渲染系统</td><td>9</td></tr>
+<tr><td>P7</td><td>媒体、音频、相机与通讯</td><td>9</td></tr>
+<tr><td>P8</td><td>启动流程与系统服务编排</td><td>9</td></tr>
+<tr><td>P9</td><td>安全、权限与隐私</td><td>9</td></tr>
+<tr><td>P10</td><td>性能、稳定性、调试与工具链</td><td>9</td></tr>
+<tr><td>P11</td><td>生态、构建系统与工程实践</td><td>9</td></tr>
+</tbody></table>
+<h2>全目录</h2>
+<h3>P0 · 体系总览与学习方法</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P0-G01</td><td><a href="pages/AND-P0-G01.html">卷导读：本书地图与四种读法</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-101</td><td><a href="pages/AND-P0-101.html">Android 的版本与发布节奏：从半年发到 trunk-stable</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-102</td><td><a href="pages/AND-P0-102.html">AOSP 源码树全景：1084 个 git 项目如何构成一个系统</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-201</td><td><a href="pages/AND-P0-201.html">repo 工作流与 project.list：多仓库协同的日常</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-202</td><td><a href="pages/AND-P0-202.html">模块与 PROJECT 名：从 Soong 模块到安装路径</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-301</td><td><a href="pages/AND-P0-301.html">五条调用链：本书的主线骨架</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-302</td><td><a href="pages/AND-P0-302.html">源码阅读顺序与读补丁：从 commit message 到行为变更</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-401</td><td><a href="pages/AND-P0-401.html">全书术语表与符号约定</a> 🔖</td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P0-402</td><td><a href="pages/AND-P0-402.html">如何提问题与查资料：官方文档、AOSP 与 stacktrace 的用法</a></td><td>★★☆☆☆</td></tr>
+</tbody></table>
+<h3>P1 · 应用层：组件、UI、资源、数据</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P1-G01</td><td><a href="pages/AND-P1-G01.html">卷导读：App 进程内的世界</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P1-101</td><td><a href="pages/AND-P1-101.html">一个 App 进程的诞生：Zygote fork 到 ActivityThread</a> 🔖</td><td>★★★☆☆</td></tr>
+<tr><td>AND-P1-102</td><td><a href="pages/AND-P1-102.html">组件生命周期：Activity/Service 的状态机与配置变更</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P1-201</td><td><a href="pages/AND-P1-201.html">Activity 启动模式与任务栈：launchMode 的真实语义</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P1-202</td><td><a href="pages/AND-P1-202.html">从 setContentView 到 Window：View 层级与 Token</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P1-301</td><td><a href="pages/AND-P1-301.html">Service 与后台执行约束：前台服务、JobScheduler 配额</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P1-302</td><td><a href="pages/AND-P1-302.html">BroadcastReceiver 与 ContentProvider：广播演进与数据共享</a></td><td>★★☆☆☆</td></tr>
+<tr><td>AND-P1-401</td><td><a href="pages/AND-P1-401.html">View 体系的 measure/layout/draw 与硬件加速</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P1-402</td><td><a href="pages/AND-P1-402.html">资源体系与数据持久化：配置适配、Room/DataStore/Keystore</a></td><td>★★☆☆☆</td></tr>
+</tbody></table>
+<h3>P2 · Java 框架层：系统服务与 Binder</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P2-G01</td><td><a href="pages/AND-P2-G01.html">卷导读：跨过 Binder 之前</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P2-101</td><td><a href="pages/AND-P2-101.html">Binder 事务的一次完整往返：transact 到 onTransact</a> 🔖</td><td>★★★★☆</td></tr>
+<tr><td>AND-P2-102</td><td><a href="pages/AND-P2-102.html">oneway、死亡通知与 Binder 的失败形状</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P2-201</td><td><a href="pages/AND-P2-201.html">AMS 与 Activity 启动：从 startActivity 到 attach</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P2-202</td><td><a href="pages/AND-P2-202.html">WMS 与窗口层级：从 Token 到 Surface 分配</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P2-203</td><td><a href="pages/AND-P2-203.html">PMS、InputManager 与其余系统服务：安装、权限授予与输入分发</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P2-301</td><td><a href="pages/AND-P2-301.html">框架并发模型：Binder 线程池 × Handler/Looper</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P2-302</td><td><a href="pages/AND-P2-302.html">权限校验框架：checkPermission 的所有路径</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P2-401</td><td><a href="pages/AND-P2-401.html">进程模型：Zygote、fork、COW 与进程优先级 adj</a></td><td>★★★☆☆</td></tr>
+</tbody></table>
+<h3>P3 · Native 框架层与 ART 运行时</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P3-G01</td><td><a href="pages/AND-P3-G01.html">卷导读：Java 之下的 Native 世界</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P3-101</td><td><a href="pages/AND-P3-101.html">Native 世界导览：bionic、.so 与 Init 属性系统</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P3-201</td><td><a href="pages/AND-P3-201.html">ART 类加载与 DEX/OAT：从 ClassLoader 到 AOT 编译</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P3-202</td><td><a href="pages/AND-P3-202.html">ART 内存与 GC：堆布局、并发 GC 与对象移动</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P3-203</td><td><a href="pages/AND-P3-203.html">JIT、Profile 与基线配置：代码为什么要被编译两次</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P3-301</td><td><a href="pages/AND-P3-301.html">JNI 桥：注册、查找方法、临界区与异常</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P3-302</td><td><a href="pages/AND-P3-302.html">Native 侧 Binder：libbinder 与 Bn/Bp 的对应关系</a> 🔖</td><td>★★★★☆</td></tr>
+<tr><td>AND-P3-401</td><td><a href="pages/AND-P3-401.html">Native 进程守护、ashmem/memfd 与内存共享</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P3-402</td><td><a href="pages/AND-P3-402.html">VNDK 与 vendor 分区：镜像、符号与稳定边界</a></td><td>★★★☆☆</td></tr>
+</tbody></table>
+<h3>P4 · HAL 与 VINTF 硬件接口</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P4-G01</td><td><a href="pages/AND-P4-G01.html">卷导读：契约之下的硬件</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P4-101</td><td><a href="pages/AND-P4-101.html">HAL 契约体系：从 HIDL 到 AIDL HAL 的演进</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P4-102</td><td><a href="pages/AND-P4-102.html">VINTF：manifest、compatibility matrix 与 framework 校验</a> 🔖</td><td>★★★★☆</td></tr>
+<tr><td>AND-P4-201</td><td><a href="pages/AND-P4-201.html">gralloc 与内存分配：ion/dma-buf/memfd 的演进</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P4-202</td><td><a href="pages/AND-P4-202.html">图形 HAL：BufferQueue、gralloc 与 HWC 合成</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P4-301</td><td><a href="pages/AND-P4-301.html">音频 HAL：AudioFlinger 到 HAL 的完整通路</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P4-302</td><td><a href="pages/AND-P4-302.html">传感器 HAL 与 Context Hub：Sensors HAL 2.x 之后</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P4-401</td><td><a href="pages/AND-P4-401.html">相机 HAL：Camera3、metadata 与流式配置</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P4-402</td><td><a href="pages/AND-P4-402.html">其余 HAL：电源、震动、NFC 与门锁</a></td><td>★★☆☆☆</td></tr>
+</tbody></table>
+<h3>P5 · Linux 内核层（Android 视角）</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P5-G01</td><td><a href="pages/AND-P5-G01.html">卷导读：落到内核</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P5-101</td><td><a href="pages/AND-P5-101.html">内核构建与配置：GKI、defconfig 与模块化</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P5-201</td><td><a href="pages/AND-P5-201.html">Binder 内核驱动：binder.c、线程池调度与优先级继承</a> 🔖</td><td>★★★★★</td></tr>
+<tr><td>AND-P5-202</td><td><a href="pages/AND-P5-202.html">Binder oneway 与缓冲限制：内核侧的形状</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P5-301</td><td><a href="pages/AND-P5-301.html">内存管理：LMKD、PSI 与 zram/swap</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P5-302</td><td><a href="pages/AND-P5-302.html">输入子系统：evdev、多点触控与按键映射</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P5-401</td><td><a href="pages/AND-P5-401.html">图形与显示：DRM/KMS、vsync 与 TE 信号</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P5-402</td><td><a href="pages/AND-P5-402.html">电源管理：suspend/resume、runtime PM 与 wakeup 源</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P5-501</td><td><a href="pages/AND-P5-501.html">安全模块：SELinux、seccomp 与 IMA</a></td><td>★★★★☆</td></tr>
+</tbody></table>
+<h3>P6 · 图形、窗口与渲染系统</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P6-G01</td><td><a href="pages/AND-P6-G01.html">卷导读：一帧画面的旅程</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P6-101</td><td><a href="pages/AND-P6-101.html">图形栈全景：从 OpenGL ES 到 Vulkan 的演进</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P6-102</td><td><a href="pages/AND-P6-102.html">Surface 与 BufferQueue：生产消费模型与队列流转</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P6-201</td><td><a href="pages/AND-P6-201.html">SurfaceFlinger：合成策略、Buffer 队列与 vsync 模型</a> 🔖</td><td>★★★★★</td></tr>
+<tr><td>AND-P6-202</td><td><a href="pages/AND-P6-202.html">HWUI 与 RenderThread：DisplayList 与 Skia/Vulkan 后端</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P6-301</td><td><a href="pages/AND-P6-301.html">Choreographer 与帧调度：VSYNC 回调与丢帧分析</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P6-302</td><td><a href="pages/AND-P6-302.html">窗口体系：Window、Token、动画与层级</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P6-401</td><td><a href="pages/AND-P6-401.html">特殊合成场景：壁纸、悬浮窗、多屏与外接显示</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P6-402</td><td><a href="pages/AND-P6-402.html">Vulkan 在 Android 的落地与差异</a></td><td>★★★☆☆</td></tr>
+</tbody></table>
+<h3>P7 · 媒体、音频、相机与通讯</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P7-G01</td><td><a href="pages/AND-P7-G01.html">卷导读：听、看与连</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P7-101</td><td><a href="pages/AND-P7-101.html">媒体框架总览与 MediaCodec：编解码的框架侧链路</a> 🔖</td><td>★★★☆☆</td></tr>
+<tr><td>AND-P7-102</td><td><a href="pages/AND-P7-102.html">媒体会话与播放器：MediaSession、ExoPlayer 与音频焦点</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P7-201</td><td><a href="pages/AND-P7-201.html">音频框架：AudioTrack/AudioRecord 到 AudioFlinger</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P7-202</td><td><a href="pages/AND-P7-202.html">音频策略与通路：AudioPolicy、A2DP/USB/HDMI 路由</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P7-301</td><td><a href="pages/AND-P7-301.html">相机框架：Camera2 API 到 HAL 的链路</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P7-302</td><td><a href="pages/AND-P7-302.html">相机元数据与流式配置：CaptureRequest 的语义</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P7-401</td><td><a href="pages/AND-P7-401.html">通话与 IMS：电信侧的框架链路</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P7-402</td><td><a href="pages/AND-P7-402.html">蓝牙、NFC、USB 外设与投屏虚拟设备</a></td><td>★★★☆☆</td></tr>
+</tbody></table>
+<h3>P8 · 启动流程与系统服务编排</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P8-G01</td><td><a href="pages/AND-P8-G01.html">卷导读：从通电到桌面</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P8-101</td><td><a href="pages/AND-P8-101.html">bootloader 到 init：设备树、启动镜像与 Verified Boot</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P8-102</td><td><a href="pages/AND-P8-102.html">启动镜像格式：boot/system/vendor 与 fastboot 链路</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P8-201</td><td><a href="pages/AND-P8-201.html">init.rc 语法、触发器与服务分类</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P8-202</td><td><a href="pages/AND-P8-202.html">属性系统：从 property_service 到 getprop 的完整链路</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P8-301</td><td><a href="pages/AND-P8-301.html">Zygote 的完整启动：预加载、TraceBegin 与 fork 循环</a> 🔖</td><td>★★★★☆</td></tr>
+<tr><td>AND-P8-302</td><td><a href="pages/AND-P8-302.html">Zygote 的类共享与 USAP：App 进程为什么启动得快</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P8-401</td><td><a href="pages/AND-P8-401.html">SystemServer 启动序列与三阶段服务编排</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P8-402</td><td><a href="pages/AND-P8-402.html">开机性能：时间戳埋点、各阶段耗时与指标采集</a></td><td>★★★★☆</td></tr>
+</tbody></table>
+<h3>P9 · 安全、权限与隐私</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P9-G01</td><td><a href="pages/AND-P9-G01.html">卷导读：边界与信任</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P9-101</td><td><a href="pages/AND-P9-101.html">Android 安全架构全景与威胁模型</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P9-102</td><td><a href="pages/AND-P9-102.html">信任根与启动链验证：从 Bootloader 到 TEE</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P9-201</td><td><a href="pages/AND-P9-201.html">权限体系：安装期/运行期、权限组与特殊权限</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P9-202</td><td><a href="pages/AND-P9-202.html">应用沙箱：uid/gid、SELinux 域与文件隔离</a> 🔖</td><td>★★★★☆</td></tr>
+<tr><td>AND-P9-301</td><td><a href="pages/AND-P9-301.html">签名与密钥体系：APK 签名 v2/v3/v4 与密钥轮转</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P9-302</td><td><a href="pages/AND-P9-302.html">APEX 与模块化签名：mainline 的信任模型</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P9-401</td><td><a href="pages/AND-P9-401.html">数据安全：Keystore、TEE 与数据加密</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P9-402</td><td><a href="pages/AND-P9-402.html">网络安全：网络安全配置、TLS 与证书透明度</a></td><td>★★★☆☆</td></tr>
+</tbody></table>
+<h3>P10 · 性能、稳定性、调试与工具链</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P10-G01</td><td><a href="pages/AND-P10-G01.html">卷导读：可观测性与归因</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P10-101</td><td><a href="pages/AND-P10-101.html">性能分析方法论：指标、基线与归因路径</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P10-102</td><td><a href="pages/AND-P10-102.html">启动性能优化实战：从冷启动指标到手段</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P10-201</td><td><a href="pages/AND-P10-201.html">内存分析：从 RSS/PSS 到 native 泄漏</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P10-202</td><td><a href="pages/AND-P10-202.html">卡顿（jank）分析：从掉帧到渲染管线归因</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P10-301</td><td><a href="pages/AND-P10-301.html">功耗与热管理：从 BatteryStats 到温控策略</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P10-401</td><td><a href="pages/AND-P10-401.html">调试工具链：logcat 与 dumpsys 的正确用法</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P10-402</td><td><a href="pages/AND-P10-402.html">atrace/perfetto 全景：从 trace 到问题定位</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P10-403</td><td><a href="pages/AND-P10-403.html">ANR/Crash 根因定位与 simpleperf/lldb 实战</a> 🔖</td><td>★★★★★</td></tr>
+</tbody></table>
+<h3>P11 · 生态、构建系统与工程实践</h3>
+<table><thead><tr><th>篇号</th><th>标题</th><th>难度</th></tr></thead><tbody>
+<tr><td>AND-P11-G01</td><td><a href="pages/AND-P11-G01.html">卷导读：系统是怎么被造出来的</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P11-101</td><td><a href="pages/AND-P11-101.html">Soong 构建体系：从 Android.bp 到 ninja</a> 🔖</td><td>★★★★☆</td></tr>
+<tr><td>AND-P11-102</td><td><a href="pages/AND-P11-102.html">Make 到 Bazel：构建系统的演进与选型</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P11-201</td><td><a href="pages/AND-P11-201.html">模块与产品变体：product、flavor 与 A/B 分区</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P11-202</td><td><a href="pages/AND-P11-202.html">镜像格式与 OTA：payload、fastboot 与增量更新</a></td><td>★★★★☆</td></tr>
+<tr><td>AND-P11-301</td><td><a href="pages/AND-P11-301.html">Google Play 服务与 GMS 依赖边界</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P11-302</td><td><a href="pages/AND-P11-302.html">定制化与 OEM/ODM 适配实践</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P11-401</td><td><a href="pages/AND-P11-401.html">车载、IoT 与可穿戴的形态差异</a></td><td>★★★☆☆</td></tr>
+<tr><td>AND-P11-402</td><td><a href="pages/AND-P11-402.html">从 AOSP 到产品：工程化清单</a></td><td>★★★☆☆</td></tr>
+</tbody></table>
+<p class="paths">🔖 ＝锚点篇（审校抽样复核的重点篇，结论被同卷及其他卷引用）。</p>
+<h2>四种阅读路径</h2>
+<p>不必从第一页顺读，按角色选一条：</p><ul><li><strong>路径 A · 应用开发者（约 1–2 个月）</strong>：P0 全卷建立地图 → P1 应用层全读 → P2 的 2.2（系统服务编排）与 P8 的 8.4、P10 的 10.1/10.2/10.3。</li><li><strong>路径 B · 系统与 Framework 工程师（约 3–6 个月）</strong>：P2 全卷 → P8 全卷 → 取 P3 的 3.1/3.3 与 P6 的 6.1/6.2 → P10 全卷。</li><li><strong>路径 C · 内核与驱动工程师（6 个月以上）</strong>：P5 内核卷起步，经 P4 HAL/VINTF 下探，配合 P6 图形与 P7 媒体两条重链路。</li><li><strong>路径 D · 架构师（按问题检索）</strong>：从各篇 §1 TL;DR 入手，按问题跳读，遇链路缺口再顺链补层。</li></ul>
+<h2>篇内结构</h2>
+<p>每篇统一十节：§1 TL;DR → §2 阅读前置 → §3 问题背景 → §4 核心机制 → §5 源码路径全景 → §6 可验证实验 → §7 常见问题与误区 → §8 边界与延伸 → §9 版本差异 → §10 延伸阅读。页首标注 ID／卷／章／难度／核验日期／版本锚点与 AOSP 路径清单。</p>
+</article>
+<footer>android-100 · 站点索引 · 文章页由 _tools/publish.py 生成，本页与其同样式（PAGE_CSS 同源）</footer>
+</div>
+</body>
+</html>

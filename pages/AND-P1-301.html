@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service 与后台执行约束：前台服务、JobScheduler 配额</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Service 与后台执行约束：前台服务、JobScheduler 配额</h1>
+<div class="kv"><span>ID：AND-P1-301</span><span>卷：P1</span><span>章：1.3</span><span>难度：3</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/Service.java ；frameworks/base/apex/jobscheduler/framework/java/android/app/job/JobScheduler.java ；frameworks/base/apex/jobscheduler/service/java/com/android/server/job/JobSchedulerService.java ；frameworks/base/apex/jobscheduler/service/java/com/android/server/job/controllers/QuotaController.java ；frameworks/base/services/core/java/com/android/server/am/ActiveServices.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>后台执行不是「想跑多久就跑多久」，它被两套约束夹住：一是状态约束，用 <code>startForeground</code> 把服务（Service）提到前台（前台化）以换取更长的存活时间，代价是必须给用户可见的通知；二是配额约束，<code>JobScheduler</code> 把任务按优先级分桶，每个桶在滚动窗口内有次数与单次时长上限，超限的任务会被推迟而不是报错。这些上限不是文档口号，而是 <code>QuotaController</code> 里可读的常量。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-102（Service 生命周期回调）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/app/Service.java</code></li><li><code>frameworks/base/apex/jobscheduler/framework/java/android/app/job/JobScheduler.java</code></li><li><code>frameworks/base/apex/jobscheduler/service/java/com/android/server/job/JobSchedulerService.java</code></li><li><code>frameworks/base/apex/jobscheduler/service/java/com/android/server/job/controllers/QuotaController.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActiveServices.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep；带 V3 档的可选实验需要模拟器或真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「任务明明注册了却迟迟不跑」是后台开发的经典困扰。开发者常把原因归结为「厂商杀后台」，但在本树里，更常见的解释是配额：该任务所在的桶次数用尽或单次时长超限，调度器把它推到下一个窗口。不理解桶与窗口，就会反复加 <code>wakeLock</code>、反复重试，问题依旧。这一篇把这套约束的具体数值与判定位置讲清。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>两个维度：优先级桶（任务按重要程度分档）、滚动窗口（配额在时间上如何计量）。</p>
+<p>图 1：JobScheduler 的约束桶与配额</p>
+<pre><code>  桶(EXEMPTED/ACTIVE/WORKING/FREQUENT/RARE/RESTRICTED)
+        │
+        ├─ 次数上限（每窗口 / 每会话）
+        └─ 单次时长上限
+
+  窗口 = 滑动时间片；超限 ⇒ 推迟执行</code></pre>
+<p>关键点：超限的后果是「延后」，不是「失败」。<code>JobScheduler.schedule</code> 返回成功只代表任务被受理，不代表立刻执行。</p>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>约束从两个方向叠加：</p>
+<p>图 2：Service 前台化的状态转移</p>
+<pre><code>  服务：STARTED ──startForeground──▶ FOREGROUND
+              ◀──stopForeground───
+
+  任务：窗口(默认1分钟) ─▶ 桶次数上限 ─▶ 会话上限</code></pre>
+<p>注册一个任务：应用调 <code>JobScheduler.schedule</code>，若任务被受理返回 <code>RESULT_SUCCESS</code>（值为 1），否则返回 <code>RESULT_FAILURE</code>（值为 0）。受理后任务进入 <code>JobSchedulerService</code>，由各控制器决定何时可跑；其中 <code>QuotaController</code> 专管配额。</p>
+<p>配额判定分三层。第一层是速率限制窗口，默认长度为 1 分钟，每窗口可提交的任务数默认 20，且系统设定的下限不低于 10。第二层是分桶上限，按任务所属桶给出不同的次数与单次时长上限。第三层是会话上限，控制同一批工作在更长时间尺度上的总量。</p>
+<p>服务侧的状态约束由 <code>ActiveServices</code> 承担：启动服务最终走到 <code>bringUpServiceLocked</code> 建起服务记录，而把服务提到前台走 <code>setServiceForegroundInnerLocked</code>。提到前台后，服务的存活优先级改变，但必须伴随可见通知，否则系统会拒绝。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一个应用每 15 分钟想同步一次数据，于是把任务放在 <code>FREQUENT</code> 桶。它在一个窗口内提交了很多次，超过该桶的次数上限，之后的任务就被延后到下一个窗口——现象是「前几次正常，后面越来越慢」。若把它改为在需要时用前台服务做长连接同步，则不再受 <code>FREQUENT</code> 桶的次数约束，代价是要长期显示通知。选择哪条路，取决于「是否值得让用户看见」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>Service 的回调与状态机见 AND-P1-102；AMS 侧对服务记录的管理与 Activity 启动同属 P2 的 2.2 章（AND-P2-201 只讲 Activity 启动侧）；进程优先级与 LMKD 回收（后台被杀的另一条路径）归 AND-P2-401 与 P5；广播触发的后台启动限制见 AND-P1-302。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>服务回调</td><td><code>frameworks/base/core/java/android/app/Service.java</code></td><td><code>onCreate</code>（约 365 行）、<code>onDestroy</code>（约 536 行）</td><td>无界面组件回调</td></tr><tr><td>提到前台</td><td>同上</td><td><code>startForeground</code>（约 772 行）</td><td>需伴随通知</td></tr><tr><td>任务注册</td><td><code>frameworks/base/apex/jobscheduler/framework/java/android/app/job/JobScheduler.java</code></td><td><code>RESULT_SUCCESS</code>（约 141 行）</td><td>受理结果常量</td></tr><tr><td>调度服务</td><td><code>frameworks/base/apex/jobscheduler/service/java/com/android/server/job/JobSchedulerService.java</code></td><td><code>JobSchedulerService</code></td><td>调度总控</td></tr><tr><td>配额判定</td><td><code>frameworks/base/apex/jobscheduler/service/java/com/android/server/job/controllers/QuotaController.java</code></td><td><code>DEFAULT_*</code>（约 3245–3281 行）</td><td>各桶上限常量</td></tr><tr><td>服务记录</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActiveServices.java</code></td><td><code>bringUpServiceLocked</code>（约 6154 行）</td><td>建起服务记录</td></tr><tr><td>前台化落点</td><td>同上</td><td><code>setServiceForegroundInnerLocked</code>（约 2279 行）</td><td>状态迁移的实际执行</td></tr></tbody></table>
+<p>配额常量同族集中如下（口径为 <code>QuotaController.java</code> 常量与其注释，2026-10-14 实测）：</p>
+<table><thead><tr><th>常量</th><th>值</th><th>备注</th></tr></thead><tbody><tr><td><code>DEFAULT_RATE_LIMITING_WINDOW_MS</code></td><td>1 分钟</td><td>速率限制窗口长度</td></tr><tr><td><code>DEFAULT_MAX_JOB_COUNT_PER_RATE_LIMITING_WINDOW</code></td><td>20</td><td>每窗口可提交任务数上限</td></tr><tr><td><code>MIN_MAX_JOB_COUNT_PER_RATE_LIMITING_WINDOW</code></td><td>10</td><td>该上限的允许最小值</td></tr><tr><td><code>DEFAULT_MAX_JOB_COUNT_EXEMPTED</code></td><td>75</td><td>免限桶次数上限</td></tr><tr><td><code>DEFAULT_MAX_JOB_COUNT_WORKING</code></td><td>注释口径 120/window</td><td>按桶滚动窗口计</td></tr><tr><td><code>DEFAULT_MAX_JOB_COUNT_FREQUENT</code></td><td>注释口径 200/window</td><td>同上</td></tr><tr><td><code>DEFAULT_MAX_JOB_COUNT_RARE</code></td><td>注释口径 48/window</td><td>同上</td></tr><tr><td><code>DEFAULT_MAX_JOB_COUNT_RESTRICTED</code></td><td>10</td><td>受限桶次数上限</td></tr><tr><td><code>DEFAULT_MAX_EXECUTION_TIME_MS</code></td><td>4 小时</td><td>单次执行时长上限</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析（含可选运行时观察）。静态命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 任务受理结果常量
+grep -n &quot;public static final int RESULT_&quot; \
+  frameworks/base/apex/jobscheduler/framework/java/android/app/job/JobScheduler.java
+# 期望：RESULT_FAILURE=0（约 137 行）、RESULT_SUCCESS=1（约 141 行）
+
+# 2. 速率限制窗口与每窗口上限
+grep -n &quot;DEFAULT_RATE_LIMITING_WINDOW_MS\|DEFAULT_MAX_JOB_COUNT_PER_RATE_LIMITING_WINDOW\|MIN_MAX_JOB_COUNT_PER_RATE_LIMITING_WINDOW&quot; \
+  frameworks/base/apex/jobscheduler/service/java/com/android/server/job/controllers/QuotaController.java
+# 期望：约 3257/3259/3507 行
+
+# 3. 分桶次数上限
+grep -n &quot;DEFAULT_MAX_JOB_COUNT_\(EXEMPTED\|WORKING\|FREQUENT\|RARE\|RESTRICTED\) = &quot; \
+  frameworks/base/apex/jobscheduler/service/java/com/android/server/job/controllers/QuotaController.java
+# 期望：命中约 3260–3269 行各桶常量
+
+# 4. 前台化与单次时长
+grep -n &quot;public final void startForeground&quot; \
+  frameworks/base/core/java/android/app/Service.java
+grep -n &quot;DEFAULT_MAX_EXECUTION_TIME_MS =&quot; \
+  frameworks/base/apex/jobscheduler/service/java/com/android/server/job/controllers/QuotaController.java
+# 期望：命中 Service 约 772 行、配额约 3255 行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>可选运行时观察（V3，需模拟器）：</p>
+<pre><code class="lang-bash">adb shell dumpsys jobscheduler | grep -i &quot;Quota\|MAX_JOB_COUNT&quot;
+# 期望：输出各桶的实际上限值，与源码常量对照
+
+adb shell dumpsys activity services | grep -i &quot;foreground&quot;
+# 期望：可见处于前台的服务的通知标识</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 `schedule` 返回成功就会立刻执行。</strong> 返回成功仅表示受理；执行时机由桶与约束条件共同决定。</p>
+<p><strong>误区二：以为任务被「杀掉」了。</strong> 多数情况是被推迟到下一个窗口，<code>dumpsys</code> 里仍能看到它。</p>
+<p><strong>误区三（看起来对其实是错的）：以为提到前台就能无限期运行。</strong> 提到前台改变的是存活优先级，仍需通知；且系统对前台服务本身也有类型与时长约束。</p>
+<p><strong>误区四：以为限额是针对单个任务。</strong> 限额按桶与窗口聚合，同桶的多个任务共享配额。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：任务不执行，先看哪里？ <strong>答</strong>：先看它落在哪个桶、该桶窗口内已用多少；<code>dumpsys jobscheduler</code> 能给出配额与待跑队列。</p>
+<p><strong>追问</strong>：怎么确认是被配额挡住而不是条件不满足？ <strong>答</strong>：看任务的约束条件（网络、充电等）是否已满足；两者都满足却仍等待，多半是配额。</p>
+<p><strong>问</strong>：前台服务是解决后台限制的通用手段吗？ <strong>答</strong>：不是。它适用于用户明确知道的长时任务（如导航、播放），滥用会被系统限制并要求声明类型。</p>
+<p><strong>追问</strong>：那短期任务用什么？ <strong>答</strong>：用 <code>JobScheduler</code> 或更轻的机制；让系统在合适时机批量调度比自建轮询更省电。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>任务迟迟不跑</td><td><code>adb shell dumpsys jobscheduler | grep -i Quota</code></td><td>各桶剩余配额</td><td>调整桶或降低频率</td></tr><tr><td>服务被很快回收</td><td><code>adb shell dumpsys activity services</code></td><td>是否在前台</td><td>评估是否该提前台</td></tr><tr><td>提交被拒</td><td><code>grep -n &quot;RESULT_FAILURE&quot; frameworks/base/apex/jobscheduler/framework/java/android/app/job/JobScheduler.java</code></td><td>返回值语义</td><td>检查参数与权限</td></tr><tr><td>前台服务被限制</td><td><code>grep -n &quot;startForeground&quot; frameworks/base/core/java/android/app/Service.java</code></td><td>通知是否随附</td><td>补通知与类型声明</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Service 生命周期回调（AND-P1-102）；服务记录在系统侧的完整管理（P2 的 2.2 章；该章的 AND-P2-201 只讲 Activity 启动侧）；进程优先级与内存回收（AND-P2-401、P5）；广播触发的后台启动限制（AND-P1-302）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-102</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P1-302</code>（同章）；被 <code>AND-P2-401</code> 引用。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>速率限制窗口默认 1 分钟、每窗口上限默认 20、下限 10，口径为 <code>QuotaController.java</code> 约 3257–3259 行与 3507 行，2026-10-14 实测。</li><li>各桶次数上限见 §5 表，口径为其常量定义与注释，2026-10-14 实测。</li><li>单次执行时长上限默认 4 小时，口径为 <code>QuotaController.java</code> 约 3255 行，2026-10-14 实测。</li><li>这些是系统默认值，可被设备配置覆盖；具体设备上的实际值以 <code>dumpsys jobscheduler</code> 输出为准，属设备相关量，暂无统一量级。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>配额由 <code>QuotaController</code> 统一管理，桶与窗口如本篇所述</td><td>读者按本篇命令可复现</td></tr><tr><td>更早版本</td><td>后台限制从「宽松」逐步收紧，早期无分桶配额模型（据官方公开资料，本树仅含 android17-release，无法回溯核验）</td><td>旧代码的「总能跑」假设在新版本失效</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>background execution limits</code>、<code>job scheduling</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>QuotaController</code>、<code>JobSchedulerService</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/apex/jobscheduler/</code>、<code>frameworks/base/services/core/java/com/android/server/am/</code>。</li><li>承接篇：<code>AND-P1-102</code>、<code>AND-P1-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

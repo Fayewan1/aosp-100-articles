@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soong 构建体系：从 Android.bp 到 ninja</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Soong 构建体系：从 Android.bp 到 ninja</h1>
+<div class="kv"><span>ID：AND-P11-101</span><span>卷：P11</span><span>章：11.1</span><span>难度：4</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/soong/Android.bp ；build/soong/ui/build/build.go ；build/soong/ui/build/kati.go ；build/soong/ui/build/ninja.go ；build/soong/cmd/soong_build/main.go ；build/soong/cmd/soong_ui/main.go ；build/soong/android/paths.go ；build/soong/scripts/run-ckati.sh</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:14px"><a href="#h7-入口链">入口链</a></li><li style="margin-left:14px"><a href="#h8-两个前端与后缀常量">两个前端与后缀常量</a></li><li style="margin-left:14px"><a href="#h9-模块类型是注册出来的">模块类型是注册出来的</a></li><li style="margin-left:14px"><a href="#h10-源文件收集与配置推导">源文件收集与配置推导</a></li><li style="margin-left:14px"><a href="#h11-自身形态">自身形态</a></li><li style="margin-left:0px"><a href="#h12-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h13-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h14-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h15-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h16-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h17-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h18-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h19-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h20-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h21-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h22-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>Android.bp</code> 不是给 <code>make</code> 读的，它由 Soong 自己解析。Soong 是一个 Go 程序，其 Android.bp 解析内核来自 blueprint。整条主线的执行者是 <code>soong_ui</code>：它先跑 <code>soong_build</code> 把 <code>Android.bp</code> 翻成 ninja 片段并产出 soong 变量，再跑 kati 把 <code>Android.mk</code> 世界叠加这些变量翻成另一段 ninja 片段，最后把两段合并成一个 <code>build.ninja</code> 交给 ninja 执行。模块类型名（如 <code>cc_binary</code>）不是语法关键字，而是 <code>RegisterModuleType</code> 在运行时注册的字符串。能否走增量分析取决于 config cache：<code>incrementalValid</code>（<code>cmd/soong_build/main.go</code> :201）比对的是<strong>配置层</strong>——env 哈希、product 变量文件时间戳与 <code>soong_build</code> 二进制时间戳（:213–:215），并不看 <code>.bp</code> 内容；且该路径只在 soong-only 下启用——<code>SetIncrementalEnabled(IncrementalBuildActions &amp;&amp; !KatiEnabled)</code> 在 :354 无条件置位（注释在 :353），置位后才在 :356 调用 <code>incrementalValid</code>。真正解析全树 <code>.bp</code> 的是 <code>soong_build</code> 进程自己的那次 <code>bootstrap.RunBlueprint</code>（<code>cmd/soong_build/main.go</code> :271，:284-285 的注释直述 <code>build.ninja</code> 就是它写的）；<code>ui/build/soong.go</code> :416 那次是另一层——它在 <code>bootstrapBlueprint</code>（:289，由 <code>runSoong</code> :603 无条件调用）里，产出的是引导构建 <code>soong_build</code> 自身的 <code>bootstrap.ninja</code>。两层都与 config cache 的判定无关。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P0-202</code>（模块与 PROJECT 名：从 Soong 模块到安装路径）——本篇讲「模块」这个概念在 Soong 里的实现侧，那篇讲模块对外呈现的安装路径结果。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/soong/Android.bp</code></li><li><code>build/soong/ui/build/build.go</code></li><li><code>build/soong/ui/build/kati.go</code></li><li><code>build/soong/ui/build/ninja.go</code></li><li><code>build/soong/cmd/soong_build/main.go</code></li><li><code>build/soong/cmd/soong_ui/main.go</code></li><li><code>build/soong/android/paths.go</code></li><li><code>build/soong/scripts/run-ckati.sh</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机（本篇验证方式为静态源码分析）。注意 <code>build/blueprint</code> 在本树工作区检出为空，相关引用一律走 <code>git show</code>/<code>git ls-tree</code> 口径。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在 <code>Android.bp</code> 里加了一个 <code>cc_binary</code> 模块，敲 <code>make</code>，然后看到屏幕上先跑了一段 Make 风格的输出、又跑了一段 Go 程序的日志、最后是 ninja 的进度条。三个引擎接力跑同一件事，谁在读你的 <code>Android.bp</code>？改一个 <code>.cpp</code> 文件重跑，为什么有时几秒结束、有时像是从头扫了一遍全树？<code>build.ninja</code> 到底在哪、里面长什么样？搞不清这些接力点，构建变慢、改了不生效、<code>Android.bp</code> 写错却报了个看不懂的错，就只能盲试。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：<strong>入口</strong>（<code>soong_ui</code>，被 <code>soong_ui.bash</code> 拉起）、<strong>两个前端</strong>（kati 读 <code>Android.mk</code> 世界，<code>soong_build</code> 读 <code>Android.bp</code> 世界）、<strong>中间产物</strong>（各自的 ninja 片段）、<strong>执行器</strong>（ninja）。<code>soong_ui</code> 是唯一的编排者，它决定跑谁、按什么顺序、合并成什么。</p>
+<p>图 1：soong_ui 的编排与两个前端的分工（soong 先行、kati 随后）</p>
+<pre><code>make -&gt; envsetup.sh get_make_command() -&gt; soong_ui.bash --make-mode
+                                              |
+                                          soong_ui (Go)
+                                  build.go :381 runSoong 先行
+                                              |
+                              soong_build (Android.bp)
+                                              | 产出 soong 变量/mk
+                                  build.go :385-387 kati 随后
+                                              |
+                        ckati/rkati (Android.mk + soong 变量)
+                                              |
+                            createCombinedBuildNinjaFile -&gt; build.ninja
+                                              |
+                                           ninja</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键在「两个前端互不知情」：kati 不解析 <code>Android.bp</code>，<code>soong_build</code> 不解析 <code>Android.mk</code>。它们只在 ninja 层的产物名上对齐。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<h3 id="h7-入口链">入口链</h3>
+<p><code>soong_ui.bash</code> 只有 44 行，是 shell 到 Go 的薄垫片。<code>build/make/envsetup.sh</code> 里 <code>get_make_command()</code> 在树顶检测到它时，把 <code>make</code> 转成 <code>build/soong/soong_ui.bash --make-mode</code>。所以「<code>make</code> 不再是 Make」，本树里的 <code>make</code> 命令只是历史入口名。</p>
+<p>进 Go 后，<code>cmd/soong_ui/main.go</code> 的 <code>main()</code> 在 :130。真正干活的是 <code>ui/build/build.go</code>：<code>SetupOutDir</code> :34 定输出目录，<code>buildUUID</code> :83（调用点 :76）生成本次构建标识，<code>SetupTempDir</code> :96（调用点 :300）备临时目录，<code>checkRAM</code> :204（调用点 :297）做内存门槛检查，<code>createCombinedBuildNinjaFile</code> :118 负责把两个前端的片段合一个。</p>
+<h3 id="h8-两个前端与后缀常量">两个前端与后缀常量</h3>
+<p>kati 这一路在 <code>ui/build/kati.go</code>（421 行）。产物后缀是一组常量，集中在 :32–:35：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>katiBuildSuffix</code></td><td>空串，主构建片段</td><td><code>build/soong/ui/build/kati.go</code> :32–:35</td></tr><tr><td><code>-cleanspec</code> 后缀</td><td><code>Android.mk</code> 的 clean 规格片段</td><td>同上</td></tr><tr><td><code>-package</code> 后缀</td><td>打包阶段片段</td><td>同上</td></tr><tr><td><code>-soong-only-package</code> 后缀</td><td>仅 Soong 侧的打包片段</td><td>同上</td></tr></tbody></table>
+<p>同文件里 <code>genKatiSuffix</code> :44、<code>runKati</code> :99、<code>runKatiBuild</code> :239、<code>runKatiPackage</code> :351 把「哪次调用、产物叫什么」串起来。</p>
+<p>kati 不是从源码树构建出来的：<code>build/make/kati</code> 本树未收录。实际使用的是预编译二进制 <code>prebuilts/build-tools/linux-x86/bin/</code> 下的 <code>ckati</code>、<code>rkati</code>、<code>make</code>；选哪个由 <code>runKati</code>（:99）经 <code>config.KatiBin()</code>（<code>config.go</code> :2035–2043）决定——<code>useRkati</code> 在 <code>dumpvars.go</code> :386 置位，release flag <code>RELEASE_USE_RKATI</code> 或环境变量 <code>SOONG_USE_RKATI</code> 任一为真即用 <code>rkati</code>，ABFS 构建再加 <code>-wrap</code> 后缀。<code>build/soong/scripts/run-ckati.sh</code>（91 行）在 :52 直接调用 <code>prebuilts/build-tools/linux-x86/bin/ckati</code>。</p>
+<p><code>soong_build</code> 这一路在 <code>cmd/soong_build/main.go</code>（445 行）。<code>newContext</code> :107 建立 <code>android</code> 包的上下文，<code>needToWriteNinjaHint</code> :115 与 <code>writeNinjaHint</code> :127 处理写 ninja 的提示路径，<code>incrementalValid</code> :201 与 <code>writeConfigCache</code> :246 决定复用或重建 config cache。</p>
+<h3 id="h9-模块类型是注册出来的">模块类型是注册出来的</h3>
+<p><code>Android.bp</code> 里写的 <code>cc_binary</code>、<code>java_library</code> 不是语法。<code>cc/binary.go</code> :73 有 <code>ctx.RegisterModuleType(&quot;cc_binary&quot;, BinaryFactory)</code>，<code>java/java.go</code> :53 有 <code>ctx.RegisterModuleType(&quot;java_library&quot;, LibraryFactory)</code>。解析器拿到字符串后查注册表找工厂函数，工厂函数再返回模块对象。</p>
+<p>图 2：从 bp 字符串到模块对象</p>
+<pre><code>Android.bp 文本
+   |
+blueprint 解析（语法层，只认 property 结构）
+   |
+模块类型名字符串 &quot;cc_binary&quot;
+   |
+RegisterModuleType 注册表 -&gt; BinaryFactory
+   |
+模块对象 + 变体 + mutator 展开</code></pre>
+<p>这解释了两件事：写错模块类型名的报错是「不认识的模块类型」而不是语法错误；新增一类模块要动 Go 代码、重新构建 <code>soong_build</code>，在 <code>.bp</code> 里加声明无效。</p>
+<h3 id="h10-源文件收集与配置推导">源文件收集与配置推导</h3>
+<p><code>android/paths.go</code> :71 是 <code>func Glob(...)</code>，配合 :81 <code>GlobFiles</code>、:95 <code>GlobFilesOutsideModuleDir</code>，是 <code>.bp</code> 里 <code>srcs: [&quot;*.cpp&quot;]</code> 这类写法的落点。glob 在解析期展开成文件列表，进 ninja 后就是一组确定的输入路径。</p>
+<p><code>defaults</code> 模块的作用是把公共属性抽出来供其他模块继承，合并发生在 mutator 阶段（实现在 <code>android/defaults.go</code>），不是文本预处理。<code>android/module.go</code> :3099 是另一件事：<code>EvaluateConfiguration</code> 里的时序护栏——<code>if !ctx.HasMutatorFinished(&quot;defaults&quot;)</code> 时直接报 <code>Cannot evaluate configurable property before the defaults mutator has run</code>。</p>
+<h3 id="h11-自身形态">自身形态</h3>
+<p><code>build/soong/Android.bp</code> 共 359 行。<code>subdirs</code> 共 9 项（:10–:18）：<code>androidmk</code>、<code>bpfix</code>、<code>cmd/*</code>、<code>fs</code>、<code>finder</code>、<code>jar</code>、<code>zip</code>、<code>third_party/zip</code>、<code>ui/*</code>。:21 的 <code>bootstrap_go_package</code> name 为 <code>soong</code>，:23 的 <code>pkgPath</code> 为 <code>android/soong</code>，<code>deps</code> 为 <code>[&quot;blueprint&quot;]</code>。也就是说 Soong 解析 <code>Android.bp</code> 的能力来自 blueprint 这个 Go 包，Soong 自身也是被这套构建系统构建的 Go 包。</p>
+<h2 id="h12-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>从树顶敲 <code>make</code>，走到 ninja 之前的顺序：</p>
+<ol><li><code>envsetup.sh</code> 的 <code>get_make_command()</code> 检测到 <code>build/soong/soong_ui.bash</code>，改道 <code>--make-mode</code>。</li><li><code>soong_ui</code> 的 <code>main()</code>（<code>cmd/soong_ui/main.go</code> :130）起来，先过 <code>preProductConfigSetup</code> :293。需要看配置变量时走 <code>dumpVar</code> :358。这一阶段还有一趟独立的 kati 调用：<code>build.go</code> :344 的 <code>if what&amp;RunProductConfig != 0</code> 门控着 :345 的 <code>runMakeProductConfig</code>，它在产品配置就绪后重跑 kati 取回产品变量——所以 soong 与 kati 之间不是单向消费，产品变量这一路是 kati → soong。</li><li>输出与临时目录就位：只有 <code>SetupOutDir</code> 是从 <code>cmd/soong_ui/main.go</code> :296 调的（<code>preProductConfigSetup</code> 体内，实现在 <code>build.go</code> :34）；<code>SetupTempDir</code>（定义 :96、调用 :300）、<code>checkRAM</code>（定义 :204、调用 :297）与 <code>buildUUID</code>（定义 :83、调用 :76）的调用点都在 <code>build.go</code> 自己里面。</li><li><code>soong_build</code> 先跑（<code>build.go</code> :381 <code>runSoong</code>，实现落在 <code>ui/build/soong.go</code>）：<code>incrementalValid</code> :201 先判断 config cache 能不能用——它比对的是配置层三项（env 哈希、product 变量文件时间戳、<code>soong_build</code> 二进制时间戳，:213–:215），<strong>不含 `.bp` 内容</strong>；而增量路径的开关在 :354 就已按 <code>IncrementalBuildActions &amp;&amp; !KatiEnabled</code> 无条件置位（注释在 :353），置位通过才在 :356 调 <code>incrementalValid</code> 比对配置层三项。真正解析全树 <code>.bp</code> 的是 <code>soong_build</code> 进程内的 <code>bootstrap.RunBlueprint</code>（<code>cmd/soong_build/main.go</code> :271），它不受这个判定影响（<code>soong.go</code> :289 的 <code>bootstrapBlueprint</code> 才是引导层，其 :416 产出 <code>bootstrap.ninja</code>；它在 <code>runSoong</code>（定义 :588）的 :603 处被调用）；判定不通过则重解析并 <code>writeConfigCache</code> :246 落盘。产出 <code>out/soong/build.ninja</code> 与供 kati 消费的 soong 变量/mk。</li><li>kati 随后（<code>build.go</code> :385–:387 三个调用）：<code>runKatiCleanSpec</code>、<code>runKatiBuild</code> :239（build 阶段）、<code>runKatiPackage</code> :351（package 阶段）依次执行，把 <code>Android.mk</code> 世界叠加第 4 步产出的 soong 变量翻成 ninja 片段。<code>runKati</code> :99 用 <code>genKatiSuffix</code> :44 生成的产物名，二进制经 <code>config.KatiBin()</code>（<code>config.go</code> :2035–2043）选取——默认 <code>ckati</code>，<code>RELEASE_USE_RKATI</code> 或 <code>SOONG_USE_RKATI</code> 为真时 <code>rkati</code>。</li><li><code>createCombinedBuildNinjaFile</code> :118 把两段合成一个 <code>build.ninja</code>。</li><li><code>runNinjaForBuild</code> :40 调到 <code>runNinja</code> :47 执行。卡住时 <code>ninjaStucknessChecker</code> 的 <code>check</code> :434 出手诊断。</li></ol>
+<p>第 4 步的分水岭在于 <code>soong_build</code> 是否被 ninja 判定为需要重跑——需要重跑就由 <code>soong_build</code> 走 <code>cmd/soong_build/main.go</code> :271 的 <code>RunBlueprint</code> 重扫全树；config cache 只在 soong-only 且增量分析置位时参与，常规 <code>make</code> 不进这条路径。另需注意第 4、5 步并非无条件依次接力：<code>build.go</code> :380 与 :384 分别以 <code>what&amp;RunSoong</code>、<code>what&amp;RunKati</code> 位掩码门控，:389 另有 <code>else if what&amp;RunKatiNinja</code> 分支——它只读回上次的 kati suffix，不重跑 kati。上面描述的是机制路径；实际耗时与产物内容未在本树构建验证。</p>
+<h2 id="h13-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P11-102</code> 接本篇往下讲 Make/kati 与 Bazel 的演进选型——本篇只说 kati 在哪里被调用、产物后缀叫什么，不评价路线。<code>AND-P11-201</code> 讲 product/flavor 配置，即 <code>soong_ui</code> 在 <code>preProductConfigSetup</code> 之后拿到的产品配置从哪来。<code>AND-P11-202</code> 接 ninja 执行之后：镜像怎么装、OTA 包怎么出。前置 <code>AND-P0-202</code> 建立模块概念，本篇给它的实现侧。</p>
+<h1 id="h14-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>构建编排主体</td><td><code>build/soong/ui/build/build.go</code></td><td><code>SetupOutDir</code>、<code>createCombinedBuildNinjaFile</code>、<code>checkRAM</code></td><td>591 行，输出目录与合并 ninja 在这里</td></tr><tr><td>kati 调用与产物命名</td><td><code>build/soong/ui/build/kati.go</code></td><td><code>genKatiSuffix</code>、<code>runKatiBuild</code>、四个后缀常量</td><td>421 行</td></tr><tr><td>ninja 执行与卡死诊断</td><td><code>build/soong/ui/build/ninja.go</code></td><td><code>runNinja</code>、<code>ninjaStucknessChecker.check</code></td><td>459 行</td></tr><tr><td>构建配置模型</td><td><code>build/soong/ui/build/config.go</code></td><td>配置推导</td><td>2325 行，本篇不展开</td></tr><tr><td>入口二进制</td><td><code>build/soong/cmd/soong_ui/main.go</code></td><td><code>main</code>、<code>preProductConfigSetup</code>、<code>dumpVar</code></td><td>642 行</td></tr><tr><td>bp 前端与增量判据</td><td><code>build/soong/cmd/soong_build/main.go</code></td><td><code>newContext</code>、<code>incrementalValid</code>、<code>writeConfigCache</code></td><td>445 行</td></tr><tr><td>源文件收集</td><td><code>build/soong/android/paths.go</code></td><td><code>Glob</code>、<code>GlobFiles</code>、<code>GlobFilesOutsideModuleDir</code></td><td><code>.bp</code> 里 glob 的落点</td></tr><tr><td>ckati 垫片脚本</td><td><code>build/soong/scripts/run-ckati.sh</code></td><td>调用 <code>prebuilts/build-tools/linux-x86/bin/ckati</code></td><td>91 行</td></tr><tr><td>Soong 自身声明</td><td><code>build/soong/Android.bp</code></td><td><code>subdirs</code>、<code>bootstrap_go_package</code></td><td>359 行，self-host 证据</td></tr></tbody></table>
+<h1 id="h15-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/soong:6722dd8833db</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<p>看 Soong 的 Android.bp 规模与子包列表：</p>
+<pre><code class="lang-bash">wc -l build/soong/Android.bp &amp;&amp; sed -n '10,26p' build/soong/Android.bp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：第一行输出 359；随后可见 <code>androidmk</code>、<code>bpfix</code>、<code>cmd/*</code>、<code>ui/*</code> 子包，以及 <code>bootstrap_go_package</code> 的 <code>soong</code>、<code>android/soong</code>、<code>deps = [&quot;blueprint&quot;]</code>。</p>
+<p>看编排三个文件的规模：</p>
+<pre><code class="lang-bash">wc -l build/soong/ui/build/build.go build/soong/ui/build/kati.go build/soong/ui/build/ninja.go build/soong/ui/build/config.go</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：591、421、459、2325。</p>
+<p>看 kati 产物后缀常量：</p>
+<pre><code class="lang-bash">sed -n '32,35p' build/soong/ui/build/kati.go</code></pre>
+<p>期望：四行常量，含空串主构建后缀、<code>-cleanspec</code>、<code>-package</code>、<code>-soong-only-package</code>。</p>
+<p>看 kati 是预编译二进制还是源码：</p>
+<pre><code class="lang-bash">ls build/make/kati 2&gt;&amp;1; ls prebuilts/build-tools/linux-x86/bin/ | grep -E '^(ckati|rkati|make)$'</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：前者报无此目录；后者列出 <code>ckati</code>、<code>rkati</code>、<code>make</code> 三个名字。</p>
+<p>看模块类型注册点：</p>
+<pre><code class="lang-bash">grep -n 'RegisterModuleType' build/soong/cc/binary.go build/soong/java/java.go</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>cc/binary.go</code> 报 73 行的 <code>cc_binary</code>；<code>java/java.go</code> 报 53 行的 <code>java_library</code>。</p>
+<p>看 rkati 开关默认值：</p>
+<pre><code class="lang-bash">git -C . show HEAD:build/release/flag_declarations/RELEASE_USE_RKATI.textproto 2&gt;/dev/null || cat build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>name: &quot;RELEASE_USE_RKATI&quot;</code>、<code>namespace: &quot;build&quot;</code>、<code>bool_value: false</code>、<code>workflow: LAUNCH</code>，描述为 rkati 是 ckati 的 Rust 重写。默认关即默认走 ckati。</p>
+<p>看 blueprint 的工作区状态：</p>
+<pre><code class="lang-bash">git -C build/blueprint rev-parse HEAD &amp;&amp; ls build/blueprint | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：提交号 <code>7f2058de8155</code>；文件计数为 0，即工作区检出为空，内容需走 <code>git ls-tree</code>/<code>git show</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h16-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h17-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`Android.bp` 是 Make 的一种方言，所以 `make` 直接读它。</strong> 错。<code>Android.bp</code> 由 blueprint 解析，blueprint 是 Go 包（<code>bootstrap_go_package</code> 的 <code>deps</code> 明确写着 <code>[&quot;blueprint&quot;]</code>）。<code>make</code> 命令只是入口名，实际已被 <code>soong_ui.bash</code> 接管。</p>
+<p><strong>误区二：`cc_binary` 是语法关键字，解析器认得。</strong> 错。它只是 <code>RegisterModuleType(&quot;cc_binary&quot;, BinaryFactory)</code> 注册进表里的字符串。同一个名字在没注册它的上下文里就是非法模块类型。</p>
+<p><strong>误区三：改了 `.bp` 里的注释或空白，重建应该秒过。</strong> 看起来对，其实是错的——但错因常被说反。<code>incrementalValid</code>（<code>cmd/soong_build/main.go</code> :201）比对的不是 <code>.bp</code> 的内容，而是配置层三项：env 哈希、product 变量文件时间戳、<code>soong_build</code> 二进制时间戳（:213–:215）。<strong>改 `.bp` 本身不会让这个缓存失效</strong>，它失效只因配置层变了。而且这个判定只在增量路径被打开后才发生：:354 先按 <code>IncrementalBuildActions &amp;&amp; !KatiEnabled</code> 置位（注释在 :353），:356 才调它——带 kati 的常规构建根本不走这条路。真正解析全树 <code>.bp</code> 的是 <code>soong_build</code> 进程内的 <code>bootstrap.RunBlueprint</code>（<code>cmd/soong_build/main.go</code> :271），不是引导层的 <code>soong.go</code> :416。</p>
+<p><strong>误区四：kati 是本树源码构建出来的，所以本树可以改 kati 行为。</strong> 错。<code>build/make/kati</code> 本树未收录，实际二进制在 <code>prebuilts/build-tools/linux-x86/bin/</code> 下。</p>
+<h2 id="h18-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>build.ninja</code> 是怎么来的，只有一个吗？ <strong>答</strong>：由 <code>createCombinedBuildNinjaFile</code>（<code>ui/build/build.go</code> :118）合并两个前端片段而来：一个是 kati 给的，一个是 <code>soong_build</code> 给的。产物位置由 <code>SetupOutDir</code> :34 定。是否还有别的辅助 ninja 文件，本篇不断言。 <strong>追问</strong>：那两个前端怎么保证产物名对得上？ <strong>答</strong>：靠约定而非共享结构。kati 侧用 <code>genKatiSuffix</code>（<code>kati.go</code> :44）生成产物名，常量在 :32–:35；<code>soong_build</code> 侧要产出同名规则的模块。对不上时表现为 ninja 报「无规则可生成该文件」，不是 <code>.bp</code> 语法错误。</p>
+<p><strong>问</strong>：<code>Android.mk</code> 和 <code>Android.bp</code> 混着的树，谁先跑？ <strong>答</strong>：<code>soong_build</code> 先、kati 后。编排在 <code>build.go</code>：:381 先 <code>runSoong</code>，:385–:387 才依次 <code>runKatiCleanSpec</code>/<code>runKatiBuild</code>/<code>runKatiPackage</code>。两者都是 <code>soong_ui</code> 的子步骤，不是两个并行进程互相等待。 <strong>追问</strong>：那为什么报错时 Make 风格与 Go 风格的输出交替出现？ <strong>答</strong>：因为两个前端各自往标准输出写。它反映的是步骤边界，不是同一引擎的两种日志格式。</p>
+<h2 id="h19-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不确定本次是 ckati 还是 rkati</td><td><code>cat build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></td><td><code>bool_value</code> 是否为 <code>false</code></td><td>默认 <code>false</code> 即走 ckati，与 <code>run-ckati.sh</code> 中的路径一致</td></tr><tr><td>改了 <code>.bp</code> 但结果没变</td><td><code>sed -n '201p;246p' build/soong/cmd/soong_build/main.go</code></td><td><code>incrementalValid</code> 与 <code>writeConfigCache</code> 的位置</td><td>按符号 grep 定位实际判定逻辑，判断 config cache 是否被复用</td></tr><tr><td>报「不认识的模块类型」</td><td><code>grep -rn &quot;RegisterModuleType(\&quot;&lt;你的类型名&gt;\&quot;&quot; build/soong/</code></td><td>是否有匹配行</td><td>无匹配说明该类型未在本树注册</td></tr><tr><td>报某产物无规则生成</td><td><code>wc -l build/soong/ui/build/kati.go build/soong/ui/build/ninja.go</code></td><td>文件是否为 421/459</td><td>核对 <code>kati.go</code> :32–:35 的后缀常量与模块产物名是否一致</td></tr><tr><td>ninja 卡住无进展</td><td><code>sed -n '434p' build/soong/ui/build/ninja.go</code></td><td><code>ninjaStucknessChecker</code> 的 <code>check</code></td><td>阅读该诊断分支的输出，判断是等待还是死锁形态</td></tr></tbody></table>
+<h1 id="h20-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Make/kati 与 Bazel 的演进选型 → <code>AND-P11-102</code>；product/flavor 配置与继承 → <code>AND-P11-201</code>；镜像生成与 OTA → <code>AND-P11-202</code>；模块对外安装路径 → <code>AND-P0-202</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P0-202</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P11-102</code>、<code>AND-P11-201</code>、<code>AND-P11-202</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>Soong</code> 主体编排代码量：<code>build.go</code> 591 行、<code>kati.go</code> 421 行、<code>ninja.go</code> 459 行、<code>config.go</code> 2325 行。口径：2026-10-23 于 <code>android17-release</code> 静态 <code>wc -l</code>。</li><li>kati 产物后缀常量 4 个。口径：<code>kati.go</code> :32–:35 源码常量。</li><li><code>soong_ui.bash</code> 44 行、<code>run-ckati.sh</code> 91 行。口径：同上静态统计。</li><li>构建耗时、镜像体积、<code>build.ninja</code> 行数：暂无实测，列为待补。本机 32GB 内存不可行 V4 整包构建；本篇所有「实际产物」类断言均未在本树构建验证。</li></ul>
+<h1 id="h21-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早分支</td><td>入口函数集合、kati 分发形态与 <code>Android.bp</code> 解析路径均可能与本树不同，本篇不断言具体版本</td><td>行号与路径不跨版本复用，按符号 grep 重锚</td></tr><tr><td>android17-release（本树，2026-10-23 实测）</td><td>kati 以预编译二进制形式提供（<code>prebuilts/build-tools/linux-x86/bin/ckati</code>、<code>rkati</code>、<code>make</code>）；<code>RELEASE_USE_RKATI</code> 存在且 <code>bool_value: false</code>；<code>build/blueprint</code> 工作区检出为空</td><td>默认仍走 ckati；rkati 为 Rust 重写版但默认关；blueprint 相关核验须走 git 对象而非磁盘</td></tr></tbody></table>
+<h1 id="h22-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>soong</code>、<code>android.bp</code>、<code>build system</code>。</li><li>官方文档：android.googlesource.com 站内检索 blueprint 仓库，看其解析与 mutator 概念说明。</li><li>Gerrit：android-review.googlesource.com 搜 <code>RegisterModuleType</code>、<code>incrementalValid</code>、<code>RELEASE_USE_RKATI</code>。</li><li>本仓关键路径：<code>build/soong/ui/build/</code>、<code>build/soong/cmd/soong_build/</code>、<code>build/soong/android/paths.go</code>。</li><li>承接篇：<code>AND-P11-102</code>（构建系统演进选型）、<code>AND-P11-201</code>（product 配置）。</li></ul>
+</article>
+<footer>android-100 · AND-P11-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

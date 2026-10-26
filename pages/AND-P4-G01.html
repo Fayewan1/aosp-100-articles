@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：契约之下的硬件</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：契约之下的硬件</h1>
+<div class="kv"><span>ID：AND-P4-G01</span><span>卷：P4</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：hardware/interfaces/Android.bp ；hardware/interfaces/current.txt ；system/hwservicemanager/hwservicemanager.rc ；system/libvintf/VintfObject.cpp ；system/libhwbinder/ProcessState.cpp ；frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>应用调用一个相机接口，中间要穿过 Binder、硬件抽象层（HAL）服务、内核驱动三层，而这三层的约定写在两处：接口定义与 VINTF 清单/矩阵。本卷讲的就是这两处约定：硬件能提供什么，框架期望什么，两者如何对上。本树 <code>hardware/interfaces/current.txt:910</code> 已写明 <code>There will be no more HIDL HALs. Use AIDL instead.</code>，但存量 HIDL 服务与双栈选择逻辑仍在。读完本卷，你能判断「某件事能不能通过 HAL 做到」，以及换机或升级时兼容性卡在清单还是矩阵。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读｜路径 C 只读 §1、§4.4</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P3-302</code>（Native 侧 Binder）。HAL 调用在框架侧表现为一次 Native Binder 事务，<code>libhwbinder</code> 与 <code>libbinder</code> 共用进程级模型，先有这层直觉，再看 HAL 接口才不悬空。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>hardware/interfaces/Android.bp</code></li><li><code>hardware/interfaces/current.txt</code></li><li><code>system/hwservicemanager/hwservicemanager.rc</code></li><li><code>system/libvintf/VintfObject.cpp</code></li><li><code>system/libhwbinder/ProcessState.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你写了一行相机代码，在旧机型上正常，换到新机就抛「服务找不到」。查 vendor 分区日志，看到的是 VINTF 校验失败或某个 HAL 服务没注册。另一类场景是升级系统镜像时编译期报「接口版本不匹配」，却说不清是接口变了还是矩阵里没声明。这类问题不在单个 HAL 的实现里，而在接口约定与兼容性声明上。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>HAL 是硬件能力的接口约定；VINTF 是设备侧与框架侧互相声明「我提供什么、我要求什么」的清单与矩阵；<code>hwservicemanager</code> 是 HIDL 服务的注册中心；<code>libvintf</code> 是读取并比对上述声明的地方。</p>
+<p>图 1：HAL 契约的三方关系</p>
+<pre><code>   应用/系统服务
+        |
+   Binder 事务
+        |
+   HAL 服务  &lt;--&gt; hwservicemanager（HIDL 注册）
+        |              |
+     驱动          libvintf 比对
+                   清单 vs 矩阵</code></pre>
+<p>读法：框架侧发起调用，HIDL 服务在 <code>hwservicemanager</code> 登记，<code>libvintf</code> 在启动与查询路径上比对设备清单与框架矩阵。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇分工如下。编号规则是 <code>AND-P{卷}-{序号}</code>，<code>G</code> 表示卷导读。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P4-G01</code></td><td>卷导读：契约之下的硬件</td><td>本篇：地图与读法</td></tr><tr><td><code>AND-P4-101</code></td><td>HAL 契约体系：从 HIDL 到 AIDL HAL 的演进</td><td>契约组，两代接口写法</td></tr><tr><td><code>AND-P4-102</code></td><td>VINTF：manifest、compatibility matrix 与 framework 校验</td><td>契约组，本卷锚点篇</td></tr><tr><td><code>AND-P4-201</code></td><td>gralloc 与内存分配：ion/dma-buf/memfd 的演进</td><td>图形与内存组</td></tr><tr><td><code>AND-P4-202</code></td><td>图形 HAL：BufferQueue、gralloc 与 HWC 合成</td><td>图形与内存组</td></tr><tr><td><code>AND-P4-301</code></td><td>音频 HAL：AudioFlinger 到 HAL 的完整通路</td><td>外设通路组</td></tr><tr><td><code>AND-P4-302</code></td><td>传感器 HAL 与 Context Hub：Sensors HAL 2.x 之后</td><td>外设通路组，B 档横切</td></tr><tr><td><code>AND-P4-401</code></td><td>相机 HAL：Camera3、metadata 与流式配置</td><td>外设通路组</td></tr><tr><td><code>AND-P4-402</code></td><td>其余 HAL：电源、震动、NFC 与门锁</td><td>外设通路组，B 档横切，出卷索引</td></tr></tbody></table>
+<p>三组的读法：<code>101</code>/<code>102</code> 是契约组，先立规矩；<code>201</code>/<code>202</code> 是图形与内存组，看契约怎么落到缓冲上；<code>301</code> 到 <code>402</code> 是外设通路组，看同一套规矩在四类设备上各长什么样。依赖顺序是 G01 → 101 → 102，之后 <code>201→202</code>（先有缓冲从哪儿来，才谈得上一帧怎么合成）、<code>302</code>、<code>401</code>、<code>402</code> 四路可分头进，它们都只依赖 <code>101</code>；<code>301</code> 只依赖本篇，随时可读。<code>102</code> 是本卷锚点篇，时间不够时至少读它一篇。</p>
+<p><code>libhwbinder</code> 的进程级常量是本卷多次引用的地基，集中列出：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>DEFAULT_BINDER_VM_SIZE</code></td><td>hwbinder 映射区默认大小</td><td><code>system/libhwbinder/ProcessState.cpp:44</code></td></tr><tr><td><code>DEFAULT_MAX_BINDER_THREADS</code></td><td>默认最大 Binder 线程数，值为 0</td><td><code>system/libhwbinder/ProcessState.cpp:45</code></td></tr></tbody></table>
+<p>服务管理中心 <code>hwservicemanager</code> 的进程定义在 <code>system/hwservicemanager/hwservicemanager.rc</code>：首行 <code>service hwservicemanager /system/system_ext/bin/hwservicemanager</code>（:1），标 <code>critical</code>（:5），并带 <code>shutdown critical</code>（:12）。<code>critical</code> 意味着它反复崩溃会拉起整机重启，这决定了 HAL 注册中心的可用性等级。</p>
+<p>VINTF 侧的取数口只有四个，集中在 <code>libvintf</code>：</p>
+<table><thead><tr><th>符号</th><th>取到的数据</th><th>出处</th></tr></thead><tbody><tr><td><code>VintfObject::GetDeviceHalManifest</code></td><td>设备侧 HAL 清单</td><td><code>system/libvintf/VintfObject.cpp:124</code></td></tr><tr><td><code>GetFrameworkHalManifest</code></td><td>框架侧 HAL 清单</td><td>:135</td></tr><tr><td><code>GetDeviceCompatibilityMatrix</code></td><td>设备侧兼容性矩阵</td><td>:146</td></tr><tr><td><code>GetFrameworkCompatibilityMatrix</code></td><td>框架侧兼容性矩阵</td><td>:154</td></tr></tbody></table>
+<p>框架兼容性矩阵（FCM）在 <code>hardware/interfaces/compatibility_matrices/</code> 下共 7 个文件：带 <code>level</code> 的 6 个是 <code>7</code>、<code>8</code>、<code>202404</code>、<code>202504</code>、<code>202604</code>、<code>202704</code>，另有 <code>compatibility_matrix.empty.xml</code> 是空白模板。本卷拿 <code>7</code> 与 <code>202704</code> 作对照样本，是因为它们一头一尾，不是因为树里只有这两份。</p>
+<p><code>hardware/interfaces</code> 三个规模口径要分开看：一级目录 56 个（含 <code>common</code>、<code>scripts</code>、<code>apexkey</code> 等公共目录）；其中 40 个带 <code>aidl/</code> 子目录；再往下一层的版本目录（<code>audio/2.0</code> 这类 <code>X.Y</code>）有 87 个。三个数字不是同一个口径，混着读会得出「87 个一级目录」这种自相矛盾的结论。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以系统侧 composer 为例，<code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp:27</code> 的依据是 <code>AidlComposer::namesAnAidlComposerService</code>：系统在初始化时先探测是否存在名为该符号对应服务的 AIDL composer，存在就走 AIDL 栈，否则回落到 HIDL 栈。这说明「同一能力两套实现」在代码里不是配置开关，而是一次探测分支。判断一个设备走哪条栈，看这一步探测结果即可，不必读 HAL 实现本身。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>上承 <code>AND-P3-302</code>：HAL 调用在框架侧就是一次 Native Binder 事务，<code>libhwbinder</code> 的进程模型与 <code>libbinder</code> 同构，区别在服务管理与映射区常量。卷内 <code>101</code> 承接契约细节，<code>102</code> 承接校验流程。出卷对接：<code>102</code> 之后接 P5-101（GKI 与内核配置）；<code>202</code> 之后接 P6-201（SurfaceFlinger 合成）；<code>301</code>、<code>401</code> 分别接 P7-102、P7-301；<code>402</code> 作为 P7/P8 相关篇的索引入口。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>接口树入口</td><td><code>hardware/interfaces/Android.bp</code></td><td>子目录构建声明</td><td>56 个一级目录的构建现场</td></tr><tr><td>接口清单注解</td><td><code>hardware/interfaces/current.txt</code></td><td><code>There will be no more HIDL HALs. Use AIDL instead.</code></td><td>第 910 行的方向性注记</td></tr><tr><td>服务管理中心</td><td><code>system/hwservicemanager/hwservicemanager.rc</code></td><td><code>service hwservicemanager</code>、<code>critical</code>、<code>shutdown critical</code></td><td>HIDL 服务注册中心进程定义</td></tr><tr><td>VINTF 取数</td><td><code>system/libvintf/VintfObject.cpp</code></td><td><code>GetDeviceHalManifest</code> 等四个取数口</td><td>清单与矩阵的唯一读取入口</td></tr><tr><td>hwbinder 常量</td><td><code>system/libhwbinder/ProcessState.cpp</code></td><td><code>DEFAULT_BINDER_VM_SIZE</code>、<code>DEFAULT_MAX_BINDER_THREADS</code></td><td>进程级默认值</td></tr><tr><td>双栈选择</td><td><code>frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></td><td><code>AidlComposer::namesAnAidlComposerService</code></td><td>AIDL 与 HIDL composer 的分叉点</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：hardware/interfaces:0162af698935</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;no more HIDL HALs&quot; hardware/interfaces/current.txt</code></pre>
+<p>期望输出第 910 行的注记，对应 §4.2 的方向性事实。</p>
+<pre><code class="lang-bash">find hardware/interfaces -maxdepth 1 -mindepth 1 -type d | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望一级目录计数为 56（只数目录，<code>ls</code> 会把 <code>Android.bp</code> 一类文件算进去）。</p>
+<pre><code class="lang-bash">grep -n &quot;service hwservicemanager\|critical&quot; system/hwservicemanager/hwservicemanager.rc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:1</code> 的服务定义、<code>:5</code> 的 <code>critical</code>、<code>:12</code> 的 <code>shutdown critical</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;GetDeviceHalManifest\|GetFrameworkCompatibilityMatrix&quot; system/libvintf/VintfObject.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:124</code> 与 <code>:154</code> 两个取数口。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/compatibility_matrices/ | grep compatibility_matrix</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 7 个矩阵文件：<code>compatibility_matrix.7.xml</code>、<code>.8.xml</code>、<code>.202404.xml</code>、<code>.202504.xml</code>、<code>.202604.xml</code>、<code>.202704.xml</code> 与 <code>compatibility_matrix.empty.xml</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;namesAnAidlComposerService&quot; frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中第 27 行的双栈探测点。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>以为 HAL 只有 HIDL 一种。纠正：<code>current.txt</code> 已声明不再新增 HIDL HAL，新接口走 AIDL，存量 HIDL 服务长期共存，读代码要按双栈预期。</li><li>以为「接口版本号对上了就兼容」。纠正：版本对上只说明接口命名一致，能否启动还要过 VINTF 清单与矩阵比对，两者都满足才算兼容。</li><li>以为 <code>hwservicemanager</code> 挂了只是某个 HAL 不可用。纠正：它被标为 <code>critical</code>，稳定性等级是整机级，它反复崩溃会触发整机重启。</li><li>以为系统侧 composer 走哪条栈是编译期配置。纠正：<code>AidlComposer::namesAnAidlComposerService</code> 是一次运行期探测，同一份镜像可落到不同栈。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：应用层能不能直接判断某能力有没有 HAL 支持？ <strong>答</strong>：不能。应用看到的是框架 API，HAL 是否存在只体现在服务注册与 VINTF 声明上。 <strong>追问</strong>：报「不支持」时怎么区分硬件缺失与 HAL 未实现？ <strong>答</strong>：设备清单里没声明是整套能力缺失；声明了但服务不可用才是实现或注册问题。</p>
+<p><strong>问</strong>：FCM 树里有 7 个文件，是不是只需要看新的那个？ <strong>答</strong>：按设备声明的 target-level 选文件，<code>compatibility_matrix.7.xml</code> 与 <code>compatibility_matrix.202704.xml</code> 分别面向 HIDL 期的老设备与 AIDL 期的新设备；中间还有 <code>8</code>、<code>202404</code>、<code>202504</code>、<code>202604</code> 四份快照，<code>empty.xml</code> 只是空白模板。看得多不等于都生效，生效的永远只有与设备 level 对应的那一份。 <strong>追问</strong>：设备 level 从哪来？ <strong>答</strong>：来自设备侧清单的 target-level 声明，由 <code>libvintf</code> 的取数口读出后与对应矩阵文件比对。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>启动期提示 VINTF 不兼容</td><td><code>grep -n &quot;GetDeviceHalManifest&quot; system/libvintf/VintfObject.cpp</code></td><td>设备清单取数口位置</td><td>转 <code>102</code> 读校验流程</td></tr><tr><td>HIDL 服务找不到</td><td><code>grep -n &quot;service hwservicemanager&quot; system/hwservicemanager/hwservicemanager.rc</code></td><td>注册中心定义与路径</td><td>确认注册中心存活再查服务名</td></tr><tr><td>图形合成路径异常</td><td><code>grep -n &quot;namesAnAidlComposerService&quot; frameworks/native/services/surfaceflinger/DisplayHardware/ComposerHal.cpp</code></td><td>双栈探测点</td><td>转 <code>202</code> 读 composer 双栈</td></tr><tr><td>怀疑 hwbinder 线程或映射区异常</td><td><code>grep -n &quot;DEFAULT_MAX_BINDER_THREADS&quot; system/libhwbinder/ProcessState.cpp</code></td><td>默认线程数常量</td><td>比对进程实际配置</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：HIDL/AIDL 机制细节归 <code>101</code>；VINTF 校验流程归 <code>102</code>；gralloc 与 HWC 内部归 <code>201</code>、<code>202</code>；音频与相机通路归 <code>301</code>、<code>401</code>；驱动侧归 P5。</li><li><strong>本篇前置依赖</strong>：<code>AND-P3-302</code>。</li><li><strong>本篇后继</strong>：<code>101</code>、<code>102</code>、<code>201</code>、<code>202</code>、<code>301</code>、<code>302</code>、<code>401</code>、<code>402</code>；出卷后接 P5-101、P6-201、P7-102、P7-301。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>接口树一级目录 56 个，口径为 <code>android17-release</code> 于 2026-10-17 实测。</li><li>带 <code>aidl/</code> 子目录的一级目录 40 个，同上口径。</li><li>第二层版本目录（<code>audio/2.0</code> 这类 <code>X.Y</code>）87 个，一级目录下为 0 个，同上口径。</li><li><code>DEFAULT_MAX_BINDER_THREADS</code> 为 0，来源为源码常量 <code>system/libhwbinder/ProcessState.cpp:45</code>。</li><li>FCM 实文件 7 个：带 <code>level</code> 的 6 个为 <code>7</code>、<code>8</code>、<code>202404</code>、<code>202504</code>、<code>202604</code>、<code>202704</code>，<code>compatibility_matrix.empty.xml</code> 无 <code>level</code>（空白模板）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL 主导期</td><td>HAL 以 HIDL 接口为主</td><td>服务注册走 <code>hwservicemanager</code></td></tr><tr><td>过渡期</td><td>AIDL HAL 与 HIDL HAL 双栈并存</td><td>系统侧需探测选择，如 composer</td></tr><tr><td><code>android17-release</code></td><td><code>current.txt</code> 注记不再新增 HIDL HAL；本树 FCM 实文件 7 个，<code>level</code> 覆盖 <code>7</code> 到 <code>202704</code> 六档</td><td>新接口按 AIDL 写，存量 HIDL 继续可用</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>hidl aidl hal</code>、<code>vintf compatibility matrix</code>、<code>hardware abstraction layer</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>vintf</code>、<code>hwservicemanager</code>、<code>composer hal aidl</code>。</li><li>本仓关键路径：<code>hardware/interfaces/current.txt</code>、<code>system/libvintf/VintfObject.cpp</code>、<code>hardware/interfaces/compatibility_matrices/</code>。</li><li>承接篇：<code>AND-P3-302</code>、<code>AND-P4-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P4-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

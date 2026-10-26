@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>调试工具链：logcat 与 dumpsys 的正确用法</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>调试工具链：logcat 与 dumpsys 的正确用法</h1>
+<div class="kv"><span>ID：AND-P10-401</span><span>卷：P10</span><span>章：10.4</span><span>难度：3</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/logging/logcat/logcat.cpp ；system/logging/logd ；frameworks/native/cmds/dumpsys/dumpsys.cpp ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java ；frameworks/base/cmds/am/src/com/android/commands/am/Am.java ；frameworks/base/services/core/java/com/android/server/DropBoxManagerService.java ；frameworks/base/services/core/java/com/android/server/utils/PriorityDump.java ；system/logging/liblog/include/android/log.h ；system/logging/liblog/logger_name.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>logcat 不带 <code>-b</code> 时的默认订阅不是「全部日志」，而是 <code>LOG_ID_MAIN</code>、<code>LOG_ID_SYSTEM</code>、<code>LOG_ID_CRASH</code>、<code>LOG_ID_KERNEL</code> 四个缓冲区，由 <code>if (id_mask == 0)</code> 分支一次性赋值；注意显式写 <code>-b default</code> 只得到前三个，KERNEL 不会加入。<code>LOG_ID_EVENTS</code>、<code>LOG_ID_STATS</code>、<code>LOG_ID_SECURITY</code> 走特殊分支，不在默认集合里；<code>LOG_ID_RADIO</code> 同样不在默认集合（<code>log_id_t</code> 全集 8 个，<code>android/log.h</code> :105-:119），要用得显式 <code>-b radio</code>。默认输出格式是 <code>threadtime</code>，不是 brief。dumpsys 慢，多半不是「服务实现烂」，而是它对每个服务逐个发一次 dump 事务，默认单次超时 <code>10000</code> 毫秒，服务多了就逐项累加。dumpsys 的 <code>-t</code> 按秒解析再乘 1000（毫秒用 <code>-T</code>），<code>--priority</code> 既过滤服务清单，又向服务端注入 <code>--dump-priority</code>/<code>-a</code> 参数从而改变服务的 dump 分派——但这两件事都只在未显式指定服务名（dump 全部服务或 <code>-l</code>）时发生（<code>dumpsys.cpp</code> :257-:259：<code>setServiceArgs</code> 的调用点在 <code>if (services.empty() || showListOnly)</code> 分支内）；<code>-a</code> 与 <code>--dump-priority</code> 按 <code>priorityFlags</code> 分支注入，并非总是同时。上面这些都是源码常量口径，本篇不断言任何真机输出。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P10-G01</code>——本卷导读给出 P10 的篇目拓扑与工具链分工，先建立「哪类问题用哪个工具」的坐标，再读本篇不会把 logcat/dumpsys 当成万能入口。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/logging/logcat/logcat.cpp</code></li><li><code>system/logging/logd</code></li><li><code>frameworks/native/cmds/dumpsys/dumpsys.cpp</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/utils/PriorityDump.java</code></li><li><code>frameworks/base/cmds/am/src/com/android/commands/am/Am.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/DropBoxManagerService.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你打开终端敲 <code>logcat</code>，日志刷得飞快，但某条 <code>Log.i</code> 死活不出现——要么 tag 拼错，要么它根本没进你订阅的缓冲区。你敲 <code>dumpsys</code> 想看某个服务状态，终端卡了十几秒才出结果，你以为机器卡死了，其实是它在一项一项地问服务。两条命令天天用，但缓冲区有几个、默认格式是什么、超时是谁的、<code>-t</code> 的单位是什么，多数人答不上来。本篇只回答这些问题，不教你怎么定位卡顿和崩溃。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>dumpsys 走 Binder 事务（经 <code>ServiceManager</code> 拿每个服务的代理，逐个发 dump），logcat 走 logd 的 socket 与日志缓冲区——底层路径并不相同；相同的只是「客户端只做选取与格式化」这一层。</p>
+<p>图 1：logcat 与 dumpsys 的客户端—服务端分层</p>
+<pre><code>logcat                       dumpsys
+  |                            |
+  |-- logd socket ---------    |-- servicemanager 查询 ---
+  |                    |       |                          |
+  +-- 日志缓冲区 &lt;-- logd       +-- 逐服务 dump 事务 --&gt; 各系统服务</code></pre>
+<p>两个命令的共同点是：<strong>客户端本身不做业务，只做选取与格式化</strong>。差别在选取维度——logcat 按缓冲区 id 选，dumpsys 按服务名与优先级选。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>logcat 的缓冲区选择由 <code>id_mask</code> 位掩码表达，有两条互不相干的路：显式 <code>-b</code> 解析臂在 <code>logcat.cpp</code> :827–:830，<code>-b default</code> 拼出 <code>LOG_ID_MAIN</code>、<code>LOG_ID_SYSTEM</code>、<code>LOG_ID_CRASH</code>；隐式默认在 :916 的 <code>if (id_mask == 0)</code>，:917–:918 用一条语句赋值 <code>MAIN|SYSTEM|CRASH|KERNEL</code>。因此 <code>-b default</code> 只有 3 个缓冲，不带 <code>-b</code> 才是 4 个。<code>LOG_ID_EVENTS</code> 等特殊 id 由 :222 的 <code>is_binary</code> 分支处理；另有一个遍历 <code>LOG_ID_MIN</code> 到 <code>LOG_ID_MAX</code> 的循环在 :1047，那是 clear/set-size/get-size 三个动作共用的，与前面两处不是同一机制。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>LOG_ID_MAIN</code></td><td>主日志缓冲区，默认订阅</td><td><code>logcat.cpp</code> :830 / :917–:918</td></tr><tr><td><code>LOG_ID_SYSTEM</code></td><td>系统日志缓冲区，默认订阅</td><td><code>logcat.cpp</code> :830 / :917–:918</td></tr><tr><td><code>LOG_ID_CRASH</code></td><td>崩溃日志缓冲区，默认订阅</td><td><code>logcat.cpp</code> :830 / :917–:918</td></tr><tr><td><code>LOG_ID_KERNEL</code></td><td>内核日志缓冲区，不在 <code>-b default</code> 三缓冲中</td><td><code>logcat.cpp</code> :917–:918（显式订阅用 <code>-b kernel</code>/<code>-b all</code>：后者是 :831–:832 的字面特例 <code>id_mask = -1</code>，在 <code>logger_name.cpp</code> 的 <code>LOG_NAME[]</code> :32 中无条目，不能拿合法名表去套它）</td></tr><tr><td><code>LOG_ID_EVENTS</code></td><td>二进制事件缓冲区，特殊处理</td><td><code>logcat.cpp</code> :222</td></tr><tr><td><code>LOG_ID_STATS</code></td><td>统计缓冲区，特殊处理</td><td><code>logcat.cpp</code> :222</td></tr><tr><td><code>LOG_ID_SECURITY</code></td><td>安全缓冲区，特殊处理</td><td><code>logcat.cpp</code> :222</td></tr><tr><td><code>LOG_ID_RADIO</code></td><td>文本广播缓冲区，不在默认集合，需 <code>-b radio</code> 显式指定</td><td><code>android/log.h</code> :107（枚举全集 :105-:119）</td></tr></tbody></table>
+<p>格式侧，默认 <code>threadtime</code>：<code>SetLogFormat(&quot;threadtime&quot;)</code> 在 :952，帮助文本 <code>defaults to &quot;threadtime&quot;</code> 在 :505——但「默认」还有一层前置：:938-950 先读 <code>ANDROID_PRINTF_LOG</code> 环境变量，只有<strong>既没给 `-v`、又没有该环境变量</strong>时才落到 :951-952 的 <code>threadtime</code> 兜底。缓冲区大小由 <code>-g, --buffer-size</code> 查看（:414），<code>-G, --buffer-size=SIZE</code> 设置（:416）。两个参数只差大小写，前者只读、后者写入。</p>
+<p>dumpsys 侧，用法文本自 <code>dumpsys.cpp</code> :68 起，形如 <code>dumpsys [-t TIMEOUT] [--priority LEVEL] [--clients] [--dump] [--pid] [--thread]</code>。<code>--priority LEVEL</code> 的说明是「filter services based on specified priority」（:81），<code>--skip SERVICES</code> 则「dumps all services but SERVICES (comma-separated list)」（:83）。</p>
+<table><thead><tr><th>参数</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>-t TIMEOUT</code></td><td>单服务 dump 超时，按秒解析后 ×1000 转毫秒</td><td><code>dumpsys.cpp</code> :193–:194</td></tr><tr><td><code>-T TIMEOUT_MS</code></td><td>同上，直接按毫秒解析</td><td><code>dumpsys.cpp</code> :205–:207</td></tr><tr><td><code>--priority LEVEL</code></td><td>过滤服务清单，并注入服务端分派参数</td><td><code>dumpsys.cpp</code> :81、:258–:259、:341、:349–:350</td></tr><tr><td><code>--skip SERVICES</code></td><td>排除逗号分隔的服务名</td><td><code>dumpsys.cpp</code> :83</td></tr><tr><td><code>--clients</code> / <code>--dump</code></td><td>改变输出目标而非服务集合</td><td><code>dumpsys.cpp</code> :68</td></tr></tbody></table>
+<p>超时默认值 <code>timeoutArgMs</code> 为 <code>10000</code> 毫秒（:139）。<code>-t</code> 的数字按秒解析并乘 1000（:193–:194）；<code>-T</code> 走毫秒分支（:205–:207）；非法值在两个分支各自报错（:196、:207）。优先级判定落在 <code>PriorityDumper::PRIORITY_ARG_CRITICAL</code> / <code>_HIGH</code> / <code>_NORMAL</code>，分别在 :100 / :104 / :108，:117–:123 处做字符串映射。而 :259 在 <code>listServices(priorityFlags, asProto)</code> 过滤清单之后还调（该函数签名在 :316，为 <code>listServices(int priorityFilterFlags, bool filterByProto)</code>，第二个形参决定清单是否按 proto 过滤） <code>setServiceArgs(args, asProto, priorityFlags)</code>（定义在 :330）：:338–:341 仅在 ALL/NORMAL/DEFAULT 时给每个服务注入 <code>-a</code>，:345–:350 仅在 CRITICAL/HIGH/NORMAL 时注入 <code>PriorityDumper::PRIORITY_ARG</code> 与优先级字符串，两条分支并不总是同时发生（CRITICAL/HIGH 只有后者，NORMAL 两者皆有）；该常量在 <code>PriorityDump.java</code> :105 定义为 <code>--dump-priority</code>，服务端据此分派（ActivityManagerService（AMS）<code>MemBinder</code> 的 <code>dumpHigh</code> :2287 与 <code>dump</code> :2293 就是两条路）。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 meminfo 服务为例，看一次 <code>dumpsys meminfo</code> 的服务端落点。</p>
+<p><code>ActivityManagerService.java</code> :2132 有 <code>ServiceManager.addService(&quot;meminfo&quot;, new MemBinder(this), false, ...)</code>。<code>MemBinder</code> 自己并不直接打印：它的 <code>dump</code>（:2304）先把请求交给 <code>PriorityDump.dump(mPriorityDumper, fd, pw, args)</code>（:2310），由分派层按优先级选路——<code>dumpHigh</code>（:2287）以 <code>{&quot;-a&quot;}</code> 回调（:2289）、<code>dump</code>（:2293）直传参数，两条路最终都落到 <code>dumpApplicationMemoryUsage</code>（调用点 :2294；实现在 :13016，随后经 :13104 转到私有重载 :13109，表头在 :13138 与 :13190 打印），表头由 <code>dumpApplicationMemoryUsageHeader</code>（:12932）产出（这是文本 dump 路径；<code>--proto</code> 走另一重载，落点同为 <code>dumpApplicationMemoryUsage</code>，本篇断言不依赖文本还是 proto 分支）。</p>
+<p>于是整条链是：客户端按名字查到 <code>meminfo</code> 的 Binder 代理 → 发 dump 事务 → <code>MemBinder</code> 接住 → 落到 <code>dumpApplicationMemoryUsage</code> → 先输出表头再输出逐进程数据。你看到的每一行都来自这一段 Java 代码，而不是 dumpsys 客户端自己拼的。客户端只负责服务枚举、超时控制与输出重定向。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>trace 类工具（atrace、perfetto）的采集与可视化归 <code>AND-P10-402</code>，本篇不碰。崩溃与 ANR 的现场定位归 <code>AND-P10-403</code>，本篇只讲它们落到哪个缓冲区、哪个归档服务。Binder 机制本身（事务、线程池、驱动语义）归 <code>AND-P2-101</code>，本篇只把 dump 当作一次事务来引用，不展开。</p>
+<p>崩溃归档这一侧，<code>DropBoxManagerService.java</code> 共 1382 行，<code>isTagEnabled(String)</code> 在 :201 与 :593 两处，落盘判据 <code>if (!isTagEnabled(tag)) return;</code> 在 :544——即 tag 未启用就直接返回，不写文件。这条判据与 <code>LOG_ID_CRASH</code> 是两套机制，不要混为一谈。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>logcat 客户端</td><td><code>system/logging/logcat/logcat.cpp</code></td><td><code>id_mask</code>、<code>SetLogFormat</code></td><td>共 1227 行，缓冲区选取与格式化</td></tr><tr><td>日志守护进程</td><td><code>system/logging/logd</code></td><td>日志缓冲区与 socket</td><td>logcat 的数据源</td></tr><tr><td>dumpsys 客户端</td><td><code>frameworks/native/cmds/dumpsys/dumpsys.cpp</code></td><td><code>timeoutArgMs</code>、<code>PriorityDumper</code></td><td>共 581 行，服务枚举与超时</td></tr><tr><td>优先级参数常量</td><td><code>frameworks/base/services/core/java/com/android/server/utils/PriorityDump.java</code>（Java 服务端）／<code>frameworks/native/services/utils/PriorityDumper.cpp</code> :22（native 客户端定义，声明在 <code>include/serviceutils/PriorityDumper.h</code> :30）</td><td><code>PRIORITY_ARG</code>（<code>--dump-priority</code>）</td><td>两侧同名同值：客户端注入、服务端分派，引用时须指明核的是哪一侧</td></tr><tr><td>meminfo 注册</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td><code>addService(&quot;meminfo&quot;, ...)</code>、<code>MemBinder</code></td><td>服务端实现示例</td></tr><tr><td>am 命令</td><td><code>frameworks/base/cmds/am/src/com/android/commands/am/Am.java</code></td><td>共 217 行</td><td>与 dumpsys 并列的客户端入口</td></tr><tr><td>崩溃归档</td><td><code>frameworks/base/services/core/java/com/android/server/DropBoxManagerService.java</code></td><td><code>isTagEnabled</code></td><td>共 1382 行，归档落盘判据</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash"># 1. logcat.cpp 总行数
+wc -l system/logging/logcat/logcat.cpp        # 期望 1227
+# 2. 隐式默认掩码：先看 id_mask == 0 判断，再看一次性赋值
+sed -n '916,918p' system/logging/logcat/logcat.cpp   # 期望 if (id_mask == 0) 后赋值四缓冲
+# 3. 显式 -b 解析臂（对照：只含三缓冲）
+grep -n &quot;case 'b':&quot; system/logging/logcat/logcat.cpp # 期望命中 :827，其内 :830 拼三缓冲
+# 4. 默认输出格式
+grep -n 'SetLogFormat(&quot;threadtime&quot;)' system/logging/logcat/logcat.cpp     # 期望命中 :952
+# 5. dumpsys 总行数
+wc -l frameworks/native/cmds/dumpsys/dumpsys.cpp                          # 期望 581
+# 6. 默认超时常量
+grep -n &quot;timeoutArgMs&quot; frameworks/native/cmds/dumpsys/dumpsys.cpp         # 期望命中 :139 赋值
+# 7. --priority 注入服务端参数
+grep -n &quot;setServiceArgs&quot; frameworks/native/cmds/dumpsys/dumpsys.cpp       # 期望命中 :259 调用与 :330 定义
+sed -n '338,351p' frameworks/native/cmds/dumpsys/dumpsys.cpp                    # 看两处注入分支
+# 8. meminfo 服务注册
+grep -n 'addService(&quot;meminfo&quot;' frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java  # 期望命中 :2132
+# 9. DropBox 落盘判据
+grep -n &quot;if (!isTagEnabled(tag)) return;&quot; frameworks/base/services/core/java/com/android/server/DropBoxManagerService.java  # 期望命中 :544</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：logcat 默认输出全部日志。</strong> 错。隐式默认（:916–:918）含 <code>LOG_ID_MAIN</code>、<code>LOG_ID_SYSTEM</code>、<code>LOG_ID_CRASH</code>、<code>LOG_ID_KERNEL</code>；<code>LOG_ID_EVENTS</code>、<code>LOG_ID_STATS</code>、<code>LOG_ID_SECURITY</code> 走 :222 的特殊分支，不在默认集合里；<code>LOG_ID_RADIO</code>（<code>android/log.h</code> :107）也不在，需 <code>-b radio</code> 显式订阅。</p>
+<p><strong>误区二：dumpsys 卡住说明某个服务挂了。</strong> 多数情况不是每个服务都慢——<code>10000</code> 毫秒（:139）是<strong>单个服务的静默无输出上限</strong>：<code>dumpsys.cpp</code> :508-509 设 deadline、:524 用 <code>poll</code> 等可读、:532-534 在超时或返回 0 时判 <code>TIMED_OUT</code>。正常服务毫秒级返回，只有卡死或长时间不发字符的才会吃满这个上限，因此<strong>不能按「服务数 × 10000ms」累加</strong>来估算总耗时。</p>
+<p><strong>误区三：`-t` 的单位是毫秒。</strong> 错。<code>-t</code> 按秒解析再乘 1000（:193–:194），毫秒要用 <code>-T</code>（:205–:207）。给 <code>-t 10000</code> 会被当成一万秒。</p>
+<p><strong>误区四：`--priority` 只筛清单。</strong> 它还改输出：过滤之后 <code>setServiceArgs</code> 按分支注入 <code>-a</code>（:338–:341，仅 ALL/NORMAL/DEFAULT）与 <code>--dump-priority</code> 及优先级串（:345–:350，仅 CRITICAL/HIGH/NORMAL），服务端按此分派不同 dump 路径，故内容会变。但前提同样是未显式指定服务名（<code>dumpsys.cpp</code> :257-:259），指定了服务名时过滤与注入都不发生。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>logcat -g</code> 和 <code>logcat -G</code> 差在哪？ <strong>答</strong>：<code>-g, --buffer-size</code> 只查看当前缓冲区大小（:414），<code>-G, --buffer-size=SIZE</code> 是设置（:416）。大小写不同，行为相反。 <strong>追问</strong>：那 <code>-b</code> 呢？ <strong>答</strong>：<code>-b</code> 选缓冲区，改变的是 <code>id_mask</code> 里的位，与 <code>-g</code>/<code>-G</code> 属于两个维度；注意 <code>-b default</code> 只给三缓冲，不带 <code>-b</code> 才是四缓冲。</p>
+<p><strong>问</strong>：为什么 <code>dumpsys --skip</code> 能提速，<code>--priority</code> 也能，但体感不同？ <strong>答</strong>：<code>--skip</code> 不改清单本身——被跳过的服务仍在清单里打印并标注 <code>(skipped)</code>（:272），真正跳过发生在 dump 循环（:285 <code>if (IsSkipped(...)) continue;</code>）；<code>--priority</code> 按优先级阈值筛选（仅在未显式指定服务名时，<code>dumpsys.cpp</code> :257-:259），保留哪些取决于服务的优先级声明。 <strong>追问</strong>：两个一起用会冲突吗？ <strong>答</strong>：不冲突，都是对同一份服务清单做集合运算，最终被 dump 的集合是两者叠加的结果。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>某条日志完全不出现</td><td><code>sed -n '916,918p' system/logging/logcat/logcat.cpp</code></td><td>隐式默认掩码含哪些 <code>LOG_ID_*</code></td><td>确认目标日志属于哪个缓冲区，用 <code>-b</code> 显式指定</td></tr><tr><td>输出没有时间戳列</td><td><code>grep -n 'SetLogFormat' system/logging/logcat/logcat.cpp</code></td><td>默认格式是否为 <code>threadtime</code></td><td>检查是否被 <code>-v</code> 覆盖成其它格式</td></tr><tr><td><code>dumpsys</code> 长时间无输出</td><td><code>grep -n &quot;timeoutArgMs&quot; frameworks/native/cmds/dumpsys/dumpsys.cpp</code></td><td>默认超时是否为 <code>10000</code></td><td>用 <code>-t</code> 显式给秒数，或 <code>--skip</code> 缩小集合</td></tr><tr><td><code>-t</code> 传大数后更慢</td><td><code>sed -n '193,207p' frameworks/native/cmds/dumpsys/dumpsys.cpp</code></td><td>秒分支与毫秒分支的乘 1000</td><td>按秒给值，或用 <code>-T</code> 按毫秒给</td></tr><tr><td>meminfo 输出异常</td><td><code>grep -n &quot;dumpApplicationMemoryUsage&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td>打印入口与表头函数</td><td>顺着 <code>MemBinder</code> → <code>dumpApplicationMemoryUsage</code> 追</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：atrace 与 perfetto 的采集与 trace 分析，见 <code>AND-P10-402</code>；崩溃与 ANR 的根因定位，见 <code>AND-P10-403</code>；Binder 事务与线程模型，见 <code>AND-P2-101</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P10-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P10-402</code>、<code>AND-P10-403</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>logcat 隐式默认订阅缓冲区数为 4（<code>MAIN</code>/<code>SYSTEM</code>/<code>CRASH</code>/<code>KERNEL</code>），<code>-b default</code> 为 3，来源：<code>logcat.cpp</code> :916–:918 与 :827–:830 源码常量。</li><li>dumpsys 单服务静默上限 <code>10000</code> 毫秒，来源：<code>dumpsys.cpp</code> :139 源码常量（:508-509 设 deadline、:524 poll、:532-534 判 <code>TIMED_OUT</code>）；端到端总耗时取决于有多少服务真的卡住，<strong>不随服务数量线性累加</strong>，暂无实测，列为待补。</li><li><code>logcat.cpp</code> 文件规模 1227 行，<code>dumpsys.cpp</code> 581 行，<code>DropBoxManagerService.java</code> 1382 行，<code>Am.java</code> 217 行，来源：本树文件行数。</li><li>真机首屏 <code>dumpsys</code> 耗时暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期树</td><td>logcat 与 logd 曾位于 <code>system/core/</code>（以官方仓库历史为准，本树无旧检出可判）</td><td>按旧路径 grep 会落空</td></tr><tr><td><code>android17-release</code>（本树）</td><td>logcat 与 logd 位于 <code>system/logging/</code>，HEAD <code>d35ba620451b</code></td><td>检索起点改为 <code>system/logging/logcat/logcat.cpp</code> 与 <code>system/logging/logd</code></td></tr><tr><td>本树静态核对状态</td><td><code>logcat.cpp</code> 共 1227 行，默认格式 <code>threadtime</code>，隐式默认掩码四项</td><td>与本篇 §4.2 一致</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>logcat</code>、<code>dumpsys</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>dumpsys timeout</code>、<code>logcat buffer size</code>。</li><li>本仓关键路径：<code>system/logging/logcat/logcat.cpp</code>、<code>frameworks/native/cmds/dumpsys/dumpsys.cpp</code>、<code>system/logging/logd</code>。</li><li>承接篇：<code>AND-P10-402</code>、<code>AND-P10-403</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

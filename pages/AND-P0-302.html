@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>源码阅读顺序与读补丁：从 commit message 到行为变更</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>源码阅读顺序与读补丁：从 commit message 到行为变更</h1>
+<div class="kv"><span>ID：AND-P0-302</span><span>卷：P0</span><span>章：0.3</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/make/core/build_id.mk ；build/make/Changes.md</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>读源码树的顺序：先入口后细节，先数据流后控制流，一次只追一个符号。读补丁的顺序：先读 commit message 的一行主题，再看 diff 的文件列表，最后才进 hunk。<code>git log --oneline -10 -- &lt;file&gt;</code> 用来建立某个文件的提交节奏感，<code>git show &lt;sha&gt;</code> 再看单次补丁全文。判断改动性质，看它改了哪些文件比看改了多少行更有效：只改一个文件的一行，通常是值变更；跨多个目录，才可能是行为变更。但这只对纯值文件成立——makefile 里列表、标志位、配置的一行增删即行为变更。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 只读 §1、§4.2、§6｜路径 C 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P0-301</code>；本篇的五链读法沿用它给的链路骨架。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/make/core/build_id.mk</code></li><li><code>build/make/Changes.md</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树 + git/grep；本篇为静态分析，不需要编译与真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>在源码树里待久了会遇到这种局面：某个常量今天和昨天不一样，却不知道是谁改的、为什么改；或者 grep 一个符号，命中分布在十几个仓里，读完第一个文件就迷路。两种卡顿的解法在于把顺序固定下来。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个层次：文件是阅读的最小单位，提交是变更的最小单位，符号是追踪的最小单位。三者互相定位：从符号查文件，从文件查提交，从提交的 diff 反查符号名。commit message 是提交的入口，主题行说明做了什么，正文与 Bug 引用说明为什么。</p>
+<p>图 1：从一个符号追到行为变更的四步</p>
+<pre><code>符号 --grep--&gt; 文件 --git log--&gt; 提交 --git show--&gt; diff</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>阅读顺序四条：先入口后细节，从 <code>main</code> 与生命周期入口进；先数据流后控制流；按五条调用链走；一次只追一个符号。</p>
+<p>读补丁的固定动作：先读主题行与 diff 文件列表，再进 hunk。commit message 的标准结构是一行主题（动词开头）＋ 正文 ＋ Bug 引用。</p>
+<table><thead><tr><th>命令</th><th>含义</th></tr></thead><tbody><tr><td><code>git log --oneline -10 -- &lt;file&gt;</code></td><td>看某个文件的最近历史</td></tr><tr><td><code>git show &lt;sha&gt;</code></td><td>看单次补丁全文</td></tr><tr><td><code>git log -L :&lt;funcname&gt;:&lt;file&gt;</code></td><td>跟一个函数的演进（函数名形式必须带前导冒号）</td></tr><tr><td><code>git blame &lt;file&gt;</code></td><td>定位某一行的责任提交</td></tr><tr><td><code>git tag --points-at HEAD</code></td><td>看当前提交上的发布标签</td></tr></tbody></table>
+<p>以上命令均在对应子仓内执行。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 <code>build/make/core/build_id.mk</code> 为例：最近 6 次提交全是同一格式，一次提交只改一行 <code>BUILD_ID</code>——<code>5ce6f78733</code>（2026-06-03）、<code>1ee6c98fbd</code>（2026-05-21）、<code>9e68fde94e</code>/<code>5b17a9449c</code>/<code>1efc1a10e0</code>（均 2026-05-15）、<code>bfcb05ace6</code>（2026-05-14）；当前值 <code>BUILD_ID=CP2A.260605.016</code>。</p>
+<p>这样的历史不需要进 hunk 看逻辑，只需确认改的是哪一行、值从什么变成什么——但只对纯值文件成立：diff 列表只剩一项时读法才可收窄，列表/标志/配置类的一行增删仍是行为变更。</p>
+<p>对照 <code>build/make/Changes.md</code>：构建系统的变更记录，开头标题为 &quot;Build System Changes for Android.mk/Android.bp Writers&quot;，如「Soong genrules are now sandboxed」。查某构建行为是否变过，先查它再追提交。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P0-301 给调用链骨架，本篇给在链上追符号与追提交的手法。AND-P0-402 讲树外信息源的查法，本篇只讲树内。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th></tr></thead><tbody><tr><td>单值变更实例</td><td><code>build/make/core/build_id.mk</code></td><td><code>BUILD_ID</code>，一次提交只改一行</td></tr><tr><td>构建行为变更记录</td><td><code>build/make/Changes.md</code></td><td>&quot;Build System Changes for Android.mk/Android.bp Writers&quot;</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/make:5ce6f78733</p></blockquote>
+<p>验证方式：静态源码分析；以下命令在源码树根执行，用 <code>-C build/make</code> 进入 build/make 子仓（AOSP 是 repo 工作区，树根不是 git 仓）。</p>
+<pre><code class="lang-bash"># 期望：最近 6 条为固定格式的 Version bump 主题行（2026-05-14 至 2026-06-03）
+git -C build/make log --oneline -10 -- core/build_id.mk
+# 期望：diff 文件列表只有 core/build_id.mk 一项，改动一行
+git -C build/make show 5ce6f78733 --stat
+# 期望：BUILD_ID 那一行的责任提交是 5ce6f78733
+git -C build/make blame core/build_id.mk
+# 期望：列出 3 个发布标签（android-17.0.0_r1 等），本仓 HEAD 上确有三枚
+git -C build/make tag --points-at HEAD</code></pre>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：读补丁就是读 diff。</strong> diff 只说明改了什么行；先读一行主题与文件列表，但「列表只有一项＝值变更」只对纯值文件成立。</p>
+<p><strong>误区二（看起来对其实是错的）：`git blame` 给出的是「谁写坏了」。</strong> 它只给出某一行的最后责任提交；改名与搬移后它可能只是搬运者，配合 <code>git log --follow</code> 看。</p>
+<p><strong>误区三：文件历史越长越要先读。</strong> 像 <code>build_id.mk</code> 这类随发布滚动的值文件历史噪音大，先读入口与数据流，不是最活跃的文件。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：符号在多个仓里同名怎么办？ <strong>答</strong>：先按调用链确定它属于哪一层，再按仓名收窄。<strong>追问</strong>：收窄后仍有多个候选？ <strong>答</strong>：用 <code>git log -L :&lt;funcname&gt;:&lt;file&gt;</code> 看函数演进，历史最短的通常不是主干实现。</p>
+<p><strong>问</strong>：<code>git log -L</code> 和 <code>git blame</code> 该先用哪个？ <strong>答</strong>：理解逻辑来龙去脉用 <code>git log -L</code>，定位某一行由谁引入用 <code>git blame</code>。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知道某文件近期改了什么</td><td><code>git log --oneline -10 -- &lt;file&gt;</code></td><td>主题行格式与节奏</td><td>挑一条进 <code>git show</code></td></tr><tr><td>补丁太大读不动</td><td><code>git show &lt;sha&gt; --stat</code></td><td>diff 文件列表长度</td><td>按目录分批读 hunk</td></tr><tr><td>某行来源不明</td><td><code>git blame &lt;file&gt;</code></td><td>该行责任提交</td><td><code>git show</code> 那个提交</td></tr><tr><td>当前提交是否带发布标签</td><td><code>git tag --points-at HEAD</code></td><td>有无输出</td><td>无输出则按分支判断基线</td></tr></tbody></table>
+<p>以上命令同样在对应子仓内执行，或在树根统一加 <code>git -C build/make</code> 前缀，否则会撞 <code>fatal: not a git repository</code>。</p>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：树外信息源的查法归 <code>AND-P0-402</code>。</li><li><strong>前置依赖</strong>：<code>AND-P0-301</code>。</li><li><strong>后继</strong>：P1 卷各子系统的入口篇。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>build_id.mk</code> 最近 6 次提交间隔为 2026-05-14 至 2026-06-03，每次只改一个文件的一行（<code>git show --stat</code> 实测）。</li><li><code>build/make</code> HEAD 上的发布标签 3 个（<code>android-17.0.0_r1</code>、<code>android-cts-17.0_r1</code>、<code>android-vts-17.0_r1</code>），<code>git tag --points-at HEAD</code> 实测。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早版本</td><td><code>Changes.md</code> 条目与格式可能不同</td><td>以本树实测为准，本篇不断言历史形态</td></tr><tr><td>android17-release（本树）</td><td><code>Changes.md</code> 含「Soong genrules are now sandboxed」，<code>BUILD_ID=CP2A.260605.016</code></td><td>构建行为与版本号均以本树实测为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>build system changes</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>build_id.mk</code>。</li><li>承接篇：AND-P0-301。</li></ul>
+</article>
+<footer>android-100 · AND-P0-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

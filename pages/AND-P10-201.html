@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内存分析：从 RSS/PSS 到 native 泄漏</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>内存分析：从 RSS/PSS 到 native 泄漏</h1>
+<div class="kv"><span>ID：AND-P10-201</span><span>卷：P10</span><span>章：10.2</span><span>难度：4</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/os/Debug.java ；frameworks/base/core/jni/android_os_Debug.cpp ；frameworks/base/core/java/com/android/internal/util/MemInfoReader.java ；system/memory/lmkd/lmkd.cpp ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>dumpsys meminfo</code> 打出来的 PSS 族四类口径（USS、SwapPss、Rss、memtrack）的每个数字都来自 <code>Debug.java</code> → <code>android_os_Debug.cpp</code>，但底部分两条：前三类经 <code>ProcMemInfo.SmapsOrRollup</code> 读 <code>/proc/pid/smaps_rollup</code>（rollup 不可用时回退解析 <code>smaps</code>）的 pss/rss 字段（<code>android_os_Debug.cpp</code> :293、<code>procmeminfo.cpp</code> :334-337；这是<strong>简要分支</strong>——同一套 <code>ProcMemInfo</code> 另有详细分支，Android 堆 stats 走 <code>system/memory/libmeminfo/androidprocheaps.cpp</code> :25-29 直读全量 <code>/proc/pid/smaps</code>），memtrack 一类走 memtrack HAL；注意 <code>android_os_Debug.cpp</code> :288 的预置关系——<code>read_memtrack_memory</code> 成功时 <code>pss</code>、<code>uss</code>、<code>rss</code> <strong>同时被赋成</strong> memtrack 三项之和，随后 :293-296 才在之上累加 <code>SmapsOrRollup</code> 的结果，所以 memtrack 已折进返回的 pss/uss/rss，四类口径<strong>不互斥</strong>（<code>android_os_Debug.cpp</code> :142-174，取 smaps 未计入的图形/显存类分配，:176-177 注释明示）；App Summary 段的 native/dalvik 堆与对象/binder 计数不走这条链（由目标进程经 <code>thread.dumpMemInfo</code> 自行取数，见 §7.1 误区三）。RSS 是「页在不在这个进程的页表里」，PSS 是「按共享页分摊后的份额」，USS 是「独占」，三者对同一进程单调递减。整机汇总另走 <code>MemInfoReader</code>，LMKD 只看 <code>oom_score_adj</code> 槽位与 PSI 压力，不看 PSS。native 泄漏的定位不是看某个数字变大，而是看同一口径在多次采样间的<strong>斜率</strong>，再用 memtrack 与调用栈产物把归因收到具体分配点。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P3-202</code>（ART 堆布局与 GC），本篇只讲内存口径与归因链路，堆内结构不重复。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/android/os/Debug.java</code></li><li><code>frameworks/base/core/jni/android_os_Debug.cpp</code></li><li><code>frameworks/base/core/java/com/android/internal/util/MemInfoReader.java</code></li><li><code>system/memory/lmkd/lmkd.cpp</code></li><li><code>system/memory/lmkd/statslog.h</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>线上反馈「这个进程内存一直涨」。你 <code>adb shell dumpsys meminfo &lt;pid&gt;</code> 一看，<code>TOTAL PSS</code> 比昨天大了 30 MB，于是判断泄漏。但如果涨的是 RSS、PSS 没动，那只是共享页被算进了页表；如果 PSS 涨而 USS 没涨，那是共享库或 dma-buf 被动增长。三种情况的归因路径完全不同，而 <code>dumpsys meminfo</code> 把四类口径并排打印，恰恰是为了让你能区分它们。分辨不清口径，后面的 native 泄漏排查一定会走错方向。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四类口径是同一个进程内存的不同切法，不是四个不同的东西。</p>
+<p>图 1：四类内存口径的包含关系（自外向内收窄）</p>
+<pre><code>RSS  ── 该进程页表里映射的物理页总量
+ └ PSS ── 共享页按映射进程数分摊后的份额
+    └ USS ── 只被本进程映射的独占页
+SwapPss  ── 已被换出/压缩的页，按 PSS 同样规则分摊</code></pre>
+<ul><li>RSS（Resident Set Size）看的是「页在不在」，不区分共享。</li><li>PSS（Proportional Set Size）把每个共享页除以映射它的进程数，避免整机求和时重复计数，所以整机 PSS 相加才有意义。</li><li>USS（Unique Set Size）只统计独占页，进程被杀后能实际还给系统的量。</li><li>SwapPss 与 PSS 同构，但对象是已被换出或被 zram 压缩的页。</li></ul>
+<p>这四类口径由 <code>android_os_Debug_getPssPid</code> 一次读齐。Java 侧的 <code>getPss(int pid, long[] outUssSwapPssRss, long[] outMemtrack)</code> 就是它的包装：两个出参数组分别装前三类口径与 memtrack 口径。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>取数链路分三段：Java 入口、JNI 实现、内核与 <code>/proc</code>。</p>
+<p>第一段在 <code>Debug.java</code>，三条入口语义各不相同，最容易记混。<code>getMemoryInfo(MemoryInfo)</code> 取的是<strong>本进程</strong> dalvik/native/other 的 PSS 分项，JNI 落 <code>android_os_Debug_getDirtyPages</code>（:820-823 注册），内部以 <code>getpid()</code> 转调 <code>android_os_Debug_getDirtyPagesPid</code>（:272/:274）；<code>getMemoryInfo(int pid, MemoryInfo)</code> 是按 pid 取同一套分项，返回 boolean 表示读取是否成功；两者都只填单进程堆分项，与整机、与「类型」无关。真正把 USS、SwapPss、Rss、memtrack 四类口径一起带回来的是 <code>getPss(int pid, long[] outUssSwapPssRss, long[] outMemtrack)</code>。</p>
+<p>第二段在 <code>android_os_Debug.cpp</code>。<code>android_os_Debug_getPss</code> 内部以 <code>getpid()</code> 转调 <code>android_os_Debug_getPssPid</code>；<code>android_os_Debug_getDirtyPagesPid</code>（:192）经 <code>ExtractAndroidHeapStats</code>（:200）填 dalvik/native/graphics/gl/other 的 pss/privateDirty/rss 分项；<code>android_os_Debug_getMemInfo</code>（:428，注册 :828）绑的是 Java 侧 <code>Debug.getMemInfo(long[] outSizes)</code>（<code>Debug.java</code> :2118，注释写明读 <code>/proc/meminfo</code>），即 <code>MemInfoReader</code> 的底层，不是 <code>MemoryInfo</code>。以上几段语义不同，不要混看。</p>
+<p>第三段是 <code>MEMINFO_*</code> 下标常量。它们寻址的对象是 <code>getMemInfo</code> 的出参 <code>long[]</code>（<code>Debug.java</code> :2118，<code>MEMINFO_COUNT</code>=29 于 :2110），错一个下标就会把 Cached 当成 Slab 读。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>MEMINFO_TOTAL</code></td><td>数组第 0 项，内存总量</td><td><code>Debug.java</code> :2048</td></tr><tr><td><code>MEMINFO_FREE</code></td><td>第 1 项，空闲量</td><td><code>Debug.java</code> :2050</td></tr><tr><td><code>MEMINFO_BUFFERS</code></td><td>第 2 项，块设备缓冲</td><td><code>Debug.java</code> :2052</td></tr><tr><td><code>MEMINFO_CACHED</code></td><td>第 3 项，文件页缓存</td><td><code>Debug.java</code> :2054</td></tr><tr><td><code>MEMINFO_SHMEM</code></td><td>第 4 项，tmpfs 类共享段</td><td><code>Debug.java</code> :2056</td></tr><tr><td><code>MEMINFO_SLAB</code></td><td>第 5 项，内核 slab 分配量</td><td><code>Debug.java</code> :2058</td></tr></tbody></table>
+<p>整机会计在 <code>MemInfoReader.java</code>。<code>readMemInfo()</code> 内部即调用 <code>Debug.getMemInfo(mInfos)</code>（:38）取一次快照，之后 <code>getTotalSize()</code>、<code>getFreeSize()</code>、<code>getCachedSize()</code>、<code>getKernelUsedSize()</code> 都是对同一份快照的切片；<code>getSwapTotalSizeKb()</code> 与 <code>getZramTotalSizeKb()</code> 分别给出 swap 与 zram 的总量。这一套面向整机，不面向单进程。</p>
+<p><code>dumpsys meminfo</code> 的服务端落点在 <code>ActivityManagerService.java</code>：以 <code>ServiceManager.addService(&quot;meminfo&quot;, new MemBinder(this), ...)</code> 注册（:2132），打印逻辑在 <code>dumpApplicationMemoryUsage</code>（:13016），该文件 :2294 也在同一入口调用。所以你看到的排版是服务端算好的，不是客户端拼的。</p>
+<p>LMKD 是第四条线，也是唯一不看 PSS 的一条。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>OOM_SCORE_ADJ_MIN</code></td><td>取值 <code>-1000</code>，最低分</td><td><code>lmkd.cpp</code> :299-300</td></tr><tr><td><code>OOM_SCORE_ADJ_MAX</code></td><td>取值 <code>1000</code>，最高分</td><td><code>lmkd.cpp</code> :299-300</td></tr><tr><td><code>MAX_DISTINCT_OOM_ADJ</code></td><td>取值 <code>64</code>，可区分的 adj 档数上限</td><td><code>lmkd.cpp</code> :560</td></tr><tr><td><code>ADJTOSLOT(adj)</code></td><td>把 oom_score_adj 映射到统计槽位</td><td><code>lmkd.cpp</code> :551-552</td></tr><tr><td><code>ADJTOSLOT_COUNT</code></td><td>槽位总数</td><td><code>lmkd.cpp</code> :551-552</td></tr><tr><td><code>killcnt[]</code></td><td>按槽位累计的杀进程次数</td><td><code>lmkd.cpp</code> :568</td></tr></tbody></table>
+<p>杀进程路径：<code>find_and_kill_process</code> :2602 决策，:2627 调 <code>kill_one_process</code> :2466 执行；扫描方向是从 <code>OOM_SCORE_ADJ_MAX</code> 向下（:2358、:2609），也就是先挑分数最高的。<code>kill_reasons</code> 枚举定义在 <code>system/memory/lmkd/statslog.h</code> :71，<code>NONE = -1</code>（:72）；<code>lmkd.cpp</code> :2176 是 <code>kill_info</code> 结构体里引用它的字段声明，不是枚举定义。<code>NONE</code> 表示当前这次杀不是由压力触发的。</p>
+<p>LMKD 的压力口径是 PSI，不是 PSS。窗口默认 <code>DEFAULT_PSI_WINDOW_SIZE_MS</code>=1000 毫秒（:122），运行期变量 <code>psi_window_size_ms</code> 声明在 :217、由 <code>GET_LMK_PROPERTY</code> 赋值于 :4122；水位分级枚举 <code>enum vmpressure_level</code> 自 :166 起（<code>VMPRESS_LEVEL_LOW</code>=0 于 :167，<code>VMPRESS_LEVEL_CRITICAL</code> 于 :169），<code>low</code>/<code>medium</code>/<code>critical</code> 三级属性分别在 :4091/:4093/:4095，升级与降级门限 <code>upgrade_pressure</code>=100、<code>downgrade_pressure</code>=100（:4102/:4104），策略开关 <code>use_new_strategy</code> 在 :3616。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某进程 <code>dumpsys meminfo</code> 里 TOTAL PSS 连续三次采样为 A、A+10、A+20（单位省略，本篇不断言任何设备上的实测内存占用数值）。判断顺序如下。</p>
+<p>先看 RSS 有没有同步上涨。RSS 涨、PSS 不动，说明共享映射变多，比如多加载了一个被别的进程也在用的库，这不是泄漏。</p>
+<p>再看 USS。PSS 涨而 USS 平，说明涨的部分是共享口径，可能是 dma-buf 或共享库被反复映射。USS 与 PSS 同步涨，才落在「本进程独占内存增长」这个分支上。</p>
+<p>最后看 memtrack 出参。<code>getPss(int pid, long[] outUssSwapPssRss, long[] outMemtrack)</code> 一并带回的 memtrack 数组，就是用来区分「图形/显存类分配」和「普通 native 堆」的开关。memtrack 涨得多，就不要去翻 malloc 调用栈，去查图形缓冲的生命周期。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P3-202</code> 讲 ART 堆布局与 GC：本篇讲到 Java 堆只到「PSS 里那块归谁」为止，堆内分区、GC 触发条件去看那篇。</li><li><code>AND-P5-301</code> 讲 LMKD 杀进程策略与 PSI：本篇只给出 LMKD 读哪些符号、杀进程走哪个函数，压力水位如何换算成动作归那篇；内核侧 zram/swap 机制同样在那篇。</li><li>后继篇承接工具链：trace 采集与符号化在 P10 卷后续篇目，本篇只给内存口径与归因链路。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>Java 取数入口</td><td><code>frameworks/base/core/java/android/os/Debug.java</code></td><td><code>getMemoryInfo</code>、<code>getPss</code>、<code>getMemInfo</code>、<code>MEMINFO_*</code></td><td>全文件 2937 行；四类口径在此声明</td></tr><tr><td>JNI 实现</td><td><code>frameworks/base/core/jni/android_os_Debug.cpp</code></td><td><code>android_os_Debug_getPssPid</code>、<code>android_os_Debug_getPss</code>、<code>android_os_Debug_getDirtyPagesPid</code>、<code>android_os_Debug_getMemInfo</code></td><td>全文件 906 行；真正读 <code>/proc</code> 的地方</td></tr><tr><td>整机会计</td><td><code>frameworks/base/core/java/com/android/internal/util/MemInfoReader.java</code></td><td><code>readMemInfo</code>、<code>getKernelUsedSize</code>、<code>getZramTotalSizeKb</code></td><td>全文件 192 行；底层调 <code>Debug.getMemInfo</code></td></tr><tr><td>LMKD 枚举与槽位</td><td><code>system/memory/lmkd/lmkd.cpp</code>、<code>system/memory/lmkd/statslog.h</code></td><td><code>ADJTOSLOT</code>、<code>kill_one_process</code>、<code>find_and_kill_process</code>、<code>kill_reasons</code>（statslog.h :71）</td><td><code>lmkd.cpp</code> 全文件 4218 行；按 <code>oom_score_adj</code> 而非 PSS</td></tr><tr><td>dumpsys 服务端</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td><code>&quot;meminfo&quot;</code> 服务注册、<code>dumpApplicationMemoryUsage</code>；详细/简要分支由 :13242 的 <code>opts.dumpDetails || (!brief &amp;&amp; !opts.oomOnly)</code> 判定</td><td>输出排版由服务端生成</td></tr><tr><td>详细分支（Android 堆 stats）</td><td><code>system/memory/libmeminfo/androidprocheaps.cpp</code></td><td><code>ExtractAndroidHeapStats</code>（:25-29，直读 <code>/proc/pid/smaps</code>）</td><td>与简要分支 <code>smaps_rollup</code> 并列，两条都要知道</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/core/java/android/os/Debug.java \
+      frameworks/base/core/jni/android_os_Debug.cpp \
+      frameworks/base/core/java/com/android/internal/util/MemInfoReader.java \
+      system/memory/lmkd/lmkd.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出四行，行数分别为 2937、906、192、4218，对上 §5 表格的「说明」列。</p>
+<pre><code class="lang-bash">grep -n &quot;public .*getPss\|public .*getMemoryInfo&quot; frameworks/base/core/java/android/os/Debug.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>getMemoryInfo</code> 两处重载与 <code>getPss()</code>、<code>getPss(int pid, ...)</code> 共四个入口。</p>
+<pre><code class="lang-bash">grep -n &quot;MEMINFO_&quot; frameworks/base/core/java/android/os/Debug.java | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>MEMINFO_TOTAL</code> 起始的一串下标常量，确认第 0 项是 <code>MEMINFO_TOTAL</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;android_os_Debug_getPssPid\|android_os_Debug_getPss\|android_os_Debug_getMemInfo&quot; \
+      frameworks/base/core/jni/android_os_Debug.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望至少命中 <code>android_os_Debug_getPssPid</code>、<code>android_os_Debug_getPss</code>、<code>android_os_Debug_getMemInfo</code> 三个符号（不加限定直接 grep <code>android_os_Debug_get</code> 会命中 51 行（24 个不同符号，一个符号常有多处声明/调用），含 <code>getNativeHeapSize</code>、<code>getDirtyPages</code>、<code>getRss</code> 等）。</p>
+<pre><code class="lang-bash">grep -rn &quot;enum kill_reasons&quot; system/memory/lmkd/</code></pre>
+<p>期望共 6 行：枚举定义唯一在 <code>statslog.h</code> :71；其余命中为引用/字段声明（<code>event.logtags</code> :39、<code>lmkd.cpp</code> :2176/:2803/:3021、<code>statslog.h</code> :93），<code>lmkd.cpp</code> :2176 是 <code>kill_info</code> 结构体里引用它的字段声明，不是枚举定义。</p>
+<pre><code class="lang-bash">grep -n &quot;OOM_SCORE_ADJ_MIN\|OOM_SCORE_ADJ_MAX\|MAX_DISTINCT_OOM_ADJ\|ADJTOSLOT&quot; system/memory/lmkd/lmkd.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>-1000</code>、<code>1000</code>、<code>64</code> 三个常量与 <code>ADJTOSLOT</code>/<code>ADJTOSLOT_COUNT</code> 宏定义。</p>
+<pre><code class="lang-bash">grep -n &quot;DEFAULT_PSI_WINDOW_SIZE_MS\|vmpressure_level\|VMPRESS_LEVEL_\|use_new_strategy&quot; \
+      system/memory/lmkd/lmkd.cpp | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中窗口默认值 1000 毫秒、<code>enum vmpressure_level</code>（:166 起）与 <code>use_new_strategy</code> 开关。</p>
+<pre><code class="lang-bash">grep -n &quot;addService(\&quot;meminfo\&quot;\|dumpApplicationMemoryUsage&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>ServiceManager.addService(&quot;meminfo&quot;, new MemBinder(this), ...)</code> 与 <code>dumpApplicationMemoryUsage</code> 的定义及另一处调用。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：PSS 涨了就是泄漏。</strong> 错。PSS 是按共享页分摊的份额，共享库、dma-buf 的映射变化都会推高它，进程自身并没有多持有内存。只有 USS 同向上涨，才落在「本进程独占内存增长」分支。</p>
+<p><strong>误区二：RSS 可以直接跨进程相加当整机占用。</strong> 错。共享页在每个进程的 RSS 里都计一次，相加会重复。整机求和要用 PSS，这也是 PSS 存在的原因。</p>
+<p><strong>误区三（看起来对其实是错的）：`dumpsys meminfo` 的数字是客户端 dumpsys 进程算出来的。</strong> 错。<code>&quot;meminfo&quot;</code> 是 <code>ActivityManagerService</code> 注册的服务；PSS 汇总由 system_server 侧 <code>Debug.getMemoryInfo(pid)</code> 读 <code>/proc</code> 得出（<code>ActivityManagerService.java</code> :13016 入口、:13903），app 进程的详细段与 App Summary 则由目标进程经 <code>thread.dumpMemInfo</code> → <code>ActivityThread.dumpMemInfo</code> 排版回写——但<strong>数据归属要分清</strong>：App Summary 里 <code>Java Heap:</code>/<code>Native Heap:</code>/<code>Code:</code>/<code>Stack:</code> 各行的 PSS 全部取自入参 <code>memInfo</code>，而该 <code>memInfo</code> 是 system_server 在 <code>ActivityManagerService.java</code> :13245 用 <code>Debug.getMemoryInfo(pid, mi)</code> 取到、经 :13281-13284 跨 binder 传进来的；目标进程本地只取 Heap Size/Alloc/Free（:1859-1867）与 Objects/SQL/binder 段（:1869-1890）（<code>ActivityManagerService.java</code> :13281 委派；<code>ActivityThread.java</code> :1803/:1856，native 堆经 <code>Debug.getNativeHeapSize</code> 系列（JNI 内走 mallinfo，<code>android_os_Debug.cpp</code> :114/:120/:126），dalvik 堆经 <code>Runtime.totalMemory</code>/<code>freeMemory</code>，两段分别落在 :1859-1861 与 :1863-1867）。客户端始终不算数，核心结论不变。</p>
+<p><strong>误区四：LMKD 是按 PSS 挑进程杀的。</strong> 错。LMKD 扫描的是 <code>oom_score_adj</code>，从 <code>OOM_SCORE_ADJ_MAX</code>=1000 向下扫；<code>killcnt[]</code> 也按 <code>ADJTOSLOT(adj)</code> 槽位计数，这套结构里没有 PSS 的位置。唯一沾到 Pss 的是同一 adj 槽位内挑「最重」那个进程时的 <code>tasksize</code> 计量——<code>proc_get_heaviest</code>（:2294）把 <code>dmabuf_pss</code> 折进页数累加（:2307/:2310-:2312），且只用于槽位内排序，不决定杀不杀。另有一处易混：<code>kill_one_process</code> 在 :2479 声明 <code>dmabuf_pss_bytes</code>、:2509-2512 读 <code>dmabuf_pss</code>，但只进 kill 统计与 desc/statslog 上报，同样不参与决策——参与杀进程决策的 PSS 计量只有 <code>proc_get_heaviest</code> 的 <code>tasksize</code> 一条。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>getPss()</code> 和 <code>getPss(int pid, ...)</code> 结果不一样？ <strong>答</strong>：前者只取本进程，且只带回 PSS 一个量；后者收一个 pid、带回四个数组口径。实现上前者走 <code>getpid()</code> 转调 <code>android_os_Debug_getPssPid</code>，后者给的是同一个底层取数函数的完整出参。<strong>追问</strong>：那我要看 USS 该用谁？<strong>答</strong>：只能用带出参数组的那一个，USS 在 <code>outUssSwapPssRss</code> 里，单返回值接口拿不到。</p>
+<p><strong>问</strong>：整机内存为什么不能从 <code>Debug.getMemoryInfo</code> 和 <code>MemInfoReader</code> 拼？ <strong>答</strong>：<code>getMemoryInfo</code> 填的是单进程堆分项，跟整机无关；整机那一路是 <code>MemInfoReader.readMemInfo()</code> 内部调 <code>Debug.getMemInfo(long[] outSizes)</code>（<code>Debug.java</code> :2118）读 <code>/proc/meminfo</code>，<code>MEMINFO_*</code> 下标寻址的正是这个 <code>long[]</code>，不是 <code>MemoryInfo</code>。切片用 <code>getTotalSize()</code>、<code>getFreeSize()</code>、<code>getCachedSize()</code>、<code>getKernelUsedSize()</code>。<strong>追问</strong>：swap 和 zram 看哪个？<strong>答</strong>：<code>getSwapTotalSizeKb()</code> 与 <code>getZramTotalSizeKb()</code>，两个都读，不要互相替代。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>PSS 持续上涨，USS 不动</td><td><code>adb shell dumpsys meminfo &lt;pid&gt;</code></td><td><code>Private Dirty</code>＋<code>Private Clean</code> 与 <code>TOTAL PSS</code> 是否背离</td><td>背离即共享口径，转查 dma-buf 与共享库映射数量</td></tr><tr><td>USS 与 PSS 同向上涨</td><td><code>adb shell dumpsys meminfo &lt;pid&gt;</code></td><td><code>Private Dirty</code>＋<code>Private Clean</code> 与 memtrack 段的相对增速</td><td>memtrack 增速大则查图形缓冲生命周期；否则查 native 堆调用栈</td></tr><tr><td>想读 USS 却读到 <code>Private Dirty</code></td><td><code>adb shell dumpsys meminfo &lt;pid&gt;</code></td><td>该列在 brief 分支是否已被换成别的量</td><td>USS＝<code>Private Dirty</code>＋<code>Private Clean</code>；但 brief 分支（<code>AMS</code> :13255-13262）会把 <code>getPss</code> 的 PSS 塞进 <code>mi.dalvikPss</code>、把 USS 塞进 <code>mi.dalvikPrivateDirty</code>，同一列含义随 <code>dumpDetails</code> 分支漂移，单 pid 时 <code>:13179</code> 强制 <code>dumpDetails=true</code> 走 :13245 的 <code>getMemoryInfo</code>，此时 <code>Private Dirty</code> 是 <code>getTotalPrivateDirty</code> 而非 USS</td></tr><tr><td>进程被杀但不知原因</td><td><code>adb logcat -b events | grep -E 'killinfo|am_kill'</code></td><td><code>killinfo</code>（tag 10195355）里的 <code>kill_reasons</code> 数值，<code>NONE</code> 为 <code>-1</code></td><td>非 <code>-1</code> 说明是压力触发，配合 PSI 水位判级</td></tr><tr><td>只想看被杀的文本描述</td><td><code>adb logcat -b main | grep &quot;Kill '&quot;</code></td><td><code>kill_desc</code> 文本</td><td>与上一行的结构化 <code>kill_reasons</code> 互相印证</td></tr><tr><td>整机可用内存对不上</td><td><code>adb shell dumpsys meminfo</code></td><td>首段合计是否等于各项相加</td><td>不等则说明有口径被重复或漏算，回看 <code>MemInfoReader</code> 切片</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：ART 堆布局与 GC 归 <code>AND-P3-202</code>；LMKD 杀进程策略细节、PSI 水位换算、内核侧 zram/swap 机制归 <code>AND-P5-301</code>。</li><li><strong>本篇前置依赖</strong>：<code>AND-P3-202</code>、<code>AND-P5-301</code>。</li><li><strong>本篇后继</strong>：P10 卷内 trace 采集与符号化相关篇目、native 崩溃调用栈相关篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>DEFAULT_PSI_WINDOW_SIZE_MS</code>=1000 毫秒（源码常量，<code>lmkd.cpp</code> :122）。</li><li><code>OOM_SCORE_ADJ_MIN</code>=(-1000)、<code>OOM_SCORE_ADJ_MAX</code>=1000（源码常量，<code>lmkd.cpp</code> :299-300）。</li><li><code>MAX_DISTINCT_OOM_ADJ</code>=64（源码常量，<code>lmkd.cpp</code> :560）。</li><li><code>upgrade_pressure</code>=100、<code>downgrade_pressure</code>=100（源码常量，<code>lmkd.cpp</code> :4102/:4104）。</li><li>各类口径的实际占用字节数：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本</td><td>无 <code>VMPRESS_LEVEL_*</code> 分级，压力判断更粗（跨版本断言，本树未核，实际以目标版本源码为准）</td><td>旧机 logcat 里看不到分级水位，排障清单第 3 行的判读方式不适用</td></tr><tr><td>android17-release（本树）</td><td><code>use_new_strategy</code> 开关存在（<code>lmkd.cpp</code> :3616），三级水位 <code>low</code>/<code>medium</code>/<code>critical</code> 分别绑属性（:4091/:4093/:4095）</td><td>压力判读按三级水位走，<code>upgrade_pressure</code>/<code>downgrade_pressure</code> 均为 100</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>perfetto</code>；developer.android.com 站内检索 <code>dumpsys meminfo</code>、<code>onTrimMemory</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>MemInfoReader</code>、<code>android_os_Debug</code>、<code>kill_one_process</code>。</li><li>本仓关键路径：<code>frameworks/base/core/jni/android_os_Debug.cpp</code>、<code>system/memory/lmkd/lmkd.cpp</code>、<code>system/memory/lmkd/statslog.h</code>、<code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code>。</li><li>承接篇：<code>AND-P3-202</code>、<code>AND-P5-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

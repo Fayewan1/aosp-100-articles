@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据安全：Keystore、TEE 与数据加密</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>数据安全：Keystore、TEE 与数据加密</h1>
+<div class="kv"><span>ID：AND-P9-401</span><span>卷：P9</span><span>章：9.4</span><span>难度：4</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/security/keystore2/src/keystore2_main.rs ；system/security/keystore2/src/remote_provisioning.rs ；hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl ；system/gatekeeper/gatekeeper.cpp ；system/core/gatekeeperd/gatekeeperd.cpp ；system/vold/FsCrypt.cpp ；system/vold/MetadataCrypt.cpp ；system/sepolicy/private/keystore.te</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>KeyMint 用四个安全等级值把「密钥由谁保证」写进接口契约：<code>SOFTWARE</code>=0 由 keystore2 进程自己保证，<code>TRUSTED_ENVIRONMENT</code>=1 与 <code>STRONGBOX</code>=2 落到硬件，<code>KEYSTORE</code>=100 是 Keystore 2 自己加的标签。Keystore 2 的服务端是 Rust 实现，<code>system/security/keystore2</code> 下 <code>.rs</code> 文件合计 51571 行，入口收敛在 <code>keystore2_main.rs</code> 的 <code>fn main()</code>。Gatekeeper 分两层：<code>system/gatekeeper</code> 是 HAL 实现入口，<code>system/core/gatekeeperd</code> 是系统侧守护进程。文件级加密（File-Based Encryption，FBE）的密钥派生入口在 <code>system/vold/FsCrypt.cpp</code>，元数据加密入口在 <code>MetadataCrypt.cpp</code>，两个文件共同决定「密钥从哪来」。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读｜路径 C 只读 §4/§6</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P9-202</code>。它给出权限检查的进程间链路与 SELinux 侧的判定位置；本篇讲的是密钥与加密这类「有状态资源」如何被同样的边界保护。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/security/keystore2/src/keystore2_main.rs</code></li><li><code>system/security/keystore2/src/remote_provisioning.rs</code></li><li><code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></li><li><code>system/gatekeeper/gatekeeper.cpp</code></li><li><code>system/core/gatekeeperd/gatekeeperd.cpp</code></li><li><code>system/vold/FsCrypt.cpp</code></li><li><code>system/vold/MetadataCrypt.cpp</code></li><li><code>system/sepolicy/private/keystore.te</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析，不涉及真机密钥操作。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个应用调用 <code>KeyGenParameterSpec</code> 生成密钥，只写「要求硬件支持」，然后拿不到密钥句柄，也没有明确的错误来源。另一种情况：设备开机第一帧就能读 <code>/data</code>，但没人能说清 <code>/data</code> 的密钥在开机脚本的哪一步被解开。还有人把 Gatekeeper 当成单纯的密码校验库，直到发现它和 KeyMint 在解锁链路上互相依赖。</p>
+<p>这三类困惑指向同一个问题：密钥的「可信来源」在哪一层被确定，以及这一层失败时上层看到什么。本篇沿服务端代码走一遍这条链。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念构成三层：</p>
+<ul><li><strong>KeyMint</strong>：密钥操作的 HAL 接口层，通过 <code>SecurityLevel</code> 声明每次操作落在哪个安全等级。</li><li><strong>Keystore 2</strong>：<code>system/security/keystore2</code> 的 Rust 服务，向上给应用提供密钥句柄，向下按 <code>SecurityLevel</code> 选择落点。</li><li><strong>Gatekeeper</strong>：口令校验通道，HAL 实现与系统守护进程分离。</li><li><strong>vold</strong>：块设备与加密卷的管理者，FBE 的密钥派生从这里进入内核。</li></ul>
+<p>图 1：密钥请求从应用到硬件的分层落点</p>
+<pre><code>应用 (uid)
+   |  句柄/别名
+keystore2 进程  --- SOFTWARE 级在此闭环
+   |  KeyMint HAL (SecurityLevel)
+TEE / StrongBox 硬件  --- TRUSTED_ENVIRONMENT / STRONGBOX
+   ^  只有 KeyMint HAL 这一跳直连硬件
+   |
+   +-- vold (FsCrypt) --- FBE 密钥派生入口：包装密钥经 keystore2 进程
+       |  请求（KeyStorage.cpp:117/:127），不直连硬件</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>安全等级是本篇的核心契约。它不是一个实现细节，而是调用方可以观测的返回值。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>SOFTWARE</code></td><td>值 0，密钥运算跑在 Android 进程内，由 keystore2 自身保证</td><td><code>SecurityLevel.aidl</code></td></tr><tr><td><code>TRUSTED_ENVIRONMENT</code></td><td>值 1，落在 TEE，满足 CDD 9.11.1 [C-1-2]</td><td><code>SecurityLevel.aidl</code></td></tr><tr><td><code>STRONGBOX</code></td><td>值 2，落在 StrongBox，满足 CDD 9.11.2</td><td><code>SecurityLevel.aidl</code></td></tr><tr><td><code>KEYSTORE</code></td><td>值 100，由 Keystore 2 自身强制的标签</td><td><code>SecurityLevel.aidl</code></td></tr></tbody></table>
+<p>这张表的读法是：前三个值描述「谁的代码在算」，第四个值描述「Keystore 认为这个密钥属于自己管辖」。所以 <code>KEYSTORE</code> 不与前三个互斥，它是叠加标签。至于「请求不到硬件级会不会自动落到 <code>SOFTWARE</code>」——<code>SecurityLevel.aidl</code>（78 行全文）里<strong>没有</strong>任何降级条款，<code>SOFTWARE</code> 在其中只被描述为「runs in an Android process」；实际选路发生在 keystore2 侧（<code>system/security/keystore2/src/security_level.rs</code> 按实例取用），请求不到即失败，是否接受软件级取决于调用方请求的是哪个实例。本篇按这一口径表述，不把降级说成 aidl 的契约。</p>
+<p>Keystore 2 服务端的形态可以直接从规模看出来。<code>system/security/keystore2/src/keystore2_main.rs</code> 共 165 行，<code>fn main()</code> 在 :38，说明入口层极薄，主体逻辑摊在其余 <code>.rs</code> 文件里。远端密钥配置（RKPD）路径单独成文件：<code>system/security/keystore2/src/remote_provisioning.rs</code> 共 159 行，负责经 Remote Provisioning HAL 生成密钥、以 CBOR 交配置服务器换回证书链并写入 SQLite——是「密钥的远端配置」，不是普通配置文件下发。</p>
+<p>Gatekeeper 的两层分工按文件规模就能读出来。<code>system/gatekeeper/gatekeeper.cpp</code> 共 379 行，是 HAL 实现入口，跑在提供实现的进程一侧；<code>system/core/gatekeeperd/gatekeeperd.cpp</code> 共 530 行、<code>system/core/gatekeeperd/main.cpp</code> 共 50 行，是系统侧守护进程。前者偏「算法与存储怎么落」，后者偏「谁可以问、问几次」——系统侧只做 Binder 入口、SID 存储与 HAL 转发（含重试超时透传）。</p>
+<p>数据加密在 vold 侧有两个入口：<code>FsCrypt.cpp</code> 共 1176 行，<code>MetadataCrypt.cpp</code> 共 501 行。前者是 FBE 卷的密钥获取与挂载流程，后者管元数据加密的设备映射。</p>
+<p>这里最容易说反的是「密钥从哪来」：<strong>卷密钥由 vold 自己生成/取回</strong>（<code>FsCrypt.cpp:546</code> 的 <code>retrieveOrGenerateKey(device_key_path, …, userdataKeyGen(), &amp;device_key)</code>），KeyMint 提供的那把是<strong>用来包装卷密钥的</strong>——<code>KeyStorage.cpp:117</code> 的 <code>generateKeyStorageKey()</code> 调 <code>keystore.generateKey(...)</code>（:127，先尝试带 <code>TAG_ROLLBACK_RESISTANCE</code>、不支持则回退）拿到的是 AES-GCM 的 key storage key，卷密钥被它加密后再落盘。所以 vold 不是单纯的消费者：它既是卷密钥的产出方，又是 KeyMint 的使用方。</p>
+<p>SELinux 侧为这条链切了独立的域。<code>system/sepolicy/private/</code> 下与这条链相关的有七项：<code>keystore.te</code>、<code>keystore2_key_contexts</code>、<code>keystore_keys.te</code>、<code>gatekeeperd.te</code>、<code>hal_gatekeeper.te</code>、<code>vold.te</code>、<code>vold_prepare_subdirs.te</code>。其中 <code>keystore2_key_contexts</code> 把 keystore2 的密钥 namespace 映射到 SELinux 类型标签，<code>keystore_keys.te</code> 声明这些 namespace 类型本身（<code>type shell_key, keystore2_key_type;</code> 一类，shell／vold／su／odsign／locksettings／keychain／resume_on_reboot 七行各一），两者把「哪个域的密钥对象」写成了策略而不是代码里的权限判断。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一个请求要求 <code>TRUSTED_ENVIRONMENT</code> 级密钥。按 <code>SecurityLevel.aidl</code>，<code>TRUSTED_ENVIRONMENT</code>=1 意味着满足 CDD 9.11.1 [C-1-2]。keystore2 的选路只看实例名：<code>globals.rs:204-211</code> 把 <code>TRUSTED_ENVIRONMENT</code> 固定映射到 <code>IKeyMintDevice/default</code>，设备声明了 default 实例就用它，<strong>不校验 HAL 自报的安全等级与槽位是否一致</strong>（<code>globals.rs:316-335</code> 连上后只取 versionNumber）。软件变体（<code>keymint-service.nonsecure</code>）同样注册为 default（<code>hardware/interfaces/security/keymint/aidl/default/service.cpp:38</code>）——这类设备上请求会成功，「TEE 级」实际由软件实现背书；legacy compat 路径更直接：没有安全 Keymaster 时把软件实现填进 <code>TRUSTED_ENVIRONMENT</code> 槽位并打 WARNING（<code>km_compat/km_compat.cpp:1468-1472</code>）。反过来，调用方<strong>请求不到</strong> <code>SOFTWARE</code> 级：<code>get_security_level</code> 只登记 TEE 与 StrongBox（<code>service.rs:122-136</code>），<code>keymint_service_name</code> 对 <code>SOFTWARE</code> 直接返回 <code>HARDWARE_TYPE_UNAVAILABLE</code>（<code>globals.rs:219-224</code>）。真正会失败的是另一种情况：设备没声明 default 实例，keystore2 启动即报错退出（<code>service.rs:70-79</code>，TEE 是 mandatory）——此时任何等级的请求都无从谈起。</p>
+<p>对照规模数据：<code>system/security/keystore2</code> 下 <code>.rs</code> 合计 51571 行，其中 <code>tests</code>/<code>test_utils</code> 两目录占 16541 行，非测试部分 35030 行（<code>find . -name '*.rs' -not -path './tests/*' -not -path './test_utils/*'</code> 可复算）——选路逻辑摊在这 35030 行里，入口只占 165 行。这解释了为什么读 <code>keystore2_main.rs</code> 看不出安全等级逻辑——它不在入口。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>前置篇 <code>AND-P9-202</code> 讲权限检查链路，本篇假设读者已知道「调用方身份如何到达服务端」。本篇的后继是 P11 的 FBE 策略层，那里讲目录级加密策略与解锁阶段划分；本篇只到 vold 的密钥派生入口为止，不展开策略。KeyMint 在 TEE 内部的具体实现不在本树，也不在本篇。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>服务入口</td><td><code>system/security/keystore2/src/keystore2_main.rs</code></td><td><code>fn main()</code> :38，全文 165 行</td><td>入口极薄，不含选路逻辑</td></tr><tr><td>远端密钥配置（RKPD）</td><td><code>system/security/keystore2/src/remote_provisioning.rs</code></td><td>全文 159 行</td><td>HAL 生成密钥、CBOR 换证书链入 SQLite</td></tr><tr><td>安全等级契约</td><td><code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></td><td><code>SOFTWARE</code>/<code>TRUSTED_ENVIRONMENT</code>/<code>STRONGBOX</code>/<code>KEYSTORE</code></td><td>等级值与 CDD 引用在此</td></tr><tr><td>Gatekeeper HAL 入口</td><td><code>system/gatekeeper/gatekeeper.cpp</code></td><td>全文 379 行</td><td>实现侧入口</td></tr><tr><td>Gatekeeper 守护进程</td><td><code>system/core/gatekeeperd/gatekeeperd.cpp</code></td><td>全文 530 行</td><td>系统侧 Binder 入口与 HAL 转发</td></tr><tr><td>FBE 密钥入口</td><td><code>system/vold/FsCrypt.cpp</code></td><td>全文 1176 行</td><td>卷密钥获取与挂载</td></tr><tr><td>元数据加密</td><td><code>system/vold/MetadataCrypt.cpp</code></td><td>全文 501 行</td><td>元数据设备映射</td></tr><tr><td>密钥域策略</td><td><code>system/sepolicy/private/keystore.te</code></td><td>域与权限规则</td><td>同目录另有 <code>keystore2_key_contexts</code>、<code>keystore_keys.te</code></td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/security:cbb2ef1617a9</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C system/security rev-parse HEAD</code></pre>
+<p>期望输出 <code>cbb2ef1617a9</code> 开头的完整提交号，与锚点一致。</p>
+<pre><code class="lang-bash">find system/security/keystore2 -name '*.rs' | xargs wc -l | tail -1</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望合计 51571 行，对应 Keystore 2 的规模事实。</p>
+<pre><code class="lang-bash">wc -l system/security/keystore2/src/keystore2_main.rs
+grep -n 'fn main' system/security/keystore2/src/keystore2_main.rs</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前者 165 行，后者在 :38 命中。</p>
+<pre><code class="lang-bash">grep -nE 'SOFTWARE|TRUSTED_ENVIRONMENT|STRONGBOX|KEYSTORE *=' \
+  hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望四个等级值同行出现，值分别为 0、1、2、100。</p>
+<pre><code class="lang-bash">wc -l system/gatekeeper/gatekeeper.cpp system/core/gatekeeperd/gatekeeperd.cpp \
+  system/core/gatekeeperd/main.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次为 379、530、50 行。</p>
+<pre><code class="lang-bash">wc -l system/vold/FsCrypt.cpp system/vold/MetadataCrypt.cpp</code></pre>
+<p>期望依次为 1176、501 行。</p>
+<pre><code class="lang-bash">ls system/sepolicy/private/ | grep -E 'keystore|gatekeeper|vold'</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出七项：<code>keystore.te</code>、<code>keystore2_key_contexts</code>、<code>keystore_keys.te</code>、<code>gatekeeperd.te</code>、<code>hal_gatekeeper.te</code>、<code>vold.te</code>、<code>vold_prepare_subdirs.te</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;retrieveOrGenerateKey&quot; system/vold/FsCrypt.cpp
+grep -n &quot;generateKeyStorageKey\|keystore.generateKey&quot; system/vold/KeyStorage.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前者命中 :546（卷密钥由 vold 生成/取回），后者命中 :117/:127（KeyMint 侧生成的是包装卷密钥用的 key storage key）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`SOFTWARE` 是「不安全的兜底」，请求硬件级失败会自动落回它。</strong> 不是。<code>SOFTWARE</code>=0 是一个正式的等级值，代表由 keystore2 进程自身保证，它需要调用方明确接受才会被选中。把它当兜底会让调用方误判密钥的实际保护边界。</p>
+<p><strong>误区二：`KEYSTORE` 是比 `STRONGBOX` 更高的等级。</strong> 看起来像，其实是错的。<code>STRONGBOX</code>=2 和 <code>KEYSTORE</code>=100 描述的是不同维度：前者说运算在 StrongBox 硬件里，后者是 Keystore 2 强制的归属标签。数值大小不构成强弱排序。</p>
+<p><strong>误区三：Keystore 2 的入口文件会给出选路逻辑。</strong> <code>keystore2_main.rs</code> 只有 165 行，<code>fn main()</code> 在 :38，是启动与装配。选路与等级判定分布在其余 <code>.rs</code> 文件里，全目录合计 51571 行（含 <code>tests</code>/<code>test_utils</code> 16541 行，非测试 35030 行）。</p>
+<p><strong>误区四：Gatekeeper 只是一个校验函数。</strong> 它被拆成 HAL 实现入口（<code>gatekeeper.cpp</code>，379 行）与系统守护进程（<code>gatekeeperd.cpp</code>，530 行加 <code>main.cpp</code>，50 行）两侧，失败计数与请求节流在 HAL 实现一侧（<code>gatekeeper.cpp:68-88</code>：<code>GetFailureRecord</code> :73、<code>ThrottleRequest</code> :78、<code>IncrementFailureRecord</code> :80、<code>ComputeRetryTimeout</code> :85，受 <code>pw_handle-&gt;version &gt;= HANDLE_VERSION_THROTTLE</code> 门控）；<code>gatekeeperd</code> 只做系统侧 Binder 入口与 HAL 转发（全文无 throttle 相关命中）。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：一个密钥到底存在哪？</p>
+<p><strong>答</strong>：取决于 <code>SecurityLevel</code>。<code>SOFTWARE</code> 级的保护边界是 keystore2 进程；<code>TRUSTED_ENVIRONMENT</code> 与 <code>STRONGBOX</code> 级落在硬件侧，密钥材料不出 TEE 或 StrongBox。</p>
+<p><strong>追问</strong>：那 <code>KEYSTORE</code> 级呢？</p>
+<p><strong>答</strong>：它是 Keystore 2 自身强制的标签，与前三个等级不互斥，用来标记该对象由 Keystore 2 管辖，不单独决定存储位置。</p>
+<p><strong>问</strong>：FBE 的密钥从哪来？</p>
+<p><strong>答</strong>：分两把。卷密钥由 vold 自己生成或取回（<code>FsCrypt.cpp:546</code> <code>retrieveOrGenerateKey</code>）；KeyMint 生成的是包装它用的 key storage key（<code>KeyStorage.cpp:117</code>/:127），卷密钥被加密后才落盘。</p>
+<p><strong>追问</strong>：密钥派生的数学细节在哪？</p>
+<p><strong>答</strong>：不在本篇范围，本篇只到 vold 的两个入口与这条调用链。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>请求硬件级密钥失败</td><td><code>grep -nE 'SOFTWARE|TRUSTED_ENVIRONMENT|STRONGBOX' hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></td><td>四个等级值定义，确认请求值是否合法</td><td>查实现侧声明的支持等级，不要改请求值绕过</td></tr><tr><td>读不到密钥文件</td><td><code>ls -lZ system/sepolicy/private/keystore2_key_contexts</code></td><td>上下文映射文件是否存在</td><td>核对 <code>keystore_keys.te</code> 的 namespace 类型声明</td></tr><tr><td>怀疑 keystore2 入口被改动</td><td><code>grep -n 'fn main' system/security/keystore2/src/keystore2_main.rs</code></td><td>是否仍在 :38</td><td>用 <code>git log -p</code> 看该文件历史</td></tr><tr><td><code>/data</code> 早期访问异常</td><td><code>wc -l system/vold/FsCrypt.cpp</code></td><td>是否为 1176 行，确认版本未漂移</td><td>沿 <code>FsCrypt.cpp</code> 的密钥获取调用链向上查</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：FBE 的目录级策略与解锁阶段划分，见 P11 对应篇；TEE 内部实现不在本树；KeyMint HAL 的 AIDL 全量方法列表未展开。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P9-202</code>。</p>
+<p><strong>本篇后继</strong>：P11 的 FBE 策略篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>Keystore 2 的 <code>.rs</code> 合计 51571 行，口径为 <code>system/security/keystore2</code> 目录下 <code>.rs</code> 文件静态统计，来源为本篇实测。</li><li>服务入口 <code>keystore2_main.rs</code> 165 行、<code>fn main()</code> :38，来源为本篇实测。</li><li>四个安全等级值 0/1/2/100，来源为 <code>SecurityLevel.aidl</code> 定义。</li><li>Gatekeeper 两个入口行数 379 与 530+50，口径为 <code>wc -l</code>，来源为本篇实测。</li><li>TEE 内部应用的实现规模暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>旧版 Keystore（C++）</td><td><code>system/security/keystore</code> 为 C++ 实现</td><td>接口形态与 Keystore 2 不同；迁移策略本篇不展开</td></tr><tr><td><code>android17-release</code>（本树）</td><td><code>system/security/keystore</code> 与 <code>system/security/keystore2</code> 并存，后者为 Rust，合计 51571 行</td><td>两套实现同时在树内，读者需按路径区分读的是哪一套</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>keymint</code>、<code>file-based encryption</code>、<code>gatekeeper</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>keystore2</code>、<code>SecurityLevel</code>、<code>remote_provisioning</code>。</li><li>本仓关键路径：<code>system/security/keystore2/src/</code>、<code>hardware/interfaces/security/keymint/aidl/</code>、<code>system/vold/</code>。</li><li>承接篇：<code>AND-P9-202</code>；后继见 P11 的 FBE 策略篇。</li></ul>
+</article>
+<footer>android-100 · AND-P9-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

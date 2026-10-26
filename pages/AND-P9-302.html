@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APEX 与模块化签名：mainline 的信任模型</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>APEX 与模块化签名：mainline 的信任模型</h1>
+<div class="kv"><span>ID：AND-P9-302</span><span>卷：P9</span><span>章：9.3</span><span>难度：3</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/apex/apexd/apexd.cpp ；system/apex/apexd/apex_file.cpp ；system/apex/apexd/apex_constants.h ；system/apex/apexd/aidl/android/apex/IApexService.aidl ；system/apex/apexer ；packages/modules/adb/apex/apex_manifest.json</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>APEX 不是普通文件，它的信任根挂在 vbmeta 上，不挂在 APK 签名块上。apexd 处理一个 APEX 时是<strong>读</strong>与<strong>验</strong>两条并行的线：<code>ApexFile::Open</code>（<code>apex_file.cpp:80</code>）一打开就把 <code>apex_manifest.pb</code> 提取并解析出来（:130 找条目、:158 解析），顺带取出内嵌公钥；校验则是另一条链——<code>GetAvbFooter</code>（:197）→ <code>VerifyVbMeta</code>（:263，内部调 <code>VerifyVbMetaSignature</code>:234，并在 :288 与传入公钥比对）→ <code>VerifyApexVerity</code>（:344），它是<strong>激活的前置门</strong>，不是「读 manifest 的前置门」。所以「文件在我手上就能被信任」不成立：能被信任的前提是验签这条链走得通，且包内公钥与预置副本一致。发布 APEX 就是发布一个可被系统独立验签的模块单元。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P9-301</code>。APK 签名块与 APEX 的 vbmeta 是两条独立通道，先看 301 才知道本篇不重复什么。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>system/apex/apexd/apexd.cpp</code></li><li><code>system/apex/apexd/apex_file.cpp</code></li><li><code>system/apex/apexd/apex_constants.h</code></li><li><code>system/apex/apexd/aidl/android/apex/IApexService.aidl</code></li><li><code>system/apex/apexer</code></li><li><code>packages/modules/adb/apex/apex_manifest.json</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>、<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>有人在设备上 <code>adb push</code> 了一个 APEX 到 <code>/data/apex/active</code>，重启后 apexd 拒绝激活，日志里是一串 AVB 相关的失败。他第一反应是「我没改文件，为什么不可信」。第二反应是「APK 签名能过，为什么这里不行」。这两问指向同一个结构：APEX 的可信性不来自文件自身携带的签名，而来自它与 vbmeta 的绑定关系，以及内嵌公钥能否打通这条绑定。本篇把这条链拆开。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>五个概念：APEX 文件、AVB footer、vbmeta、<code>apex_pubkey</code>、<code>apex_manifest.pb</code>。</p>
+<ul><li>APEX 文件：一个打包单元，尾部挂 AVB footer 指向 vbmeta。</li><li>vbmeta：携带 hashtree 描述符与签名，是校验的数据源兼签名载体。</li><li><code>apex_pubkey</code>：APEX 内嵌的公钥文件，用来验 vbmeta 的签名。</li><li><code>apex_manifest.pb</code>：protobuf 形式的模块清单，<code>ApexFile::Open</code> 一打开就连同内嵌公钥一起读出解析，早于验签。</li></ul>
+<p>关系要分两条线看：<strong>读取线</strong>是 Open 一发生就解析 manifest（并取出内嵌公钥）；<strong>校验线</strong>是 footer 定位 vbmeta → 验 vbmeta 签名并与公钥比对 → 用 vbmeta 描述符验整包数据。两条线在「激活」这一步汇合——校验不过就不激活，但 manifest 早就被读出来了。</p>
+<p>图 1：APEX 校验的信任链与读取顺序</p>
+<pre><code>APEX file
+  |-- AVB footer        -&gt; vbmeta 偏移
+  |-- vbmeta            -&gt; hashtree 描述符 + 签名
+  |-- apex_pubkey       -&gt; 验 vbmeta 签名
+  `-- apex_manifest.pb  -&gt; Open 即读，与验签并行</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>apexd 的入口在 <code>system/apex/apexd/apexd.cpp</code>，全文件 3848 行；单文件校验逻辑收在 <code>system/apex/apexd/apex_file.cpp</code>，共 465 行。校验函数不是一锅炖，而是分层递进的四步：<code>GetAvbFooter</code>、<code>VerifyVbMetaSignature</code>、<code>VerifyVbMeta</code>、<code>VerifyApexVerity</code>。上层 <code>VerifyApexVerity</code> 依次调用下层，形成一条链：先取 footer（:358 调 <code>GetAvbFooter</code>），再验 vbmeta（:364 调 <code>VerifyVbMeta</code>，其内部 :283 调 <code>VerifyVbMetaSignature</code>），最后进入 verity 数据组装。函数级归属要分清：<code>VerifyVbMetaSignature</code>（:234）的签名是 <code>(apex, data, length)</code>，<strong>不接收公钥入参</strong>；与公钥的比对由 <code>VerifyVbMeta</code> 在 :288 用 <code>CompareKeys</code> 完成（不符即在 :290 报 <code>public key doesn't match the pre-installed one</code>）。这意味着「验签」和「验数据」是两个动作，签不过就不进入数据校验。</p>
+<p>同族常量集中成一表：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>kBundledPublicKeyFilename</code></td><td>值为 <code>&quot;apex_pubkey&quot;</code>，APEX 内嵌公钥文件名</td><td><code>system/apex/apexd/apex_file.cpp:53</code></td></tr><tr><td><code>kManifestFilenamePb</code></td><td>值为 <code>&quot;apex_manifest.pb&quot;</code>，模块清单文件名</td><td><code>system/apex/apexd/apex_constants.h:76</code></td></tr><tr><td><code>kManifestFilenamePb</code> 使用点</td><td><code>apex_file.cpp</code> 内引用清单常量的位置</td><td><code>system/apex/apexd/apex_file.cpp:130</code></td></tr></tbody></table>
+<p>清单的解析时机值得单独说，而且和直觉相反：<code>ApexFile::Open</code>（<code>apex_file.cpp:80</code>）里 :130 先 <code>FindEntry</code> 找到 <code>kManifestFilenamePb</code>、:139-145 把它读到内存、:158 <code>ParseManifest</code> 解析——全程<strong>没有任何 verity 前置条件</strong>，紧随其后的 :146-156 取出内嵌公钥。验签与验数据是后面另一条链（<code>GetAvbFooter</code>:197 → <code>VerifyVbMeta</code>:263 → <code>VerifyApexVerity</code>:344）的事。代码里 manifest 被消费得比验签还早：<code>apexd.cpp:283</code> 刚 <code>Open</code> 完，:287 就用 <code>GetManifest().name()</code> 做删除决策。</p>
+<p>那「改 manifest 骗过系统」靠什么挡？靠两处比对，都不是「不读 manifest」：其一，manifest 是包内数据的一部分，改了它 verity 的整包摘要就对不上；其二，挂载之后还有一道 <code>VerifyMountedImage</code>（<code>apexd.cpp:328</code>）——:333 读挂载镜像内的 <code>apex_manifest.pb</code>，:337 用 <code>MessageDifferencer::Equals</code> 与包内 manifest 比对，不一致就在 :339 报 <code>Manifest inside filesystem does not match manifest outside it</code>（调用点 <code>apexd.cpp:599</code>）。所以防篡改落在「验整包数据」与「挂载后再比一次」，而不是读取顺序。</p>
+<p>对外接口由 AIDL 定义，<code>system/apex/apexd/aidl/android/apex/IApexService.aidl</code> 共 108 行。它是客户端（如 installd、系统组件）与 apexd 之间的契约面：谁能请求提交、激活、回滚，都从这 108 行的方法签名进入，而不是从文件系统直接操作。</p>
+<p>信任的根在 vbmeta。APEX 镜像尾挂 AVB footer，签名验证由 vbmeta 的公钥完成。这与 APK 的签名块机制是两套独立通道——本篇不断言两者实现共享。因此 APEX 的信任模型可以概括为：文件不自证，绑定才自证。</p>
+<p>rollback 保护在 TEE 侧由 Trusty 的 AVB 应用（<code>trusty/user/app/avb</code>）承担，本篇只按接口口径提及其存在，不展开内部实现。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>取本树里最普通的模块：<code>packages/modules/adb/apex/apex_manifest.json</code>。这是构建期的源清单；按本卷分工，构建期 json→pb 的转换与打包产出归 <code>AND-P5-101</code>／P11，本篇只把它当作「包内 manifest 的来源」提及，不把它当本篇可核验事实。</p>
+<p>走一遍：设备侧拿到 APEX 文件 → <code>ApexFile::Open</code> 先解析出 <code>apex_manifest.pb</code> 与内嵌 <code>apex_pubkey</code>（:130/:158、:146-156）→ 校验链 <code>GetAvbFooter</code>(:197) 取 footer → <code>VerifyVbMeta</code>(:263) 读 vbmeta、<code>VerifyVbMetaSignature</code>(:234) 验签名、<strong>并在 :288 `CompareKeys` 与传入的公钥比对</strong> → <code>VerifyApexVerity</code>(:344) 按 hashtree 描述符验整包数据 → 激活路径上还有 <code>VerifyPackageBoot</code>（<code>apexd.cpp:834</code>）：:841 先 <code>CheckBundledPublicKeyMatchesPreinstalled</code>（定义 :1142，:1147-1152 与预置副本比对），:843 才调 <code>VerifyApexVerity</code> → 挂载后再由 <code>VerifyMountedImage</code>（:328/:337）比对一次 manifest。</p>
+<p>任何一步不通过，激活请求就被拒。这解释了第 3 节那个现象：文件没被改也可能失败——公钥与预置副本不一致（:1147-1152），或 footer/vbmeta 与公钥不配对（:288），第一步就过不了。注意失败在这里的表现是「不激活」，而不是「没读 manifest」：manifest 早就被读出来并参与过若干决策了。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>与 <code>AND-P9-301</code>：APK 签名块机制归 301；本篇只讲 vbmeta 与 <code>apex_pubkey</code>，不重复签名块结构。</li><li>与 P5-101、P11：APEX 的构建与打包产出、镜像分区布局归它们。本篇对 <code>system/apex/apexer/</code> 只在路径层索引，不讲打包命令细节。</li><li>与 P9 卷内权限/Keystore 2 篇：密钥存放位置与 TEE 口径是另一条线；本篇只说明 Trusty AVB 应用作为 rollback 保护执行体的存在。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>apexd 主体</td><td><code>system/apex/apexd/apexd.cpp</code></td><td>3848 行主流程</td><td>激活、提交、回滚的总入口</td></tr><tr><td>APEX 校验</td><td><code>system/apex/apexd/apex_file.cpp</code></td><td><code>GetAvbFooter</code>、<code>VerifyVbMetaSignature</code>、<code>VerifyVbMeta</code>、<code>VerifyApexVerity</code></td><td>465 行，本篇全部校验细节在此</td></tr><tr><td>常量</td><td><code>system/apex/apexd/apex_constants.h</code></td><td><code>kManifestFilenamePb</code></td><td>清单文件名字符串唯一定义处</td></tr><tr><td>AIDL 契约</td><td><code>system/apex/apexd/aidl/android/apex/IApexService.aidl</code></td><td>108 行接口方法</td><td>客户端与 apexd 的边界</td></tr><tr><td>构建目录</td><td><code>system/apex/apexer</code></td><td>打包工具目录</td><td>只在路径层索引</td></tr><tr><td>源清单样例</td><td><code>packages/modules/adb/apex/apex_manifest.json</code></td><td>adb 模块清单</td><td>构建期源，运行时变 <code>.pb</code></td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/apex:ce2bb9f71018</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l system/apex/apexd/apexd.cpp system/apex/apexd/apex_file.cpp \
+      system/apex/apexd/aidl/android/apex/IApexService.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：3848、465、108 三行行数，对上事实 1、2、4。</p>
+<pre><code class="lang-bash">grep -n &quot;GetAvbFooter\|VerifyVbMetaSignature\|VerifyVbMeta\|VerifyApexVerity&quot; \
+  system/apex/apexd/apex_file.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：四个符号各至少一处，行号对齐 :197、:234、:263、:344（事实 2）。</p>
+<pre><code class="lang-bash">sed -n '344,368p' system/apex/apexd/apex_file.cpp</code></pre>
+<p>期望输出：<code>VerifyApexVerity</code> 体内 :358 调 <code>GetAvbFooter</code>、:364 调 <code>VerifyVbMeta</code>，对上事实 5。</p>
+<pre><code class="lang-bash">grep -n &quot;kBundledPublicKeyFilename\|apex_pubkey&quot; system/apex/apexd/apex_file.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>:53</code> 的定义行，值为 <code>&quot;apex_pubkey&quot;</code>，对上事实 2。</p>
+<pre><code class="lang-bash">grep -n &quot;kManifestFilenamePb&quot; system/apex/apexd/apex_constants.h \
+  system/apex/apexd/apex_file.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>apex_constants.h:76</code> 定义，<code>apex_file.cpp:130</code> 使用点，对上事实 2、3。</p>
+<pre><code class="lang-bash">find packages/modules system -name apex_manifest.json -not -path &quot;*test*&quot; | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：77，对上事实 6（写成 85 的那轮是把测试数据也算进去了）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：APEX 用的是 APK 签名机制。</strong> 不是。APEX 的信任来自 vbmeta，签名验证由公钥完成，与 APK 签名块是两套独立通道。两者有无实现共享，本篇不断言。</p>
+<p><strong>误区二：把 APEX 文件拷进 `/data/apex/active` 就能生效。</strong> 看起来对，其实是错的。文件能不能生效取决于验签是否通过，与它放在哪个目录无关；目录只是 apexd 的扫描输入来源之一。</p>
+<p><strong>误区三：`apex_pubkey` 是信任根。</strong> 不是。它是被用来验 vbmeta 签名的那把公钥，本身要过两道比对：一是与<strong>系统预置副本</strong>一致（<code>apexd.cpp:1142</code> <code>CheckBundledPublicKeyMatchesPreinstalled</code>，:1147-1152 逐字节比，不符即 <code>public key doesn't match the pre-installed one</code>），二是在 <code>VerifyVbMeta</code> 内与「签署 vbmeta 的那把公钥」比对（<code>apex_file.cpp:288</code> <code>CompareKeys</code>）。两处任一不符即失败——所以它不是自证的信任根，而是被比对的对象。</p>
+<p><strong>误区四：manifest 解析和校验有先后、靠顺序挡住篡改。</strong> 不准确。manifest 在 <code>ApexFile::Open</code> 里就被解析了（:130/:158），比验签还早，apexd 也在验签前就用过它（<code>apexd.cpp:283</code>/:287）。真正挡住「改 manifest」的是另外两处：改了包内数据则 verity 摘要不符；挂载后 <code>VerifyMountedImage</code>（:328/:337/:339）再比对一次包内与镜像内的 manifest。把防篡改归给「读取顺序」会让人误判哪些环节能省。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：校验失败究竟是哪一步？ <strong>答</strong>：按 <code>GetAvbFooter</code> → <code>VerifyVbMeta</code> → <code>VerifyVbMetaSignature</code> → verity 数据组装的顺序定位，先断在哪一步。 <strong>追问</strong>：断开点能区分「公钥不对」和「数据被改」吗？ <strong>答</strong>：能。签名步失败指向公钥/签名层；签名过而数据步失败指向内容层。</p>
+<p><strong>问</strong>：为什么本树有 77 个 <code>apex_manifest.json</code>？ <strong>答</strong>：<code>packages/modules</code> 与 <code>system</code> 下（不含测试数据）共 77 个，含 adb、AppSearch、ExtServices、IPsec、Permission、StatsD、ThreadNetwork、Uwb、Wifi、vndk 等模块，模块化以 APEX 为单元铺开。 <strong>追问</strong>：数量说明什么？ <strong>答</strong>：说明 APEX 是 mainline 的默认交付粒度，单个模块的验签失败只影响该模块的激活，不牵动整包。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>APEX 激活被拒</td><td><code>grep -n &quot;VerifyVbMetaSignature&quot; system/apex/apexd/apex_file.cpp</code></td><td>签名步在 <code>:234</code> 定义，确认比对路径</td><td>查包内是否有 <code>apex_pubkey</code></td></tr><tr><td>疑公钥名字写错</td><td><code>grep -n &quot;kBundledPublicKeyFilename&quot; system/apex/apexd/apex_file.cpp</code></td><td><code>:53</code> 值是否为 <code>&quot;apex_pubkey&quot;</code></td><td>与包内实际文件名比对</td></tr><tr><td>疑清单没被读到</td><td><code>grep -n &quot;kManifestFilenamePb&quot; system/apex/apexd/apex_constants.h</code></td><td><code>:76</code> 值是否为 <code>&quot;apex_manifest.pb&quot;</code></td><td>确认校验是否已通过</td></tr><tr><td>疑校验链顺序被改</td><td><code>sed -n '344,368p' system/apex/apexd/apex_file.cpp</code></td><td><code>:358</code>、<code>:364</code> 的调用次序</td><td>与事实 5 的形状比对</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：APK 签名块（<code>AND-P9-301</code>）；APEX 构建与打包产出（P5-101、P11）；镜像分区布局（P11）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P9-301</code>。</li><li><strong>本篇后继</strong>：P9 卷内 Keystore 2 与 TEE 相关篇目（密钥存放位置）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>apexd.cpp</code> 3848 行（源码事实 1，口径 android17-release）。</li><li><code>apex_file.cpp</code> 465 行（源码事实 2）。</li><li><code>IApexService.aidl</code> 108 行（源码事实 4）。</li><li>本树 <code>apex_manifest.json</code> 共 77 个（manifest 元数据，事实 6，不含测试数据）；其中 <code>packages/modules</code> 10 个、<code>system</code> 67 个。</li><li>rollback 保护执行体位于 Trusty 侧，内部行为暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td><code>apex_file.cpp</code> 465 行；校验四步链为 <code>GetAvbFooter</code>:197 → <code>VerifyVbMetaSignature</code>:234 → <code>VerifyVbMeta</code>:263 → <code>VerifyApexVerity</code>:344；公钥比对在 <code>VerifyVbMeta</code> 的 :288</td><td>本篇全部行号与符号口径</td></tr><tr><td>其他近版本</td><td>本篇不断言</td><td>行号会漂移，按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>APEX file format</code>、<code>verified boot</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>apexd</code>、<code>apex_file</code>、<code>apex_pubkey</code>。</li><li>本仓关键路径：<code>system/apex/apexd/apex_file.cpp</code>、<code>system/apex/apexd/apexd.cpp</code>、<code>system/apex/apexd/aidl/android/apex/IApexService.aidl</code>。</li><li>承接篇：<code>AND-P9-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

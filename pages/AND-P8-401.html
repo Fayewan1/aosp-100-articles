@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SystemServer 启动序列与三阶段服务编排</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>SystemServer 启动序列与三阶段服务编排</h1>
+<div class="kv"><span>ID：AND-P8-401</span><span>卷：P8</span><span>章：8.4</span><span>难度：4</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/java/com/android/server/SystemServer.java ；frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java ；frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java ；frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>system_server 进程里的服务不是「按需启动」，而是由 <code>SystemServer.run()</code> 分三阶段顺序编排：Bootstrap、Core、Other。顺序的硬约束来自服务间依赖：后段服务构造时要拿前段服务的实例，前段没起完，后段直接抛异常。每段每个服务都被 <code>TimingsTraceAndSlog</code> 打上 trace 并写入 <code>SystemServerTiming</code> 标签，开机耗时分析就靠这条 trace 加 <code>sys.system_server.start_*</code> 三个属性。三阶段之后 <code>run()</code> 仍在同一个 try 块里往下走：<code>startApexServices(t)</code>（:1050，定义在 :3685，收尾处 <code>:3709</code> 调 <code>sealStartedServices()</code> 封口服务注册面）、<code>updateWatchdogTimeout(t)</code>（:1053）、<code>CriticalEventLog.getInstance().logSystemServerStarted()</code>（:1054）。所以「三阶段」是服务编排的主干，不是 <code>run()</code> 的全部。<code>sys.boot_completed</code> 并不在 <code>SystemServer</code> 里设置，也不由编排触发：它写在 ActivityManagerService 的 <code>finishBooting()</code> 内，该方法有两道门控——<code>mBootAnimationComplete</code>（<code>:5915-5921</code>）与低层工厂测试（<code>:5984-5986</code>）。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§4.1｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P8-301</code>。要先知道 Zygote 怎么 fork 出 system_server，才理解本篇 <code>run()</code> 的起点；<code>AND-P2-401</code>（进程模型：Zygote、fork、COW 与进程优先级 adj）提供进程侧背景；要看系统服务本身的内部分工，转 <code>AND-P2-203</code>（PMS、InputManager 与其余系统服务）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>开机 log 里 services 一条条刷过去，服务多到看不过来。真出问题时，现象往往是「某个服务没起来，另一个服务抛 NPE」——比如 ActivityTaskManagerService 构造时为 null，或者某个 ServiceManager 查询拿不到实例。想看 trace 定位慢在哪，打开 <code>SystemServerTiming</code> 却发现几百个小段，不知道哪些是可砍的。这篇要回答的就是：这三阶段边界怎么划、哪个服务被谁依赖、trace 埋点在哪、开机完成到底由谁宣布。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：</p>
+<ul><li><strong>SystemServer</strong>：<code>run()</code> 是三阶段编排的唯一入口，逐段调用三个 <code>start*Services</code> 方法。</li><li><strong>SystemServiceManager</strong>：负责 <code>startService</code> 的注册与生命周期回调，服务实例被它持有，供后段查询。</li><li><strong>TimingsTraceAndSlog</strong>：在 <code>SystemServerTiming</code> 标签下逐服务打 trace，把「谁慢」变成可量化的段。</li></ul>
+<p>图 1：三阶段编排的依赖推进</p>
+<pre><code>Zygote fork (--nice-name=system_server)
+        |
+        v
+SystemServer.run()
+        |
+        +--&gt; startBootstrapServices()   基础设施、AMS/ATMS
+        |        |
+        +--&gt; startCoreServices()        &lt;-- 依赖 Bootstrap 实例
+        |        |
+        +--&gt; startOtherServices()       &lt;-- 依赖前两段
+        |
+        +--&gt; startApexServices() :1050  &lt;-- 末尾 :3709 sealStartedServices()
+        +--&gt; updateWatchdogTimeout() :1053
+        +--&gt; CriticalEventLog.logSystemServerStarted() :1054
+                 |
+                 v
+        (编排主干到此结束；与开机完成标志无直接调用边)
+
+  另一条旁路：WindowManagerService.java:4412 bootAnimationComplete()
+                 |
+                 v
+        AMS.bootAnimationComplete() :6089  -&gt;  mBootAnimationComplete = true
+                 |
+                 v
+        AMS.finishBooting() :5910  -&gt;  sys.boot_completed=1 (:5991)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>顺序不能乱的原因就是图上主干那几行箭头：后段的构造参数里有前段的实例。图下半段从 <code>bootAnimationComplete()</code> 到 <code>sys.boot_completed=1</code> 的那条旁路是另一回事——开机完成标志的时点由开机动画是否已结束决定，不由编排的收尾决定。图里 <code>startApexServices</code> 那一行容易被忽略：它在 Other 之后，负责把 APEX 里的服务拉起来，收尾的 <code>sealStartedServices()</code> 会把服务名单换成不可变集合，此后 <code>startService</code> 会撞上 <code>UnsupportedOperationException</code>。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>SystemServer.java</code> 共 3862 行，<code>run()</code> 在 852 行。<code>run()</code> 一开始建计时器，紧接着写三个启动属性。</p>
+<p>同族属性常量集中在 <code>:548-550</code>：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>SYSPROP_START_COUNT</code></td><td>值 <code>sys.system_server.start_count</code>，system_server 启动次数</td><td>SystemServer.java:548</td></tr><tr><td><code>SYSPROP_START_ELAPSED</code></td><td>值 <code>sys.system_server.start_elapsed</code>，启动时刻（开机后经过时间口径）</td><td>SystemServer.java:549</td></tr><tr><td><code>SYSPROP_START_UPTIME</code></td><td>值 <code>sys.system_server.start_uptime</code>，启动时刻（uptime 口径）</td><td>SystemServer.java:550</td></tr></tbody></table>
+<p>三个属性在 <code>run()</code> 内依次写入：<code>:868</code>、<code>:869</code>、<code>:870</code>，紧跟 <code>:859</code> 的 <code>TimingsTraceAndSlog t = new TimingsTraceAndSlog()</code>。要注意的是，<code>:868</code>–<code>:870</code> 只是把已经拿到的时刻写进系统属性——真正的时间原点更早：构造器 <code>SystemServer()</code> 在 <code>:736</code>/<code>:737</code> 用 <code>SystemClock.elapsedRealtime()</code> 与 <code>SystemClock.uptimeMillis()</code> 捕获 <code>mRuntimeStartElapsedTime</code>/<code>mRuntimeStartUptime</code>（并经 <code>Process.setStartTimes</code> 下沉到 native），<code>:868</code>–<code>:870</code> 写的就是这两个字段。所以「一次启动的时间原点」是构造器阶段，不是 <code>run()</code> 里的 <code>t.traceBegin</code>；后面所有 trace 段对齐到的是构造器捕获的那个时刻。</p>
+<p>三阶段入口与样例服务：</p>
+<table><thead><tr><th>阶段</th><th>入口</th><th>样例服务</th><th>依赖意义</th></tr></thead><tbody><tr><td>Bootstrap</td><td><code>startBootstrapServices(TimingsTraceAndSlog)</code> :1192</td><td><code>ArtModuleServiceInitializer.setArtModuleServiceManager(...)</code> :1203、<code>Watchdog.getInstance()</code> :1209、<code>Installer</code> :1245、<code>ActivityTaskManagerService atm = mSystemServiceManager.startService(...)</code> :1292、<code>mActivityManagerService = ActivityManagerService.Lifecycle.startService(...)</code> :1294</td><td>提供 Binder、看门狗、包安装、Activity 与进程管理的地基</td></tr><tr><td>Core</td><td><code>startCoreServices</code> :1467</td><td><code>SystemConfigService</code>、<code>BatteryService</code>、<code>UsageStatsService</code>、<code>WebViewUpdateService</code>、<code>RollbackManagerService</code>、<code>GpuService</code></td><td>依赖 Bootstrap 已成型的 AMS/ATMS 与 Installer</td></tr><tr><td>Other</td><td><code>startOtherServices</code> :1550</td><td><code>KeyChainSystemService</code>、<code>AccountManagerService</code>、<code>ContentService</code>、<code>DropBoxManagerService</code>、<code>TelecomLoaderService</code>、<code>RoleManagerService</code> 等</td><td>大量服务在此注册，前面任何一段缺实例都会在构造期暴露</td></tr></tbody></table>
+<p>表里只有三段，但 <code>run()</code> 的编排不止三段。<code>:1042-1061</code> 的 try 块里，<code>:1047</code>/<code>:1048</code>/<code>:1049</code> 依次调三个 <code>start*Services</code> 之后，还有 <code>:1050</code> 的 <code>startApexServices(t)</code>（定义在 <code>:3685</code>，<code>:3692</code> 打 <code>startApexServices</code> trace，<code>:3709</code> 调 <code>mSystemServiceManager.sealStartedServices()</code>）、<code>:1053</code> 的 <code>updateWatchdogTimeout(t)</code>（<code>:3714</code> 定义）与 <code>:1054</code> 的 <code>CriticalEventLog.getInstance().logSystemServerStarted()</code>。<code>sealStartedServices()</code>（<code>SystemServiceManager.java:293-294</code>）的注释写的是「Disallow starting new services after this call」，但它的实现只有两行：把 <code>mServiceClassnames</code> 置成 <code>Collections.emptySet()</code>、把 <code>mServices</code> 包成 <code>unmodifiableList</code>。源码里没有任何显式的封口检查或抛异常路径——seal 之后调 <code>startService</code> 仍会走到 <code>:270</code> 的去重与 <code>:274</code>/<code>:277</code> 的 add，最后被 JDK 的不可变集合以 <code>UnsupportedOperationException</code> 拦下。所以口径要说准：这是「注册面被换成不可变集合」，不是一个可 catch 的框架级拒绝。把「三阶段」当成 <code>run()</code> 的全部，是读这一段最常见的偏差。</p>
+<p>trace 设施在 <code>com.android.server.utils.TimingsTraceAndSlog</code>（共 108 行）：标签常量 <code>SYSTEM_SERVER_TIMING_TAG = &quot;SystemServerTiming&quot;</code> 在 <code>:32</code>，异步写 log 的 <code>newAsyncLog()</code> 在 <code>:50</code>。标签固定意味着 <code>atrace</code>/<code>perfetto</code> 上所有启动段归到同一 tag 下，按段名筛即可。</p>
+<p>入口侧的衔接在 <code>ZygoteInit.java:726-741</code>：<code>forkSystemServer</code> 的参数里带 <code>--nice-name=system_server</code> 与主类 <code>com.android.server.SystemServer</code>。system_server 进程名与主类都由此确定，本篇 <code>run()</code> 就从这里被调用。</p>
+<p>开机完成标志不在 <code>SystemServer</code> 里：<code>ActivityManagerService.java:5991</code> 的 <code>finishBooting()</code> 内写 <code>SystemProperties.set(&quot;sys.boot_completed&quot;, &quot;1&quot;)</code>，<code>:5992</code> 写 <code>dev.bootcomplete</code>。也就是说「服务都起来了」与「开机完成」是两件事，后者由 AMS 在 <code>finishBooting()</code> 里宣布。</p>
+<p>但 <code>finishBooting()</code> 不是编排的自然收尾，它被两道门控挡着。方法体在 <code>:5910</code>，进来先建 <code>TimingsTraceAndSlog</code> 并 <code>t.traceBegin(&quot;FinishBooting&quot;)</code>（<code>:5911-5913</code>），紧接着的第一段逻辑（<code>:5915-5921</code>）是 <code>synchronized (mGlobalLock) { if (!mBootAnimationComplete) { mCallFinishBooting = true; return; } }</code>——开机动画没结束，它直接返回并记账，<code>sys.boot_completed</code> 一个字节都不写。第二道门控在更靠后的 <code>:5984-5986</code>：<code>if (mFactoryTest == FactoryTest.FACTORY_TEST_LOW_LEVEL) { return; }</code>，位置在 <code>:5991</code> 写属性之前。低层工厂测试模式下 <code>sys.boot_completed</code> 恒不写入，这与开机动画无关，是另一条独立的早退。真正把 <code>mBootAnimationComplete</code> 置真的是 <code>bootAnimationComplete()</code>（<code>:6089</code>），而它的调用方在窗口侧：<code>WindowManagerService.java:4412</code> 的 <code>mActivityManager.bootAnimationComplete()</code>。但这一条也不是无条件执行的。该调用点位于 <code>performEnableScreen</code> 收尾，上游前置返回不止三处：<code>:4342-4343</code> 的 <code>mDisplayEnabled</code>、<code>:4345-4346</code> 的 <code>!mSystemBooted &amp;&amp; !mShowingBootMessages</code>、<code>:4349-4350</code> 的 <code>!mShowingBootMessages &amp;&amp; !mPolicy.canDismissBootAnimation()</code>、<code>:4356-4359</code> 等 checkpoint 就绪（<code>Flags.syncBeforeEnablingScreen()</code> 为真时），再往后才是 <code>:4362-4375</code> 等全部已有窗口绘制完毕（<code>mForceDisplayEnabled</code> 为假时）、<code>:4392-4395</code> 的 <code>!checkBootAnimationCompleteLocked()</code>、<code>:4397-4400</code> 的 <code>!SurfaceControl.bootFinished()</code>。其中 <code>:4388</code> 紧接着把 <code>service.bootanim.exit</code> 置 1。无开机动画的场景（headless、<code>service.bootanim.exit</code> 预置）或 <code>bootFinished()</code> 失败时，这条路径可能长时间不到达，此时放行落在 <code>ensureBootCompleted</code> 链上。所以准确口径是：<code>sys.boot_completed</code> 的时点由「开机动画何时结束」与上述前置条件共同决定，与 <code>startOtherServices</code> 没有固定先后关系。进程内另有几条入口，都不在 <code>SystemServer.run()</code> 里：</p>
+<ul><li><code>ensureBootCompleted()</code>（<code>:6186</code>），<code>:6197</code> 在 <code>booting</code> 为真时调 <code>finishBooting</code>。</li><li>三处 <code>mHandler</code> 错误弹窗分支（<code>:1831</code>/<code>:1835</code>/<code>:1858</code>）。</li><li><code>ActivityTaskManagerService.java:7444</code> 的工厂测试路径。</li><li><code>ActivityTaskManagerService.postFinishBooting()</code>（<code>:5980-5989</code>），<code>:5983</code> 调 <code>mAmInternal.finishBooting()</code>，调用方是 <code>ActivityTaskSupervisor.java:1564</code>，参数由 <code>booting</code> 与 <code>enableScreen</code> 两个布尔控制。</li><li><code>AMS.Lifecycle</code> 的 Binder 桥接（<code>:18258-18259</code>，<code>public void finishBooting()</code> 直接转调内层方法），这是 <code>IActivityManager</code> 暴露给跨模块的入口。<code>run()</code> 侧唯一相关的是 <code>:3394</code> 的 <code>mActivityManagerService.systemReady(...)</code>，而 <code>systemReady</code>（<code>:9676</code>）方法体只做各 controller 的 <code>onSystemReady</code>（<code>:9693-9699</code> 连续六处）、<code>killProcesses</code> 与 <code>mProcessesReady = true</code>（<code>mSystemReady = true</code> 在 <code>:9700</code>），全程不调 <code>finishBooting</code>。这条结论可以直接在 trace 里核：<code>systemReady</code> 段内没有任何 <code>FinishBooting</code> 子区间，后者只在 AMS 的 <code>finishBooting()</code>（<code>:5913</code> 的 <code>t.traceBegin(&quot;FinishBooting&quot;)</code>）里出现。</li></ul>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>按顺序走一遍 <code>run()</code> 的时间线：</p>
+<ol><li>进程入口先过构造器 <code>SystemServer()</code>：<code>:736</code>/<code>:737</code> 在这里用 <code>SystemClock.elapsedRealtime()</code> 与 <code>uptimeMillis()</code> 捕获 <code>mRuntimeStartElapsedTime</code>/<code>mRuntimeStartUptime</code>，并经 <code>Process.setStartTimes</code> 下沉——这是一次启动真正的时间原点。</li><li><code>:859</code> 建 <code>TimingsTraceAndSlog t</code>，此后每段服务调用都记在 <code>SystemServerTiming</code> 下。</li><li><code>:868</code>–<code>:870</code> 把构造器已捕获的两个时刻与启动计数写进 <code>sys.system_server.start_count</code>、<code>start_elapsed</code>、<code>start_uptime</code>。想算「system_server 从启动到某服务可用」的耗时，用 <code>start_elapsed</code> 与该服务 <code>SystemServerTiming</code> trace 段的起点作差；若手上的时刻来自另一个时钟源，就换 <code>start_uptime</code>。<code>start_count</code> 只记启动次数，不参与作差。</li><li>进 Bootstrap <code>:1192</code>：<code>:1203</code> 先给 ART 模块服务装 manager，<code>:1209</code> 取 <code>Watchdog.getInstance()</code>，<code>:1245</code> 建 <code>Installer</code>，<code>:1292</code> 起 ActivityTaskManagerService，<code>:1294</code> 起 ActivityManagerService 的 <code>Lifecycle</code>。</li><li>进 Core <code>:1467</code>：<code>SystemConfigService</code>、<code>BatteryService</code>、<code>UsageStatsService</code>、<code>WebViewUpdateService</code>、<code>RollbackManagerService</code>、<code>GpuService</code>。</li><li>进 Other <code>:1550</code>：<code>KeyChainSystemService</code>、<code>AccountManagerService</code>、<code>ContentService</code>、<code>DropBoxManagerService</code>、<code>TelecomLoaderService</code>、<code>RoleManagerService</code> 等。注意 <code>AccountManager</code> 必须在 <code>ContentService</code> 之前（<code>:1651</code> 的注释明示了这条依赖），段内平铺的列表不等于无序。</li><li><code>startOtherServices</code> 返回后，<code>run()</code> 在同一 try 块内还依次调 <code>startApexServices(t)</code>（:1050，定义在 :3685，收尾 <code>:3709</code> 调 <code>sealStartedServices()</code> 封口注册面）、<code>updateWatchdogTimeout(t)</code>（:1053）与 <code>CriticalEventLog.getInstance().logSystemServerStarted()</code>（:1054）。编排主干到此结束。<code>sys.boot_completed=1</code> 不在这一步写：AMS 的 <code>finishBooting()</code>（<code>ActivityManagerService.java:5910</code>）被 <code>:5915-5921</code> 的 <code>mBootAnimationComplete</code> 门控，动画没结束就直接返回；属性写入 <code>:5991</code>/<code>:5992</code> 要等 <code>WindowManagerService.java:4412</code> 触发 <code>bootAnimationComplete()</code>（<code>:6089</code>）之后才发生。</li></ol>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P8-301</code> 讲 Zygote fork 出 system_server，止于 <code>run()</code> 被调用；本篇从 <code>run()</code> 接管。分界线就是 <code>ZygoteInit.java:726-741</code> 那组 fork 参数。</li><li><code>AND-P2-201</code>/<code>AND-P2-202</code>/<code>AND-P2-203</code> 讲各系统服务内部机制，本篇只讲谁先谁后、依赖怎么形成的，不拆服务内部。</li><li><code>AND-P8-402</code>（开机性能：时间戳埋点、各阶段耗时与指标采集）讲整条开机链路的量化口径，本篇只在 §4.2 指出 <code>sys.boot_completed</code> 的写入点与门控链，耗时怎么量归 402。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>三阶段编排入口</td><td><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td><code>run()</code>、<code>startBootstrapServices</code>、<code>startCoreServices</code>、<code>startOtherServices</code>、<code>startApexServices</code></td><td>全篇主线，3862 行；三段之后另有 <code>:1050</code> 的 <code>startApexServices</code> 与两项收尾</td></tr><tr><td>计时与 trace</td><td><code>frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code></td><td><code>SYSTEM_SERVER_TIMING_TAG</code>、<code>newAsyncLog()</code></td><td>108 行，所有启动段的标签来源</td></tr><tr><td>进程入口衔接</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>forkSystemServer</code>、<code>--nice-name=system_server</code></td><td>解释 system_server 主类与进程名从哪来</td></tr><tr><td>开机完成标志</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td><code>finishBooting()</code>、<code>sys.boot_completed</code>、<code>dev.bootcomplete</code>、<code>bootAnimationComplete()</code>、<code>mBootAnimationComplete</code></td><td>门控在 <code>:5915-5921</code>，触发方在窗口侧</td></tr><tr><td>开机动画回调</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td><code>mActivityManager.bootAnimationComplete()</code></td><td><code>:4412</code>，<code>mBootAnimationComplete</code> 的置真上游之一；该行在 <code>performEnableScreen</code> 尾部，而 <code>performEnableScreen</code> 在 WMS 内有 5 个触发点（:4295/:4326/:4463/:6273/:6370），不是单入口；其内部另有 7 处前置返回（:4342/:4345/:4349/:4356/:4362/:4392/:4397）</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析，在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望输出 <code>94b4c163b7df</code> 对应的完整提交号，与锚点一致。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/services/java/com/android/server/SystemServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 3862，对上 §4.2 的文件总行数。</p>
+<pre><code class="lang-bash">grep -n &quot;SYSPROP_START_COUNT\|SYSPROP_START_ELAPSED\|SYSPROP_START_UPTIME&quot; \
+  frameworks/base/services/java/com/android/server/SystemServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望共 7 处命中：<code>:548-550</code> 三个常量定义、<code>:735</code> 在构造器里读 <code>SYSPROP_START_COUNT</code> 并加 1（<code>mStartCount = SystemProperties.getInt(SYSPROP_START_COUNT, 0) + 1</code>）、<code>:868-870</code> 三处写入。对上行段口径时注意 <code>:735</code> 这一处容易被漏掉。</p>
+<pre><code class="lang-bash">grep -n &quot;private void startBootstrapServices\|private void startCoreServices\|private void startOtherServices&quot; \
+  frameworks/base/services/java/com/android/server/SystemServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望三阶段入口分别在 <code>:1192</code>、<code>:1467</code>、<code>:1550</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;SYSTEM_SERVER_TIMING_TAG\|newAsyncLog&quot; \
+  frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望标签常量在 <code>:32</code>，<code>newAsyncLog()</code> 在 <code>:50</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;nice-name=system_server\|com.android.server.SystemServer&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:726-741</code> 区间的 fork 参数。</p>
+<pre><code class="lang-bash">grep -n &quot;sys.boot_completed\|dev.bootcomplete\|bootAnimationComplete\|mBootAnimationComplete\|mCallFinishBooting&quot; \
+  frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:5991</code>、<code>:5992</code>（<code>finishBooting()</code> 内的属性写入），另可看到 <code>:5915-5921</code> 的门控块、<code>:6089</code> 的 <code>bootAnimationComplete()</code> 定义与 <code>:6094</code>/<code>:6095</code> 的读写点。</p>
+<pre><code class="lang-bash">grep -n &quot;bootAnimationComplete&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:4412</code>，即 <code>mActivityManager.bootAnimationComplete()</code> 调用点——这是 <code>mBootAnimationComplete</code> 被置真的上游。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li><strong>误区：服务顺序可以随意调，只要都在 `run()` 里起。</strong> 纠正：Core 与 Other 的服务构造参数里有 Bootstrap 阶段的实例（如 AMS/ATMS），提前或挪后会在构造期直接拿到 null 或抛异常，顺序是依赖驱动的，不是风格问题。</li><li><strong>误区：`sys.boot_completed` 是 `SystemServer` 在编排末尾设的。</strong> 纠正：它在 <code>ActivityManagerService.java:5991</code> 的 <code>finishBooting()</code> 内设置，<code>SystemServer</code> 只负责把服务按序拉起。更要紧的是它不由编排触发：<code>finishBooting()</code> 有两道早退，第一道是 <code>:5915-5921</code> 的 <code>mBootAnimationComplete</code>（放行者是 <code>WindowManagerService.java:4412</code> 的 <code>bootAnimationComplete()</code>），第二道是 <code>:5984-5986</code> 的 <code>mFactoryTest == FACTORY_TEST_LOW_LEVEL</code>。低层工厂测试设备上属性永远不置 1，与动画无关。</li><li><strong>误区：三阶段各跑一个线程，所以能看到交错。</strong> 纠正：三阶段都是 <code>run()</code> 内的同步调用（<code>:1192</code>、<code>:1467</code>、<code>:1550</code>），顺序推进；并发出现在各服务自身的内部线程里，不改变编排顺序。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么计时器和三个启动属性要放在 <code>run()</code> 最前面？ <strong>答</strong>：时刻本身在构造器 <code>SystemServer()</code> 的 <code>:736</code>/<code>:737</code> 就已捕获（<code>mRuntimeStartElapsedTime</code>/<code>mRuntimeStartUptime</code>），<code>run()</code> 前段把这两个字段写进系统属性只是落盘动作；放在 <code>run()</code> 最前面是为了让后续 trace 段与耗时统计都能对齐到同一时刻，晚写就会漏掉前段开销的记录口径（不是漏掉时刻本身）。<strong>追问</strong>：三个属性口径有什么区别？<strong>答</strong>：<code>start_count</code> 是启动次数，<code>start_elapsed</code> 与 <code>start_uptime</code> 是两个不同时钟口径的启动时刻，取哪个取决于你比较的对象是什么时钟。</p>
+<p><strong>问</strong>：<code>SystemServerTiming</code> 这个标签下几百个段，怎么下手？ <strong>答</strong>：先按段名前缀归到三个阶段，再看每段时长；编排级问题通常出现在段与段之间的空档，也就是某服务构造期阻塞。<strong>追问</strong>：段名和 <code>start*Services</code> 的边界一定一一对应吗？<strong>答</strong>：不一定，段是按服务调用粒度铺的，一个 <code>start*Services</code> 方法里有很多段；对应关系要看 trace 层级而非段名。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑某版本文件行数变了</td><td><code>wc -l frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td>是否仍为 3862</td><td>变了就按符号 grep 重锚，不按行号引用</td></tr><tr><td>某服务疑似被挪段</td><td><code>grep -n &quot;startBootstrapServices|startCoreServices|startOtherServices&quot; frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td>三阶段入口行号</td><td>对照目标服务所在行区间，判断归属段</td></tr><tr><td>trace 里没有启动段</td><td><code>grep -n &quot;SYSTEM_SERVER_TIMING_TAG&quot; frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code></td><td>标签常量是否被改名</td><td>改名则更新抓 trace 的过滤条件</td></tr><tr><td>开机完成属性迟迟为 0</td><td><code>grep -n &quot;sys.boot_completed|mFactoryTest&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td>命中行是否在 <code>finishBooting()</code> 内</td><td>两道门控依次排查：先看 <code>:5915-5921</code> 的 <code>mBootAnimationComplete</code>，再看 <code>:5984-5986</code> 是否处于低层工厂测试；然后查 <code>WindowManagerService.java:4412</code> 的 <code>bootAnimationComplete()</code> 是否到位，再到 402 追广播侧</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：各系统服务内部实现（<code>AND-P2-201</code>/<code>AND-P2-202</code>/<code>AND-P2-203</code>）；开机耗时与时间戳口径的完整语义（<code>AND-P8-402</code>）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P8-301</code>、<code>AND-P2-401</code>。</li><li><strong>本篇后继</strong>：<code>AND-P8-402</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>SystemServer.java</code> 3862 行，<code>TimingsTraceAndSlog.java</code> 108 行（源码实测，口径为 2026-10-19 于 <code>android17-release</code>）。</li><li>三阶段入口行号 <code>:1192</code>/<code>:1467</code>/<code>:1550</code>；三段之后的 <code>startApexServices</code> 在 <code>:1050</code> 调用、<code>:3685</code> 定义、<code>:3709</code> 封口，<code>updateWatchdogTimeout</code> 在 <code>:1053</code> 调用、<code>:3714</code> 定义；三属性定义与写入行段 <code>:548-550</code>/<code>:735</code>/<code>:868-870</code>（源码实测同口径）。</li><li>服务总数与各段服务条数：本篇不断言，暂无实测，列为待补。</li><li>各段耗时占比：无 trace 实测数据，本篇不断言。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code></td><td>三阶段编排方法签名 <code>startBootstrapServices(TimingsTraceAndSlog)</code>、<code>startCoreServices</code>、<code>startOtherServices</code>；入口行号 <code>:1192</code>/<code>:1467</code>/<code>:1550</code>；<code>run()</code> :852</td><td>本篇全部行号与符号以本树为准</td></tr><tr><td>更早版本</td><td>清单未提供版本史，本篇不断言</td><td>引用行号前须按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>boot flow</code>、<code>system server</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>SystemServer</code>、<code>startBootstrapServices</code>、<code>TimingsTraceAndSlog</code>。</li><li>本仓关键路径：<code>frameworks/base/services/java/com/android/server/SystemServer.java</code>、<code>frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code>。</li><li>承接篇：<code>AND-P8-301</code>、<code>AND-P8-402</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P8-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

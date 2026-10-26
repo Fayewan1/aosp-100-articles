@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>开机性能：时间戳埋点、各阶段耗时与指标采集</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>开机性能：时间戳埋点、各阶段耗时与指标采集</h1>
+<div class="kv"><span>ID：AND-P8-402</span><span>卷：P8</span><span>章：8.4</span><span>难度：4</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/am/EventLogTags.logtags ；system/logging/logcat/event.logtags ；frameworks/base/services/core/java/com/android/server/EventLogTags.logtags ；frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java ；frameworks/base/services/java/com/android/server/SystemServer.java ；frameworks/base/core/java/android/util/TimingsTraceLog.java ；frameworks/base/core/java/android/app/WaitResult.java ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerShellCommand.java ；system/core/init/init.cpp ；system/core/init/builtins.cpp ；system/core/init/first_stage_init.cpp ；system/core/init/service.cpp ；system/core/init/action_manager.cpp ；system/core/bootstat/boot_event_record_store.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>开机耗时不是一个数字，而是一串被分散埋在三个进程域里的时间戳：init 侧属性、Zygote 侧 logtag 与 trace、SystemServer 侧 trace 与 logtag。要把「慢在哪一段」问清楚，第一步不是优化，而是确认这几处埋点各自的写法与采集口径。</p>
+<p>init 阶段留下 <code>ro.boottime.init</code> 系列属性：<code>RecordStageBoottimes</code> 内最多四个（一个时刻＋三个时长），函数外另有 <code>cold_boot_wait</code>，<code>mount_all</code> 内建还会写三个 <code>mount_all.*</code> 时长——粒度都到阶段级；Zygote 的 preload 区间靠 <code>LOG_BOOT_PROGRESS_PRELOAD_START</code>/<code>END</code> 与 <code>Zygote64Timing</code> trace tag 双通道记录；SystemServer 的区间由 <code>TimingsTraceAndSlog</code> 统一承担，tag 固定为 <code>SystemServerTiming</code>。</p>
+<p>跨进程的对齐基准来自 <code>boot_progress_*</code> 事件族，ID 分布在 3000–3100 区间：3000 的 <code>boot_progress_start</code> 由主 zygote 自身启动时写（<code>AndroidRuntime.cpp:1252-1253</code>，位置在 <code>AndroidRuntime::start</code> 入口的 options 循环内，早于 <code>startVm</code> 完成与 <code>forkSystemServer</code>），3011 的 <code>system_server_start</code> 与三个 <code>sys.system_server.start_*</code> 属性同源、属双通道，最后以 <code>sys.boot_completed</code> 与 <code>dev.bootcomplete</code> 收尾。单应用首帧则用 <code>am start -W</code> 读 <code>WaitResult</code>，不在开机时间线内。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P8-401</code>。它给出 bootloader 到 init 的启动主链，本篇的埋点是挂在这条链上的刻度，链不清则刻度无处落。</p>
+<p><strong>涉及源码</strong>（相对 AOSP 根，行号见 §6）：</p>
+<ul><li><code>system/core/init/init.cpp</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code></li><li><code>frameworks/base/core/java/android/util/TimingsTraceLog.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/EventLogTags.logtags</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/EventLogTags.logtags</code></li><li><code>system/logging/logcat/event.logtags</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerShellCommand.java</code></li><li><code>system/core/bootstat/boot_event_record_store.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>有人报「开机慢了两秒」，你打开日志，看到 <code>boot_progress_enable_screen</code> 比基线晚了 2 秒，但 <code>boot_progress_system_run</code> 只晚了 0.1 秒。剩下 1.9 秒落在哪个区间？如果不知道 SystemServer 侧每个 phase 由 <code>TimingsTraceAndSlog</code> 自动打点，就只能靠猜。</p>
+<p>另一类困惑是口径问题：同一台机器，<code>logcat -b events</code> 算出的一段耗时与 <code>dumpsys</code> 或 trace 里读出的对不上。原因常是两个埋点覆盖的区间本就不同——比如 <code>boot_progress</code> 是事件时刻，而 <code>ro.boottime.init.selinux</code> 是一段区间长度。</p>
+<p>本篇只解决这两件事：埋点在哪、口径怎么对。怎么把时间压下去，不在这里。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念构成开机时间线的坐标系。</p>
+<ul><li><strong>阶段属性</strong>：init 把某段耗时写成 <code>ro.boottime.*</code> 属性，开机后只读，粒度是阶段。</li><li><strong>进程内区间</strong>：进程内部用 trace tag 划分区间。Zygote 在非 lazy-preload 模式下用 <code>Zygote64Timing</code>/<code>Zygote32Timing</code>（带 <code>--enable-lazy-preload</code> 的 <code>zygote_secondary</code> 另起 <code>ZygoteInitTiming_lazy</code>），SystemServer 的主线程用 <code>SystemServerTiming</code>，异步操作另有 <code>SystemServerTimingAsync</code>（<code>TimingsTraceAndSlog.java:37</code> 定义，<code>:50-53</code> 由 <code>newAsyncLog()</code> 生产）。</li><li><strong>全局事件</strong>：<code>boot_progress_*</code> 事件（ID 3000–3100 段）是跨进程的共同基准，仅记录「时刻」，不记录时长。</li><li><strong>完成标志</strong>：<code>sys.boot_completed</code> 与 <code>dev.bootcomplete</code> 标记时间线终点。</li></ul>
+<p>图 1：开机时间线的四类埋点位置</p>
+<pre><code>init          阶段属性 ro.boottime.init.*
+  |
+Zygote        事件: 3000 boot_progress_start（主 zygote 自身启动时，早于 forkSystemServer）
+              trace: Zygote64Timing + 3020/3030 事件（lazy-preload 下改为 ZygoteInitTiming_lazy，3020/3030 不写）
+  |
+SystemServer  trace: SystemServerTiming（异步 phase 走 SystemServerTimingAsync）
+              + 3010/3040/3050/3060..3100 事件
+  |
+boot_completed sys.boot_completed=1 / dev.bootcomplete</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>四者的关系是：事件给「什么时候」，trace 与属性给「花了多久」。两者不能互相替代，只能互相校验。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>同类符号必须成组看，否则容易把「时刻」当成「时长」。</p>
+<p><code>boot_progress_*</code> 事件族分布在三个文件里，这一点本身就是坑：查一个标签要先确认它在哪个文件。3000/3020/3030 三个标签名声明在 platform 侧的 <code>system/logging/logcat/event.logtags</code>（:64/:66/:68），3010 及之后那一串在 <code>frameworks/base</code> 的两个 <code>.logtags</code> 里。也就是说，只想查 preload 两个点却去 grep frameworks/base，必然空命中。</p>
+<p>表 1：boot_progress 事件与 ID</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>boot_progress_system_run</code></td><td>SystemServer main 开始的时刻</td><td><code>server/EventLogTags.logtags</code>:161</td></tr><tr><td><code>boot_progress_ams_ready</code></td><td>3040</td><td><code>am/EventLogTags.logtags</code>:9</td></tr><tr><td><code>boot_progress_enable_screen</code></td><td>3050</td><td><code>am/EventLogTags.logtags</code>:11</td></tr><tr><td><code>boot_progress_pms_start</code></td><td>3060</td><td><code>server/EventLogTags.logtags</code>:168</td></tr><tr><td><code>boot_progress_pms_system_scan_start</code></td><td>3070</td><td><code>server/EventLogTags.logtags</code>:170</td></tr><tr><td><code>boot_progress_pms_data_scan_start</code></td><td>3080</td><td><code>server/EventLogTags.logtags</code>:172</td></tr><tr><td><code>boot_progress_pms_scan_end</code></td><td>3090</td><td><code>server/EventLogTags.logtags</code>:174</td></tr><tr><td><code>boot_progress_pms_ready</code></td><td>3100</td><td><code>server/EventLogTags.logtags</code>:176</td></tr><tr><td><code>system_server_start</code></td><td>3011</td><td><code>server/EventLogTags.logtags</code>:162</td></tr></tbody></table>
+<p>其中 3060–3100 五个点是 PackageManagerService 的自分段；因为包扫描是开机里最容易被怀疑的一段，它被切得最细。3011 的 <code>system_server_start</code> 容易被漏：它的参数 <code>(start_count|1),(uptime|2|3),(elapse_time|2|3)</code> 与下一节那三个 <code>sys.system_server.start_*</code> 属性用的是同一份数据，只是走事件通道——属性写点在 <code>SystemServer.java:868-870</code>，事件写点紧邻其后的 <code>:872-873</code>。两个通道必须成对记，否则会以为事件侧只有 3010 一个 SystemServer 入口。<code>frameworks/base/services/core/java/com/android/server/EventLogTags.logtags</code> 共 305 行，这一族集中在 161–176 行区间。</p>
+<p>init 侧的属性写法完全不同，而且要按量纲分开记。<code>RecordStageBoottimes</code>（<code>init.cpp</code>:904，调用点 :1166）写四个：<code>ro.boottime.init</code> 本身是第一阶段（first stage init）的起始<strong>时刻</strong>（写点 :908，<code>kEnvFirstStageStartedAt</code> 环境变量的原始值），<code>.first_stage</code>（:922-923）与 <code>.selinux</code>（:924-926）是两个<strong>纳秒</strong>时刻的差值，<code>.modules</code>（:928）取第一阶段经 <code>kEnvInitModuleDurationMs</code> 传来的<strong>毫秒</strong>值（<code>first_stage_init.cpp:465-467</code>，<code>duration_cast&lt;milliseconds&gt;</code>）。函数外还有 <code>ro.boottime.init.cold_boot_wait</code>（写点 <code>init.cpp</code>:203，由 <code>CheckAndResetWait</code> 的 detached 线程在 cold boot 完成等待结束时写入，<code>std::to_string(time_waited)</code>），记的是等待 ueventd 上报 cold boot 完成的时长。<code>mount_all</code> 内建另写三个：<code>ro.boottime.init.mount_all.{early,default,late}</code>（<code>builtins.cpp:630</code> 拼名、<code>:645</code> 写值，Timer 计时，同为毫秒）。还有两个同前缀但不同域的：<code>service.cpp:203</code> 的 <code>ro.boottime.&lt;service&gt;</code> 是每个服务首次 running 的时刻，<code>action_manager.cpp:109</code> 的 <code>ro.boottime.event.*</code> 属调试域（受 <code>enables_init_event_timestamp_</code> 门控）。</p>
+<p>表 2：init 阶段属性</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>ro.boottime.init</code></td><td>第一阶段（first stage init）起始时刻（相对内核启动的偏移，非时长）</td><td><code>init.cpp</code>:904（写点 :908）</td></tr><tr><td><code>ro.boottime.init.first_stage</code></td><td>第一阶段（first stage init）时长</td><td><code>init.cpp</code>:904（写点 :922）</td></tr><tr><td><code>ro.boottime.init.selinux</code></td><td>SELinux 策略加载时长</td><td><code>init.cpp</code>:904</td></tr><tr><td><code>ro.boottime.init.modules</code></td><td>内核模块加载时长（<strong>毫秒</strong>，第一阶段经环境变量传来）</td><td><code>init.cpp</code>:928；源头 <code>first_stage_init.cpp:465-467</code>；写点 :927-928 位于 :919-920 守卫之后</td></tr><tr><td><code>ro.boottime.init.cold_boot_wait</code></td><td>等待 cold boot 完成的时长（<strong>毫秒</strong>，detached 线程写入 <code>std::to_string(time_waited)</code>）</td><td><code>init.cpp</code>:203</td></tr><tr><td><code>ro.boottime.init.mount_all.early</code> / <code>.default</code> / <code>.late</code></td><td><code>mount_all</code> 各模式挂载耗时（<strong>毫秒</strong>）</td><td><code>builtins.cpp:630</code> 拼名、<code>:645</code> 写值</td></tr></tbody></table>
+<p>这些属性的口径要分开记：<code>ro.boottime.init</code> 是时刻（<code>setenv(kEnvFirstStageStartedAt, ...)</code> 带下来的那一下，写点 :908）；<code>.first_stage</code>（:922-923）是 <code>selinux_start_time_ns − first_stage_start_time_ns</code>，<code>.selinux</code>（:924-926）是 <code>second_stage_start − selinux_start</code>，两者都是<strong>纳秒</strong>；<code>.modules</code> 与 <code>mount_all.*</code> 是<strong>毫秒</strong>。把它们混成一类、或跨量纲相减，是「事件差值对不上属性值」最常见的根因。还有一条容易忽略的守卫：<code>init.cpp:919-920</code> 在两个环境变量任一缺失（值为 -1）时直接 return，此时 <code>.first_stage</code>/<code>.selinux</code>/<code>.modules</code> 三个属性根本不会写出，只有 :908 的时刻已落。</p>
+<p>Zygote 走双通道。<code>LOG_BOOT_PROGRESS_PRELOAD_START = 3020</code> 与 <code>LOG_BOOT_PROGRESS_PRELOAD_END = 3030</code>（<code>ZygoteInit.java</code>:100/:101），写点在 :890/:893；trace tag 为 <code>Zygote64Timing</code>/<code>Zygote32Timing</code>（:845）——这个 tag 只属于非 lazy-preload 路径，<code>zygote_secondary</code> 带 <code>--enable-lazy-preload</code> 时（<code>init.zygote64_32.rc:3</code>）换成 <code>ZygoteInitTiming_lazy</code>（:182），且 :890/:893 两个事件不写。事件告诉你 preload 区间在整条线上的位置，trace 告诉你区间内各步骤怎么分。</p>
+<p>SystemServer 侧由 <code>TimingsTraceAndSlog</code> 统一承担，但 tag 不止一个。该文件 108 行，主 tag <code>SYSTEM_SERVER_TIMING_TAG = &quot;SystemServerTiming&quot;</code> 定义在 :32，异步 tag <code>SYSTEM_SERVER_TIMING_ASYNC_TAG</code>（值即 <code>SystemServerTimingAsync</code>）定义在 :37，由 <code>newAsyncLog()</code>（<code>:50-53</code>）生产；实例在 <code>frameworks/base/services/java/com/android/server/SystemServer.java</code>:859 用 <code>new TimingsTraceAndSlog()</code> 创建，此后每个 <code>traceBegin</code>/<code>traceEnd</code> 都自动落 trace，同时把 phase 耗时汇进日志。</p>
+<p>重启计数另有一套属性：<code>sys.system_server.start_count</code>/<code>.start_elapsed</code>/<code>.start_uptime</code>（<code>frameworks/base/services/java/com/android/server/SystemServer.java</code>:548-550，写入点 :868-870）。这三个值在系统反复重启时是判断「是不是每次都重来一遍」的直接证据。同一份数据还走了事件通道：<code>EventLog.writeEvent(EventLogTags.SYSTEM_SERVER_START, mStartCount, mRuntimeStartUptime, mRuntimeStartElapsedTime)</code> 在 <code>:872-873</code>，对应 <code>logtags</code> 里的 3011 <code>system_server_start</code>——属性与事件是双通道，别只认一边。</p>
+<p>Zygote 还会把起点上报给统计：<code>FrameworkStatsLog.write(BOOT_TIME_EVENT_ELAPSED_TIME_REPORTED, BOOT_TIME_EVENT_ELAPSED_TIME__EVENT__ZYGOTE_INIT_START, startTime)</code>（<code>ZygoteInit.java</code>:872-874）。这条通道的数据不出现在 logcat，别在设备日志里找。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设基线机与问题机的 events buffer 对齐后读到：</p>
+<ul><li><code>boot_progress_system_run</code>（3010）差值 +0.1 秒</li><li><code>boot_progress_pms_ready</code>（3100）差值 +0.4 秒</li><li><code>boot_progress_enable_screen</code>（3050）差值 +2.0 秒</li></ul>
+<p>3010–3100 段与 3050–3100 段都无法解释剩下的 1.5 秒。此时切到 <code>SystemServerTiming</code> trace：按 phase 名排序取各自 <code>traceEnd - traceBegin</code>，逐项与基线比对，差值集中在哪个 phase 就很清楚。要注意别只看主 tag——<code>newAsyncLog()</code> 打的段落在 <code>SystemServerTimingAsync</code> 下，主要出现在 <code>SystemServerInitThreadPool</code>（<code>:116</code>）、<code>SensorService</code>（<code>:74</code>）、<code>UserController</code>（<code>:4723</code>）与 <code>SystemServer</code> 自身的若干并行初始化点（<code>:1595</code>/<code>:1775</code>/<code>:1782</code>）。只过滤主 tag 会把并行初始化那部分耗时整个漏掉，与 <code>AND-P8-401</code> 的三阶段编排衔接时正好落在盲区。</p>
+<p>若怀疑 preload 段，则取 <code>Zygote64Timing</code> trace 看 3020–3030 区间内部，而不是看这两个事件本身的差值——它们只界定时长，不切分内容。</p>
+<p>若怀疑 init 段，先确认属性存在（<code>init.cpp:919-920</code> 的守卫会让三个时长属性在环境变量缺失时根本不写），再读 <code>ro.boottime.init.first_stage</code>/<code>.selinux</code>/<code>.modules</code> 三个时长属性与基线相减——但必须先统一量纲：前两个是纳秒、<code>.modules</code> 是毫秒，跨量纲相减得到的数没有意义；<code>mount_all.*</code> 三个同为毫秒，可互相比。<code>ro.boottime.init</code> 本身是时刻，只能用于对齐起点，不能当时长相减。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P8-401</code> 给出启动主链与各阶段的职责划分，本篇在其上加刻度。<code>AND-P10-101</code>/<code>AND-P10-102</code> 是优化手段篇，本篇给出的埋点不涉及任何调参或裁剪建议。</p>
+<p><code>bootstat</code> 一侧（<code>system/core/bootstat/boot_event_record_store.cpp</code>，共 178 行）把开机事件落盘供 boot_reason 分析，属于事后归因通道，与实时采集并行。</p>
+<p><code>am start -W</code> 走 <code>WaitResult</code>（<code>WaitResult.java</code> 共 146 行，实例创建在 <code>ActivityManagerShellCommand.java</code>:979），度量的是单次启动，不是开机，不要混进开机时间线。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>init 阶段时长</td><td><code>system/core/init/init.cpp</code></td><td><code>RecordStageBoottimes</code></td><td>写 <code>ro.boottime.init.*</code> 及 cold_boot_wait（:203）</td></tr><tr><td>mount_all 耗时</td><td><code>system/core/init/builtins.cpp</code></td><td><code>mount_all</code> 内建</td><td>写 <code>ro.boottime.init.mount_all.{early,default,late}</code>（:630/:645）</td></tr><tr><td>模块耗时源头</td><td><code>system/core/init/first_stage_init.cpp</code></td><td><code>kEnvInitModuleDurationMs</code></td><td><code>.modules</code> 的毫秒值在这里算（:465-467）</td></tr><tr><td>service 域时刻</td><td><code>system/core/init/service.cpp</code></td><td><code>ro.boottime.&lt;service&gt;</code></td><td>每个服务首次 running 写一次（:203）</td></tr><tr><td>事件调试域</td><td><code>system/core/init/action_manager.cpp</code></td><td><code>ro.boottime.event.*</code></td><td>受 <code>enables_init_event_timestamp_</code> 门控（:109）</td></tr><tr><td>Zygote 埋点</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>LOG_BOOT_PROGRESS_PRELOAD_START</code>/<code>_END</code>、<code>Zygote64Timing</code></td><td>事件与 trace 双通道</td></tr><tr><td>SystemServer 计时</td><td><code>frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code></td><td><code>SYSTEM_SERVER_TIMING_TAG</code>（:32）、<code>SYSTEM_SERVER_TIMING_ASYNC_TAG</code>（:37）、<code>newAsyncLog()</code>（:50-53）</td><td>phase 级区间统一入口；主线程与异步各一个 tag，只取主 tag 会漏并行初始化</td></tr><tr><td>SystemServer 入口</td><td><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td><code>new TimingsTraceAndSlog</code>（:859）、<code>sys.system_server.start_*</code>（:548-550/:868-870）</td><td>计时实例与重启计数属性所在</td></tr><tr><td>计时基类</td><td><code>frameworks/base/core/java/android/util/TimingsTraceLog.java</code></td><td>trace 与日志双写</td><td><code>TimingsTraceAndSlog</code> 的父类</td></tr><tr><td>事件标签（服务）</td><td><code>frameworks/base/services/core/java/com/android/server/EventLogTags.logtags</code></td><td>3010、3060–3100</td><td>共 305 行</td></tr><tr><td>事件标签（am）</td><td><code>frameworks/base/services/core/java/com/android/server/am/EventLogTags.logtags</code></td><td>3040、3050</td><td>与上一个文件分家</td></tr><tr><td>事件标签（platform）</td><td><code>system/logging/logcat/event.logtags</code></td><td>3000、3020、3030</td><td>三个标签名声明在此，不在 frameworks/base</td></tr><tr><td>单应用启动</td><td><code>frameworks/base/core/java/android/app/WaitResult.java</code></td><td>结果结构</td><td>共 146 行</td></tr><tr><td>shell 命令</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerShellCommand.java</code></td><td><code>new WaitResult()</code></td><td><code>am start -W</code> 的实现点</td></tr><tr><td>事件落盘</td><td><code>system/core/bootstat/boot_event_record_store.cpp</code></td><td>开机事件记录</td><td>共 178 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash"># 1. 确认 am 侧两个 logtag 的编号与行号
+grep -n &quot;boot_progress_ams_ready\|boot_progress_enable_screen&quot; \
+  frameworks/base/services/core/java/com/android/server/am/EventLogTags.logtags
+# 期望：3040:9 与 3050:11 各命中一行
+
+# 2. 确认 server 侧 logtag 文件总行数
+wc -l frameworks/base/services/core/java/com/android/server/EventLogTags.logtags
+# 期望：305
+
+# 3. 列出 3060–3100 的五个 PMS 分段
+grep -n &quot;boot_progress_pms_&quot; \
+  frameworks/base/services/core/java/com/android/server/EventLogTags.logtags
+# 期望：168/170/172/174/176 五行
+
+# 4. Zygote 的 preload 常量与 trace tag
+grep -n &quot;LOG_BOOT_PROGRESS_PRELOAD_START\|LOG_BOOT_PROGRESS_PRELOAD_END&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+# 期望：:100/:101 为定义，:890/:893 为写点
+
+grep -n &quot;Zygote64Timing\|Zygote32Timing&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+# 期望：:845
+
+# 5. SystemServer 计时 tag 与实例位置
+grep -n &quot;SYSTEM_SERVER_TIMING_TAG\|SYSTEM_SERVER_TIMING_ASYNC_TAG&quot; \
+  frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java
+# 期望：:32（TAG 定义）、:37（ASYNC_TAG 拼接引用）、:59（默认构造引用）、:50-53（newAsyncLog）
+
+grep -n &quot;new TimingsTraceAndSlog&quot; frameworks/base/services/java/com/android/server/SystemServer.java
+# 期望：:859
+
+# 6. init 阶段属性写入点
+grep -n &quot;RecordStageBoottimes&quot; system/core/init/init.cpp
+# 期望：:904
+
+# 7. SystemServer 重启计数属性
+grep -n &quot;sys.system_server.start_&quot; frameworks/base/services/java/com/android/server/SystemServer.java
+# 期望：:548-550 与 :868-870 两处命中
+
+# 8. 统计上报与 WaitResult
+grep -n &quot;BOOT_TIME_EVENT_ELAPSED_TIME__EVENT__ZYGOTE_INIT_START&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+# 期望：:872-874
+
+grep -n &quot;new WaitResult&quot; \
+  frameworks/base/services/core/java/com/android/server/am/ActivityManagerShellCommand.java
+# 期望：:979</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p>**误区一：<code>ro.boottime.init*</code> 属性都是时长。** 错。<code>ro.boottime.init</code> 是时刻（第一阶段起始，相对内核启动的偏移，<code>init.cpp</code>:908），不是「首阶段总时长」；同族另外三个才是时长（:922/:924/:928）。拿它去和 <code>boot_progress_system_run</code> 做减法，得到的数没有意义——两个口径相差一个起点。</p>
+<p><strong>误区二：所有 `boot_progress` 标签都在一个文件里。</strong> 听起来合理，实际错在三个文件各占一份。3000 与 3020/3030 的标签名声明在 <code>system/logging/logcat/event.logtags</code>（:64/:66/:68），3010 与 3060–3100 在 <code>server/EventLogTags.logtags</code>，3040 与 3050 在 <code>am/EventLogTags.logtags</code>。只 grep <code>frameworks/base</code> 会漏掉 preload 那一对，只 grep 一个模块目录会漏掉一半。</p>
+<p><strong>误区三：events buffer 里的时间是绝对时刻。</strong> 它是设备开机以来的相对时刻，跨设备或跨重启比对必须先对齐起点，否则差值全来自起算点不同。还有一层更容易踩：这一族事件不是同一时钟源，共三种口径。3000 来自 native 侧 <code>LOG_EVENT_LONG(LOG_BOOT_PROGRESS_START, ns2ms(systemTime(SYSTEM_TIME_MONOTONIC)))</code>（<code>AndroidRuntime.cpp:1252-1253</code>），取的是内核 <code>CLOCK_MONOTONIC</code>；3010/3011 取 <code>SystemClock.elapsedRealtime()</code>（<code>SystemServer.java:908</code>，变量名虽叫 <code>uptimeMillis</code>），含深睡；3020/3030 取 <code>SystemClock.uptimeMillis()</code>（<code>ZygoteInit.java:890-891</code>/<code>893-894</code>），不含深睡。跨这三个点直接相减，差值里混着时钟口径差。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>Zygote64Timing</code> 和 3020/3030 事件是什么关系？ <strong>答</strong>：事件只标记 preload 起止两端的时刻，trace 把这两个时刻之间的内容切细。查区间位置用事件，查区间内部怎么分用 trace。 <strong>追问</strong>：带 <code>--enable-lazy-preload</code> 时这两个事件还在吗？ <strong>答</strong>：不在。<code>ZygoteInit.java:888</code> 的 <code>if (!enableLazyPreload)</code> 把 <code>:889-895</code> 整段包住，3020/3030 的写点就在这段里；该参数由 <code>:859</code> 置真，本树 <code>init.zygote64_32.rc:3</code> 对 <code>zygote_secondary</code> 就是带参启动（<code>init.rc:1095</code> 会 <code>start zygote_secondary</code>）。这种配置下预加载被推到首次 fork 之前，trace tag 也换成 <code>ZygoteInitTiming_lazy</code>（<code>ZygoteInit.java:182</code>），要看这一段耗时只能抓 trace，事件里没有。</p>
+<p><strong>问</strong>：<code>system_server_start</code>（3011）和那三个 <code>sys.system_server.start_*</code> 属性是什么关系？ <strong>答</strong>：同一份数据的两个通道。属性写点 <code>SystemServer.java:868-870</code>，事件写点 <code>:872-873</code>，事件参数与属性一一对应；要总量看属性，要时刻对齐看事件。</p>
+<p><strong>问</strong>：<code>sys.system_server.start_count</code> 为什么比 <code>boot_progress_system_run</code> 更适合判断反复重启？ <strong>答</strong>：事件在每次进程启动时都会打一次，但只看单条事件看不出总量；<code>start_count</code> 是累计值，<code>start_elapsed</code>/<code>start_uptime</code> 提供同一次启动的两个基准，三者一起才能判断是否每次都在重来。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>找不到某个 boot_progress 标签</td><td><code>grep -rn &quot;boot_progress_&quot; frameworks/base/services/ system/logging/logcat/</code></td><td>命中文件是 server、am 还是 platform 侧</td><td>按命中文件确认 ID；查 3000/3020/3030 时必须带上第三个目录，否则空命中</td></tr><tr><td>事件差值算出来对不上总时长</td><td><code>grep -n &quot;boot_progress_&quot; frameworks/base/services/core/java/com/android/server/EventLogTags.logtags</code></td><td>手上有哪些点、缺哪段</td><td>用 <code>SystemServerTiming</code> trace 补区间</td></tr><tr><td>怀疑包扫描慢</td><td><code>grep -n &quot;boot_progress_pms_&quot; frameworks/base/services/core/java/com/android/server/EventLogTags.logtags</code></td><td>3060/3070/3080/3090/3100 五个点</td><td>四段差值分开看，别取首尾</td></tr><tr><td>怀疑 init 慢</td><td><code>grep -n &quot;RecordStageBoottimes|cold_boot_wait|mount_all&quot; system/core/init/init.cpp system/core/init/builtins.cpp</code></td><td>写入的属性名（函数内四个＋函数外 cold_boot_wait＋mount_all 三个）</td><td>先确认属性存在（:919-920 守卫），再按纳秒/毫秒分桶相减</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：优化手段与调参，见 <code>AND-P10-101</code>、<code>AND-P10-102</code>。bootloader 到 init 的主链细节见 <code>AND-P8-401</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P8-401</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P10-101</code>、<code>AND-P10-102</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>frameworks/base/services/core/java/com/android/server/EventLogTags.logtags</code> 共 305 行（源码实测）。</li><li><code>system/logging/logcat/event.logtags</code> 里 3000/3020/3030 三个标签名分别在 :64/:66/:68（源码实测，同口径）。</li><li><code>TimingsTraceAndSlog.java</code> 共 108 行（源码实测）。</li><li><code>WaitResult.java</code> 共 146 行（源码实测）。</li><li><code>boot_event_record_store.cpp</code> 共 178 行（源码实测）。</li><li>各阶段实际毫秒数暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早的主线版本</td><td>本篇不断言其 preload 埋点 tag 的命名（本机只有 <code>android17-release</code> 一份检出，无法核验历史）</td><td>跨版本比较时以本树的 <code>Zygote64Timing</code>/<code>Zygote32Timing</code> 为基准，不要假设旧版同名</td></tr><tr><td><code>android17-release</code></td><td>本树实测：<code>Zygote64Timing</code> 在 <code>ZygoteInit.java</code>:845，<code>SystemServerTiming</code> 在 <code>TimingsTraceAndSlog.java</code>:32</td><td>本篇全部行号以此树为口径</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>boot times</code>、<code>bootloader</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>Zygote64Timing</code>、<code>SystemServerTiming</code>、<code>RecordStageBoottimes</code>。</li><li>本仓关键路径：<code>frameworks/base/services/core/java/com/android/server/utils/TimingsTraceAndSlog.java</code>、<code>frameworks/base/core/java/android/util/TimingsTraceLog.java</code>、<code>system/core/init/init.cpp</code>。</li><li>承接篇：<code>AND-P8-401</code>、<code>AND-P10-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P8-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

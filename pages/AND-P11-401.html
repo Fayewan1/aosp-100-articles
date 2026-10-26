@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>车载、IoT 与可穿戴的形态差异</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>车载、IoT 与可穿戴的形态差异</h1>
+<div class="kv"><span>ID：AND-P11-401</span><span>卷：P11</span><span>章：11.4</span><span>难度：3</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：packages/services/Car/car-lib ；packages/services/Car/cpp/evs ；hardware/interfaces/automotive/vehicle ；device/generic/car/AndroidProducts.mk ；device/google/contexthub/contexthubhal ；system/chre/pal</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>同一份 AOSP 树，车载（AAOS）、IoT、可穿戴三种形态的差异不在「核心框架」，而在三类可核落点：多出的一组 HAL 接口、多出的系统服务族、多出的一套产品配置。车载的增量最重：<code>hardware/interfaces/automotive/</code> 一整组接口、<code>packages/services/Car/</code> 一整套 Car 服务与 native 组件、<code>car_product</code>/<code>device/generic/car</code>/<code>device/google_car</code> 三层产品声明。IoT 在本树只可核到 <code>system/chre/</code> 与 <code>device/google/contexthub/</code> 这条传感器管线，Android Things 已停止发行，本树未收录其组件。可穿戴（Wear）要分两层看：顶层未检出 <code>wear</code> 目录、<code>packages/</code> 下未收录 Wear 包、<code>device/</code> 下未收录 Wear 产品配置；但框架层有可核落点——<code>frameworks/base/core/java/android/app/wearable/</code>、<code>frameworks/base/core/java/android/service/wearable/</code> 与 <code>frameworks/base/services/core/java/com/android/server/wearable/</code> 构成穿戴感知的三层。发行形态本身仍按官方文档口径描述，本篇不断言其内部结构。TV 作对比形态，特征是 Leanback 应用族与 mDNS offload 服务。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P11-201</code>——构建配置与产品继承的机制在本篇被当作既成前提引用，本篇只讲形态增量，不重讲继承规则。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>packages/services/Car/car-lib</code></li><li><code>packages/services/Car/cpp/evs</code></li><li><code>hardware/interfaces/automotive/vehicle</code></li><li><code>device/generic/car/AndroidProducts.mk</code></li><li><code>device/google/contexthub/contexthubhal</code></li><li><code>system/chre/pal</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>移植工程师常见的困惑是：拿到一份通用 AOSP 树，想让它变成一个车机镜像，改动面看起来铺满整个仓库，实际要动的却只有固定的几处。反过来，想给一块带低功耗协处理器的板子接入传感器，会发现 <code>device/</code> 下没有可抄的 IoT 产品样例，只有 <code>device/google/contexthub/</code> 这一处名字对得上。再往上问「Wear 形态到底比手机少了什么」，顶层确实 grep 不到 Wear 专属系统目录，但 <code>frameworks/base</code> 下有 <code>android.app.wearable</code>、<code>android.service.wearable</code> 与 <code>com.android.server.wearable</code> 三层，是穿戴感知在框架侧的落点。三个问题指向同一个事实：AOSP 主干提供的是机制，形态是主干之外按层次叠加的增量，增量有多厚、落在哪一层，三种形态差别极大。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三种形态共用同一套框架层（<code>frameworks/base</code>、<code>system/core</code>），差异全部发生在框架层之外的三个位置：HAL 接口集合、系统服务与应用集合、产品与设备配置。车载三层齐备，IoT 只在 HAL 与低层运行时上有增量，可穿戴只在框架层的穿戴感知一处有可核增量，没有独立的 HAL 与产品配置。</p>
+<p>图 1：形态差异的三个增量层</p>
+<pre><code>  形态          HAL 接口              服务/应用族与产品配置
+  车载(AAOS)    automotive            Car 服务族 + car_product
+  IoT           contexthub           CHRE（无产品配置样例）
+  TV            tv（cec/hdmi/input/mediaquality/tuner）  Leanback 应用族 + device/google/atv
+  Wear          -                    WearableSensing 三层（无 HAL/产品配置）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键概念四条：车载形态的「车载 HAL 契约」是 <code>hardware/interfaces/automotive/</code> 下的一整组 AIDL 接口；「Car 服务族」是 <code>packages/services/Car/</code> 下由 <code>service-builtin</code> 构建进 system 的 Car 服务实现；「上下文中心（Context Hub）」是 <code>system/chre/</code> 提供的低功耗运行时；「产品声明」是 <code>*.mk</code> 与 <code>AndroidProducts.mk</code> 组成的构建入口。四者的关系是：产品声明决定哪一组服务与 HAL 被装进镜像，HAL 契约决定上层服务能调什么，CHRE 是唯一不属于 Android 框架进程模型的运行环境。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>车载增量是三块，逐块可核。</p>
+<p><strong>第一块：HAL 接口。</strong> <code>hardware/interfaces/automotive/</code> 下多出一整组接口，名称包括 <code>vehicle</code>（VHAL 接口）、<code>evs</code>、<code>audiocontrol</code>、<code>can</code>、<code>remoteaccess</code>、<code>occupant_awareness</code>、<code>ivn_android_device</code>。这组接口与手机形态的 HAL 集合是并列追加关系，不替换任何既有接口。VHAL 是其中最关键的一条：上层 Car 服务通过它读车辆属性；<code>packages/services/Car/cpp/vhal/</code> 下是 client 侧（<code>client/</code> 的 <code>libvhalclient</code>），实现侧在 <code>device/generic/car/emulator/vhal_aidl/</code>（<code>EmulatedVehicleService.cpp</code> 与 <code>VehicleEmulator/</code>）。</p>
+<p><strong>第二块：Car 服务族。</strong> <code>packages/services/Car/</code> 顶层共 20 个目录，下表只列与形态增量直接相关的 8 项：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>car-lib</code></td><td>供应用与系统服务调用的 Car API 层，351 个 Java 文件</td><td><code>packages/services/Car/car-lib</code></td></tr><tr><td><code>car-lib-module</code></td><td><code>car-lib</code> 的模块化打包形态</td><td><code>packages/services/Car/car-lib-module</code></td></tr><tr><td><code>service</code></td><td>Car 服务实现，含 <code>src</code>/<code>jni</code>/<code>proto</code>/<code>res</code></td><td><code>packages/services/Car/service</code></td></tr><tr><td><code>service-builtin</code></td><td>构建进 system 分区的服务入口，<code>CarService.java</code> 位于 <code>service-builtin/src/com/android/car/</code></td><td><code>packages/services/Car/service-builtin</code></td></tr><tr><td><code>apex_car_framework</code></td><td>Car 框架的 APEX 打包</td><td><code>packages/services/Car/apex_car_framework</code></td></tr><tr><td><code>cpp</code></td><td>车载 native 组件族</td><td><code>packages/services/Car/cpp</code></td></tr><tr><td><code>car_product</code></td><td>产品配置声明</td><td><code>packages/services/Car/car_product</code></td></tr><tr><td><code>experimental</code></td><td>实验性组件</td><td><code>packages/services/Car/experimental</code></td></tr></tbody></table>
+<p><code>cpp/</code> 下同族 native 组件集中列出：<code>evs</code>（Extended View System，后视/环视相机）、<code>vhal</code>（VHAL 的 client 库 <code>libvhalclient</code>）、<code>computepipe</code>、<code>displayproxy</code>、<code>car_binder_lib</code>、<code>watchdog</code>、<code>telemetry</code>、<code>security</code>、<code>power</code>、<code>bugreport</code>、<code>libsysfsmonitor</code>、<code>packagemanagerproxy</code>。这十二项构成车载形态的 native 侧增量，与 Java 侧服务族互补。</p>
+<p><strong>第三块：产品与设备配置。</strong> 三层落点：<code>packages/services/Car/car_product/build/</code> 提供产品继承链，含 <code>car.mk</code>、<code>car_base.mk</code>、<code>car_system.mk</code>、<code>car_system_ext.mk</code>、<code>car_vendor.mk</code>、<code>car_generic_system.mk</code>、<code>car_product.mk</code> 以及 <code>preinstalled-packages-product-car-base.xml</code>；<code>device/generic/car/</code> 提供 8 个 <code>sdk_car*.mk</code>、3 个 <code>gsi_car_*.mk</code>、4 个 <code>emulator_car64_*</code> 目录，<code>common/</code> 另放公共片段（<code>audio_effects.xml</code>、<code>manifest.xml</code>、<code>overlay</code>、<code>rro_overlays</code>、<code>sepolicy</code>、<code>sysconfig</code> 等）；<code>device/google_car/</code> 提供 <code>cheetah_car</code>、<code>husky_car</code>、<code>panther_car</code>、<code>tangorpro_car</code> 四套设备配置。三层的关系是产品族 → 通用设备 → 具体机型，继承方向见 <code>AND-P11-201</code>。</p>
+<p>IoT 增量只有一条管线。Android Things 已停止发行，<code>device/</code> 与 <code>packages/</code> 下未检出 Things 目录，本树未收录 Things 组件。树内与 IoT 最近的可核形态是 <code>device/google/contexthub/</code>（含 <code>contexthubhal</code>、<code>sensorhal</code>、<code>firmware</code>、<code>lib</code>、<code>util</code>）与 <code>system/chre/</code>。CHRE 全称 Context Hub Runtime Environment，仓内顶层含 <code>core</code>、<code>pal</code>、<code>platform</code>、<code>apps</code>、<code>chpp</code>、<code>zephyr</code> 等目录。<code>pal</code> 是平台抽象层，负责把 CHRE 核心与具体协处理器平台隔开；<code>contexthubhal</code> 是设备侧 HAL 实现，把 CHRE 暴露给 Android 侧。两者共同构成「Android 主处理器 + 低功耗协处理器」的形态，但这不是一套完整产品配置——本树未收录配套的 IoT 产品 <code>*.mk</code> 样例。</p>
+<p>TV 作对比形态可核：<code>device/google/atv/</code> 下有 <code>TvProvision</code>、<code>TvSampleLeanbackLauncher</code>、<code>LeanbackSampleApp</code>、<code>MdnsOffloadManagerService</code>、<code>products/</code>、<code>sdk/</code>。TV 在 HAL 层同样有成组追加——<code>hardware/interfaces/tv/</code> 下有 <code>cec</code>、<code>hdmi</code>、<code>input</code>、<code>mediaquality</code>、<code>tuner</code> 五个接口目录，与 <code>automotive</code> 并列；应用与服务层的增量是 Leanback 应用族与 mDNS offload，产品配置走 <code>products/</code> 与 <code>sdk/</code>。</p>
+<p>可穿戴要分两层看：顶层无 <code>wear</code> 目录、<code>packages/</code> 下无 Wear 包、<code>device/</code> 下无 Wear 产品配置；但框架层有可核落点——<code>WearableSensingManager</code>（<code>frameworks/base/core/java/android/app/wearable/</code>）、<code>WearableSensingService</code>（<code>frameworks/base/core/java/android/service/wearable/</code>）与 <code>WearableSensingManagerService</code>（<code>frameworks/base/services/core/java/com/android/server/wearable/</code>）三层。发行形态本身仍按官方文档口径（source.android.com 站内检索 <code>wear</code>）描述为「基于 Android 的可穿戴发行形态」，本篇不对其内部结构做断言。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以车机镜像为例走一遍增量装载。构建入口是 <code>device/generic/car/AndroidProducts.mk</code>，它枚举该目录下 8 个 <code>sdk_car*.mk</code>；这些产品文件直接继承 <code>car_generic_system.mk</code> 与 <code>car_system_ext.mk</code>（以 <code>sdk_car_arm64.mk</code> 为例，分别在 :37 与 :46），同时 :51 与 :56 还继承 <code>emulator/car_emulator_product.mk</code>（转 <code>car_product.mk</code>）与 <code>emulator/car_emulator_vendor.mk</code>（转 <code>car_vendor.mk</code>），分区内容经这些文件装进镜像；<code>car_base.mk</code> 只被 <code>car.mk</code> :111 继承，不在 sdk_car 这条线上。产品侧同时带入 <code>preinstalled-packages-product-car-base.xml</code>，声明预装包清单。运行时，<code>service-builtin</code> 里的 <code>CarService.java</code> 作为系统服务启动，通过 <code>car-lib</code> 暴露 API，Car 服务经 <code>android.hardware.automotive.vehicle</code> 的 AIDL 直连 VHAL；<code>cpp/vhal/client</code> 的 <code>libvhalclient</code> 是给 <code>cpp/power</code>、<code>cpp/watchdog</code>、<code>cpp/evs/apps/default</code>、<code>cpp/security/vehicle_binding_util</code> 这些原生组件用的（<code>cpp/car_binder_lib</code> 下只有 <code>largeParcelable</code>，不是 VHAL 通道）。实现侧示例见 <code>device/generic/car/emulator/vhal_aidl/</code>。想换成具体机型，就把继承链末端换成 <code>device/google_car/</code> 下的 <code>cheetah_car</code> 一类目录。整条路径上，框架层代码一行未改——这就是形态差异的定位。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>前置 <code>AND-P11-201</code> 讲构建配置与产品继承机制，本篇只讲形态增量，不复述继承规则。<code>AND-P11-302</code> 讲具体产品与设备配置的写法，本篇只给目录落点与文件清单。传感器 HAL 的机制归 <code>AND-P4-302</code>（传感器 HAL 与 Context Hub），本篇只把 <code>contexthubhal</code> 当作形态对比的一个点，不讲 HAL 注册与调用流程。<code>AND-P11-402</code> 承接本篇的形态结论，展开构建产物与发布侧话题。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>Car API 层</td><td><code>packages/services/Car/car-lib</code></td><td>351 个 Java 文件</td><td>应用与系统服务共用的 Car API</td></tr><tr><td>车载相机 native</td><td><code>packages/services/Car/cpp/evs</code></td><td>Extended View System</td><td>后视/环视相机实现侧</td></tr><tr><td>VHAL 接口契约</td><td><code>hardware/interfaces/automotive/vehicle</code></td><td>VHAL 接口定义</td><td>上层服务与实现侧的契约边界</td></tr><tr><td>车载产品入口</td><td><code>device/generic/car/AndroidProducts.mk</code></td><td>枚举 8 个 <code>sdk_car*.mk</code></td><td>通用车载产品族的入口</td></tr><tr><td>设备侧 CHRE HAL</td><td><code>device/google/contexthub/contexthubhal</code></td><td>硬件抽象实现</td><td>把 CHRE 暴露给 Android 侧</td></tr><tr><td>CHRE 平台抽象</td><td><code>system/chre/pal</code></td><td>平台抽象层</td><td>隔开 CHRE 核心与协处理器平台</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：packages/services/Car:9f04df65daa8</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 事实 1：Car 顶层目录构成
+ls packages/services/Car/</code></pre>
+<p>期望输出含 <code>car-lib</code>、<code>car_product</code>、<code>service</code>、<code>service-builtin</code>、<code>cpp</code>、<code>experimental</code>、<code>apex_car_framework</code>、<code>car-lib-module</code>。</p>
+<pre><code class="lang-bash"># 事实 1：car-lib 的 Java 文件计数
+find packages/services/Car/car-lib -name '*.java' | wc -l</code></pre>
+<p>期望输出 <code>351</code>。</p>
+<pre><code class="lang-bash"># 事实 2：cpp 下的 native 组件族
+ls packages/services/Car/cpp/</code></pre>
+<p>期望输出含 <code>evs</code>、<code>vhal</code>、<code>computepipe</code>、<code>displayproxy</code>、<code>car_binder_lib</code>、<code>watchdog</code>、<code>telemetry</code>、<code>security</code>、<code>power</code>、<code>bugreport</code>。</p>
+<pre><code class="lang-bash"># 事实 3：automotive HAL 接口清单
+ls hardware/interfaces/automotive/</code></pre>
+<p>期望输出含 <code>vehicle</code>、<code>evs</code>、<code>audiocontrol</code>、<code>can</code>、<code>remoteaccess</code>、<code>occupant_awareness</code>、<code>ivn_android_device</code>。</p>
+<pre><code class="lang-bash"># 事实 4：通用车载产品族计数
+ls device/generic/car/sdk_car*.mk | wc -l
+ls device/generic/car/gsi_car_*.mk | wc -l
+ls -d device/generic/car/emulator_car64_* | wc -l</code></pre>
+<p>期望输出依次为 <code>8</code>、<code>3</code>、<code>4</code>。</p>
+<pre><code class="lang-bash"># 事实 4：car_product 的产品继承链文件
+ls packages/services/Car/car_product/build/</code></pre>
+<p>期望输出含 <code>car.mk</code>、<code>car_base.mk</code>、<code>car_system.mk</code>、<code>car_system_ext.mk</code>、<code>car_vendor.mk</code>、<code>car_generic_system.mk</code>、<code>car_product.mk</code>、<code>preinstalled-packages-product-car-base.xml</code>。</p>
+<pre><code class="lang-bash"># 事实 5/6：IoT 与 Wear 的树内状态
+ls -d device/*/*hings* packages/*[Ww]ear* 2&gt;/dev/null
+find frameworks -type d -iname '*wear*'
+ls device/google/contexthub/
+ls -d hardware/interfaces/contexthub
+ls system/chre/</code></pre>
+<p>第一条期望无输出（顶层与 packages/ 下无 Things/Wear）；第二条期望含 <code>core/java/android/app/wearable</code>、<code>core/java/android/service/wearable</code>、<code>services/core/java/com/android/server/wearable</code>——这是 Wear 缺席断言的证据面，不能只跑第一条；第三条期望含 <code>contexthubhal</code>、<code>sensorhal</code>、<code>firmware</code>、<code>lib</code>、<code>util</code>；第四条确认 <code>hardware/interfaces/contexthub</code> 与 <code>automotive</code> 并列存在；第五条期望含 <code>core</code>、<code>pal</code>、<code>platform</code>、<code>apps</code>、<code>chpp</code>、<code>zephyr</code>。</p>
+<pre><code class="lang-bash"># 事实 7：TV 形态落点
+ls device/google/atv/</code></pre>
+<p>期望输出含 <code>TvProvision</code>、<code>TvSampleLeanbackLauncher</code>、<code>LeanbackSampleApp</code>、<code>MdnsOffloadManagerService</code>、<code>products</code>、<code>sdk</code>。</p>
+<p>本节命令里的目录与路径是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：车载形态需要改框架层。</strong> 实际不需要。<code>packages/services/Car/</code> 与 <code>hardware/interfaces/automotive/</code> 本身就是框架外的增量层，<code>frameworks/base</code> 对车载提供的是通用机制，Car 服务作为系统服务在其上运行。</p>
+<p><strong>误区二：IoT 形态就是 Android Things 的现行版本。</strong> 看起来像是改名或延续，实际 Android Things 已停止发行，本树未收录该组件。树内可核的 IoT 邻近形态只有 CHRE 与 <code>contexthub</code> 这条低功耗协处理器管线，它并非一套完整产品发行。</p>
+<p><strong>误区三：Wear 形态在树里有独立系统组件。</strong> 分两层看：顶层未检出 <code>wear</code> 目录、<code>packages/</code> 下未收录 Wear 包、<code>device/</code> 下未收录 Wear 产品配置，所以本树未检出独立的 HAL 与产品配置；但框架层有穿戴感知的三层（<code>android.app.wearable</code>、<code>android.service.wearable</code>、<code>com.android.server.wearable</code>）。发行形态本身仍按官方文档口径描述，本篇不对其内部结构做断言。</p>
+<p><strong>误区四：三种形态的差异总量相当。</strong> 实际差距很大：车载三层齐备（HAL + 服务族 + 产品配置），IoT 只有低层管线与设备侧 HAL，TV 在 HAL、应用与服务层各有增量，Wear 只在框架层的穿戴感知一处有增量。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：能不能只拿 <code>device/generic/car/</code> 就能出车机镜像？ <strong>答</strong>：不能。<code>sdk_car*.mk</code> 只是产品入口，真正的分区内容来自 <code>packages/services/Car/car_product/build/</code> 下的 <code>car_system.mk</code>、<code>car_system_ext.mk</code>、<code>car_vendor.mk</code>，以及经 emulator 层转进来的 <code>car_product.mk</code>。 <strong>追问</strong>：那换机型要改哪些？ <strong>答</strong>：换继承链末端，指向 <code>device/google_car/</code> 下的 <code>cheetah_car</code>、<code>husky_car</code>、<code>panther_car</code>、<code>tangorpro_car</code> 之一；通用层不动。</p>
+<p><strong>问</strong>：CHRE 和 <code>contexthubhal</code> 是上下两层还是一件事？ <strong>答</strong>：是两层。<code>system/chre/</code> 是运行在协处理器上的运行时，<code>contexthubhal</code> 是设备侧的 HAL 实现，把 CHRE 能力暴露给 Android 侧。<code>system/chre/pal</code> 是 CHRE 内部的平台抽象层，与 HAL 不是同一层。 <strong>追问</strong>：那 IoT 形态是不是只靠这两者就够了？ <strong>答</strong>：不够。本树未收录配套的 IoT 产品配置样例，形态只可核到这条管线。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>构建出的镜像没有 Car 服务</td><td><code>grep -rln 'car_product/build' device/generic/car/*.mk</code></td><td>产品文件是否引用 <code>car_product</code> 的继承链</td><td>补继承 <code>car_generic_system.mk</code> 或改用 <code>sdk_car*.mk</code> 入口</td></tr><tr><td>找不到 VHAL 接口定义</td><td><code>ls hardware/interfaces/automotive/vehicle</code></td><td>接口目录是否存在</td><td>核对 <code>hardware/interfaces/automotive</code> 是否被整组缺省裁掉</td></tr><tr><td>想给板子接 CHRE 却无设备目录</td><td><code>ls device/google/contexthub/</code></td><td>是否含 <code>contexthubhal</code>/<code>sensorhal</code></td><td>本树未收录 IoT 产品样例，需自建设备目录</td></tr><tr><td>以为树里有 Wear 组件</td><td><code>find frameworks -type d -iname '*wear*'</code></td><td>是否命中 <code>android.app.wearable</code> 等三层</td><td>框架层有落点、HAL 与产品配置无；发行形态转官方文档口径</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：构建配置与产品继承机制见 <code>AND-P11-201</code>；具体产品与设备配置写法见 <code>AND-P11-302</code>；传感器 HAL 的注册与调用机制见 <code>AND-P4-302</code>；发布与 OTA 侧见 <code>AND-P11-402</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P11-201</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P11-402</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>car-lib</code> 的 Java 文件数为 351（源码文件计数，口径为 2026-10-23 于 <code>android17-release</code> 静态核）。</li><li><code>hardware/interfaces/automotive/</code> 下接口目录 7 个（源码目录计数，同上口径）。</li><li><code>device/generic/car/</code> 的产品文件为 8 个 <code>sdk_car*.mk</code> + 3 个 <code>gsi_car_*.mk</code> + 4 个 <code>emulator_car64_*</code> 目录（目录计数，同上口径）。</li><li>车载镜像体积、构建耗时、OTA 包大小：暂无实测，列为待补。本机 32GB 内存，V4 整包构建不可行，未在本树构建验证。</li><li>Wear 与 Things 的形态边界：Things 树内不可核；Wear 可核到框架层的穿戴感知三层，发行形态仍属官方文档口径。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早分支（Things 发行期，本篇不断言）</td><td>IoT 形态曾有独立产品与设备组件</td><td>本树未收录，无法核验</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>device/</code> 与 <code>packages/</code> 下未检出 Things 目录；顶层未检出 wear 目录、<code>packages/</code> 未收录 Wear 包、<code>device/</code> 未收录 Wear 产品配置，但 <code>frameworks/base</code> 下有穿戴感知三层；车载三层齐备，<code>automotive</code> HAL 7 个接口目录、<code>packages/services/Car/</code> 顶层 20 个目录（表中只列与形态增量直接相关的 8 项）、<code>car-lib</code> 351 个 Java 文件</td><td>IoT 形态只能核到 CHRE/<code>contexthub</code> 管线；Wear 可核到框架层，发行形态按官方文档口径</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>automotive</code>、<code>wear</code>、<code>context hub</code>。</li><li>Gerrit：android-review.googlesource.com 检索 <code>packages/services/Car</code>、<code>system/chre</code>、<code>hardware/interfaces/automotive</code>。</li><li>本仓关键路径：<code>packages/services/Car/car_product/build/car_base.mk</code>、<code>system/chre/pal</code>、<code>packages/services/Car/cpp/vhal/client</code>（VHAL client 侧）、<code>device/generic/car/emulator/vhal_aidl</code>（VHAL 实现侧）。</li><li>承接篇：<code>AND-P11-201</code>、<code>AND-P11-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

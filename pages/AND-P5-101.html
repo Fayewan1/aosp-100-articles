@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内核构建与配置：GKI、defconfig 与模块化</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>内核构建与配置：GKI、defconfig 与模块化</h1>
+<div class="kv"><span>ID：AND-P5-101</span><span>卷：P5</span><span>章：5.1</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：kernel/configs/README.md ；kernel/configs/Android.bp ；kernel/configs/b/android-6.12/Android.bp ；kernel/configs/b/android-6.12/android-base.config ；kernel/configs/v/android-6.6/android-base.config ；kernel/configs/kernel-lifetimes.xml ；kernel/configs/approved-ogki-builds.xml</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>通用内核镜像（Generic Kernel Image，GKI）的关键不在「编译内核」，而在「配置片段的归属边界」：通用能力进 <code>android-base.config</code>，增强项进 <code>android-recommended.config</code>，供应商只能加模块。<code>kernel/configs</code> 用字母目录按内核版本分流，<code>b/android-6.12/</code> 的产物叫 <code>kernel_config_b_6.12</code>，meta 指向 <code>android-base-conditional.xml</code>。KMI 冻结意味着配置与符号面在冻结窗口内不再随 vendor 需求变化，因此能进 base 的需求必须先在 <code>kernel/configs</code> 里落地。判断「能力能不能加」，实际就是判断它是 base 片段、recommended 片段，还是只能做模块。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P5-G01</code>（P5 卷导读），本篇的路径与版本口径沿用卷级约定。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>kernel/configs/README.md</code></li><li><code>kernel/configs/Android.bp</code></li><li><code>kernel/configs/b/android-6.12/Android.bp</code></li><li><code>kernel/configs/b/android-6.12/android-base.config</code></li><li><code>kernel/configs/v/android-6.6/android-base.config</code></li><li><code>kernel/configs/kernel-lifetimes.xml</code></li><li><code>kernel/configs/approved-ogki-builds.xml</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>同事要开一个网络特性，习惯性地往 defconfig 里加 <code>CONFIG_XXX=y</code>，结果 GKI 设备上启动没生效。另一头有人改了 fragment，<code>check_fragments.sh</code> 在 CI 报错，看不出是哪个架构失败。这类问题的共同点是：把「内核配置」当成一棵树的局部改动，而它其实是一套跨仓库的分层契约——片段在 Android 侧，defconfig 在内核侧，供应商侧只能挂模块。本篇按这三层拆开讲。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个层次：内核树里的平台 defconfig（在 <code>arch/*/configs/</code>），Android 侧的 fragment（片段），以及供应商侧的内核模块。<code>scripts/kconfig/merge_config.sh</code> 负责把片段按顺序合并到 defconfig 上，最终产物就是该内核版本的配置。</p>
+<p>图 1：三层配置的来源与合并关系</p>
+<pre><code> 内核树                      Android 侧                vendor 侧
+ arch/*/configs/  --+      android-base.config  --+   vendor 模块 Kconfig
+ (平台 defconfig)   |      android-recommended ... |   (只能 out-of-tree)
+                    v                             v
+              scripts/kconfig/merge_config.sh -&gt; 最终 .config</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>片段的组织不是平铺，而是版本分目录。<code>kernel/configs</code> 顶层有 7 个字母目录：<code>b</code>、<code>c</code>、<code>d</code>、<code>s</code>、<code>t</code>、<code>u</code>、<code>v</code>，另有 <code>build</code>、<code>tools</code>、<code>xsd</code> 三个公共目录。字母是内核主版本序列（b 对应 6.12，v 对应 6.6，u 对应 6.1）。版本差异靠目录隔离，不用条件判断。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>基础要求与增强项的划分在 README 里写死：基础要求放 <code>android-base.config</code>，增强项放 <code>android-recommended.config</code>。P 及以前还有 <code>android-base-&lt;arch&gt;.config</code> 架构片段，P 之后这些被移除，条件要求改存 <code>android-base-conditional.xml</code>。自 Android R 起再按编译变体加片段，user 构建另有 <code>non_debuggable.config</code>。</p>
+<p>图 2：片段树的关键目录与文件归属</p>
+<pre><code>kernel/configs/
+  b/android-6.12/   Android.bp + android-base.config
+                    + android-base-conditional.xml (5 个文件)
+  v/android-6.6/    同结构 (3 个文件)
+  u/android-6.1/    同结构 (3 个文件)
+  xsd/              approvedBuild/（approved_build.xsd + schema + vts/）  (schema 与测试侧校验)
+  tools/            check_fragments.sh / bump.py / kconfig_xml_fixup.py</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>Soong 侧的落点：<code>kernel/configs/b/android-6.12/Android.bp</code> 定义的模块名形如 <code>kernel_config_b_6.12</code>，meta 指向 <code>kernel_meta_b_6.12</code>，后者即 <code>android-base-conditional.xml</code>。TV 分支的两处二选一是同构的：配置侧在 <code>android-base.config</code> 与 <code>android-tv-base.config</code> 之间选，meta 侧在 <code>android-base-conditional.xml</code> 与 <code>android-tv-base-conditional.xml</code> 之间选，条件都是 <code>select(soong_config_variable(&quot;google_tv&quot;,&quot;using_tv_gki&quot;), ...)</code>（<code>kernel_meta_b_6.12</code> 的 filegroup 见 Android.bp:45-51）；同时配 <code>tv_kernel_base_config_b_6.12</code> genrule 做 cp 生成。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>android-base.config</code></td><td>Android 基础配置要求</td><td><code>kernel/configs/b/android-6.12/android-base.config</code></td></tr><tr><td><code>android-recommended.config</code></td><td>增强项，非强制</td><td><code>kernel/configs/README.md</code></td></tr><tr><td><code>android-base-conditional.xml</code></td><td>按条件启用的配置项（P 之后取代架构片段）</td><td><code>kernel/configs/b/android-6.12/Android.bp</code></td></tr><tr><td><code>non_debuggable.config</code></td><td>R 起 user 构建追加的片段</td><td><code>kernel/configs/README.md</code></td></tr><tr><td><code>kernel_config_b_6.12</code></td><td>Soong 模块名，配置产物入口</td><td><code>kernel/configs/b/android-6.12/Android.bp</code></td></tr><tr><td><code>kernel_meta_b_6.12</code></td><td>meta 模块，对应 conditional xml</td><td><code>kernel/configs/b/android-6.12/Android.bp</code></td></tr></tbody></table>
+<p><code>kernel/configs/Android.bp</code> 另外把 <code>approved-ogki-builds.xml</code> 与 <code>kernel-lifetimes.xml</code> 用 <code>prebuilt_etc</code> 落到 <code>sub_dir: &quot;kernel&quot;</code>。这两份 XML 各有 schema：<code>kernel-lifetimes.xml</code> 根元素是 <code>&lt;kernels schema_version=&quot;0&quot;&gt;</code>，每个 <code>&lt;branch&gt;</code> 带 name/version/launch/eol；<code>approved-ogki-builds.xml</code> 根元素是 <code>&lt;ogki-approved version=&quot;1&quot;&gt;</code>，按 <code>&lt;branch name=...&gt;</code> 列 <code>&lt;build id=... bug=.../&gt;</code>。校验侧的目录只有一层：<code>xsd/approvedBuild/</code>，内含 <code>approved_build.xsd</code>、<code>schema</code> 与 <code>vts/</code>（后者带 Android.bp 与 ValidateApprovedBuild.cpp）。</p>
+<p>维护纪律只有一条：README.md:138 的原句是 <code>please keep them alphabetically (not randomly) sorted.</code>——片段文件要按字母序排。这条不是风格偏好，是为了合并顺序稳定、diff 可读。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 <code>b/android-6.12/</code> 为例走一遍：目录下 5 个文件，包含 <code>Android.bp</code>、<code>android-base.config</code>、<code>android-base-conditional.xml</code>。构建系统读 <code>Android.bp</code> 得到 <code>kernel_config_b_6.12</code>，meta 取 <code>android-base-conditional.xml</code>。若本次是 TV 配置，<code>select(soong_config_variable(&quot;google_tv&quot;,&quot;using_tv_gki&quot;), ...)</code> 命中 <code>android-tv-base.config</code>，走 <code>tv_kernel_base_config_b_6.12</code> 的 genrule。内核侧拿到 base 片段后，与平台 defconfig 一起喂给 <code>scripts/kconfig/merge_config.sh</code>，合成最终配置。vendor 想加的项不在任何片段里，只能以外部模块形式存在。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P5-G01</code> 是卷导读，给出全卷篇目地图。本篇（<code>AND-P5-101</code>）只讲内核怎么被配上、模块边界在哪。Binder 内核驱动内部行为归 <code>AND-P5-201</code>，本篇不碰。启动镜像怎么打包进 boot 归 P8 卷的 <code>P8-101</code>，本篇只到「配置产物」为止。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>片段规则说明</td><td><code>kernel/configs/README.md</code></td><td><code>android-base.config</code>、<code>non_debuggable.config</code>、<code>merge_config.sh</code></td><td>分层与变体规则的唯一文档口径</td></tr><tr><td>全局构建定义</td><td><code>kernel/configs/Android.bp</code></td><td><code>prebuilt_etc</code>、<code>sub_dir: &quot;kernel&quot;</code></td><td>两份 XML 落到 <code>/kernel</code></td></tr><tr><td>6.12 配置模块</td><td><code>kernel/configs/b/android-6.12/Android.bp</code></td><td><code>kernel_config_b_6.12</code>、<code>kernel_meta_b_6.12</code></td><td>meta 指向 conditional xml</td></tr><tr><td>6.12 基础片段</td><td><code>kernel/configs/b/android-6.12/android-base.config</code></td><td>基础配置项清单</td><td>与 TV 片段二选一</td></tr><tr><td>6.6 基础片段</td><td><code>kernel/configs/v/android-6.6/android-base.config</code></td><td>基础配置项清单</td><td>字母目录按版本隔离</td></tr><tr><td>分支生命周期</td><td><code>kernel/configs/kernel-lifetimes.xml</code></td><td><code>&lt;kernels schema_version=&quot;0&quot;&gt;</code>、<code>&lt;branch&gt;</code></td><td><code>android17-6.18</code> 为 pre-release</td></tr><tr><td>OGKI 批准构建</td><td><code>kernel/configs/approved-ogki-builds.xml</code></td><td><code>&lt;ogki-approved version=&quot;1&quot;&gt;</code></td><td>按 branch 列 build</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：kernel/configs:553fd8d03411</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git -C kernel/configs rev-parse HEAD</code></pre>
+<p>期望输出：<code>553fd8d03411</code>，与本篇锚点一致。</p>
+<pre><code class="lang-bash">ls kernel/configs</code></pre>
+<p>期望输出：含 <code>b</code>、<code>c</code>、<code>d</code>、<code>s</code>、<code>t</code>、<code>u</code>、<code>v</code> 七个字母目录，以及 <code>build</code>、<code>tools</code>、<code>xsd</code>。</p>
+<pre><code class="lang-bash">ls kernel/configs/b/android-6.12 | wc -l</code></pre>
+<p>期望输出：5，对应 6.12 目录下 5 个文件。</p>
+<pre><code class="lang-bash">grep -n &quot;kernel_config_b_6.12\|kernel_meta_b_6.12&quot; kernel/configs/b/android-6.12/Android.bp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：模块名与 meta 指向各命中一行，验证 §4.2 的产物命名。</p>
+<pre><code class="lang-bash">grep -n &quot;android-base.config\|android-tv-base.config&quot; kernel/configs/b/android-6.12/Android.bp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：两个片段名出现在 <code>select(soong_config_variable(&quot;google_tv&quot;,&quot;using_tv_gki&quot;), ...)</code> 附近，确认 TV 二选一。</p>
+<pre><code class="lang-bash">grep -n &quot;alphabetically&quot; kernel/configs/README.md</code></pre>
+<p>期望输出：命中 1 行（README.md:138 <code>please keep them alphabetically (not randomly) sorted.</code>），确认维护纪律在文档中留存。</p>
+<pre><code class="lang-bash">grep -n &quot;no-releases&quot; kernel/configs/kernel-lifetimes.xml</code></pre>
+<p>期望输出：命中 <code>android17-6.18</code> 那一条，对应 <code>&lt;no-releases reason=&quot;branch in pre-release phase&quot;/&gt;</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：改 defconfig 就能让所有设备生效。</strong> 平台 defconfig 在内核树的 <code>arch/*/configs/</code>，属于单内核树；GKI 设备吃的是合并后的公共配置，defconfig 改动不会自动进入。</p>
+<p><strong>误区二：vendor 想要的能力写进 `android-base.config` 就行。</strong> 看起来对其实是错的：base 片段是平台侧统一维护的，KMI 冻结后其配置面不随单个 vendor 需求变动。vendor 差异化只能走外部模块。</p>
+<p><strong>误区三：架构差异还用 `android-base-&lt;arch&gt;.config`。</strong> P 之后架构片段已被移除，条件要求改存 <code>android-base-conditional.xml</code>。仍在找架构片段的，方向就错了。</p>
+<p><strong>误区四：片段文件顺序无所谓。</strong> README 原句要求 <code>keep them alphabetically (not randomly) sorted</code>（README.md:138），顺序影响合并可读性与 diff 稳定性。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>kernel_config_b_6.12</code> 和 <code>kernel_meta_b_6.12</code> 什么关系？ <strong>答</strong>：前者是配置产物模块，后者是 meta 模块，指向 <code>android-base-conditional.xml</code>。 <strong>追问</strong>：那 TV 配置怎么进来？ <strong>答</strong>：通过 <code>select(soong_config_variable(&quot;google_tv&quot;,&quot;using_tv_gki&quot;), ...)</code> 在 base 与 TV 片段间二选一，并由 <code>tv_kernel_base_config_b_6.12</code> genrule 生成。</p>
+<p><strong>问</strong>：<code>kernel-lifetimes.xml</code> 的 eol 能不能作为「我的分支还支持吗」的依据？ <strong>答</strong>：它是分支生命周期的声明数据，<code>android17-6.18</code> 当前是 <code>&lt;no-releases reason=&quot;branch in pre-release phase&quot;/&gt;</code>。<strong>追问</strong>：怎么核对某个具体 build 是否被批准？ <strong>答</strong>：看 <code>approved-ogki-builds.xml</code>，按 <code>&lt;branch name=...&gt;</code> 找 <code>&lt;build id=... bug=.../&gt;</code>，schema 在 <code>xsd/approvedBuild/approved_build.xsd</code>。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>改了片段但产物没变</td><td><code>git -C kernel/configs log --oneline -5</code></td><td>提交是否真落在片段目录</td><td>确认改动在 <code>b/android-6.12/</code> 等版本目录内</td></tr><tr><td>合并后配置项冲突</td><td><code>grep -n &quot;merge_config.sh&quot; kernel/configs/README.md</code></td><td>合并入口口径</td><td>按 README 顺序核对片段层叠</td></tr><tr><td>TV 配置未生效</td><td><code>grep -n &quot;using_tv_gki&quot; kernel/configs/b/android-6.12/Android.bp</code></td><td>Soong 变量选择逻辑</td><td>确认构建变体确实打开了 TV</td></tr><tr><td>片段顺序被 review 打回</td><td><code>grep -n &quot;alphabetically&quot; kernel/configs/README.md</code></td><td>排序纪律原文</td><td>重排片段文件</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Binder 内核驱动内部行为归 <code>AND-P5-201</code>；启动镜像打包进 boot 归 <code>P8-101</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P5-201</code>、<code>P8-101</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>字母目录 7 个（b/c/d/s/t/u/v），另有 3 个公共目录（build/tools/xsd）。口径：<code>kernel/configs</code> 顶层目录实测。</li><li>6.12 目录 5 个文件；6.6 与 6.1 目录各 3 个文件。口径：目录列目录实测。</li><li><code>check_fragments.sh</code> 按 <code>ARCHES=&quot;arm64 arm x86&quot;</code> 逐架构执行，需 <code>ANDROID_BUILD_TOP</code> 与内核树 <code>-k</code>。口径：脚本内置常量；该脚本需要 android common kernel 检出，本机树内无内核源码，不可执行，只作口径引用。</li><li>驱动侧实现细节不在本篇核验范围，凡涉及驱动内部行为一律按内核契约与用户态可观测现象表述。</li><li>Soong 模块命名与 meta 指向的确切条目数：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>P 及以前</td><td>存在 <code>android-base-&lt;arch&gt;.config</code> 架构片段</td><td>按架构分文件维护</td></tr><tr><td>P 之后</td><td>架构片段移除，条件要求改存 <code>android-base-conditional.xml</code></td><td>架构差异从「文件」变「XML 条件」</td></tr><tr><td>Android R 起</td><td>按编译变体加片段，user 构建另有 <code>non_debuggable.config</code></td><td>变体影响最终 <code>.config</code></td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>b/android-6.12/</code> 5 个文件；<code>v/android-6.6/</code>、<code>u/android-6.1/</code> 各 3 个（<code>Android.bp</code> ＋ <code>android-base.config</code> ＋ <code>android-base-conditional.xml</code>）</td><td>版本以字母目录隔离，无架构片段残留</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>gki kernel config fragments</code>；source.android.com 站内检索 <code>kernel module interface</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>kernel/configs</code>、<code>android-base.config</code>、<code>kernel_config_b_6.12</code>。</li><li>本仓关键路径：<code>kernel/configs/README.md</code>、<code>kernel/configs/b/android-6.12/Android.bp</code>、<code>kernel/configs/xsd/approvedBuild/approved_build.xsd</code>。</li><li>承接篇：<code>AND-P5-201</code>、<code>P8-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P5-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

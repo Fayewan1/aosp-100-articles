@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蓝牙、NFC、USB 外设与投屏虚拟设备</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>蓝牙、NFC、USB 外设与投屏虚拟设备</h1>
+<div class="kv"><span>ID：AND-P7-402</span><span>卷：P7</span><span>章：7.4</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java ；packages/modules/Nfc/framework/java/android/nfc/NfcAdapter.java ；frameworks/base/core/java/android/hardware/usb/UsbManager.java ；frameworks/base/media/java/android/media/projection/MediaProjection.java ；frameworks/base/core/java/android/hardware/display/VirtualDisplay.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>本篇收口「连」这一族：蓝牙（<code>BluetoothAdapter</code>，含 BR/EDR 与 LE）、NFC（<code>NfcAdapter</code>）、USB 外设（<code>UsbManager</code>/<code>UsbDevice</code>）与投屏虚拟设备（<code>MediaProjection</code> + <code>VirtualDisplay</code>）。它们的共同点是「应用只拿入口门面，真正的协议栈与设备枚举在远端服务/内核里」。理解各入口的获取方式与权限边界，是定位「搜不到设备/读不到标签/USB 打不开/录屏黑屏」的起点。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P7-G01</code>（本卷导航）、<code>AND-P7-401</code>（通话与 IMS，蓝牙通话与之相关）、<code>AND-P7-201</code>（音频路由，蓝牙 A2DP 与之相关）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</code>（蓝牙入口，约 5461 行）</li><li><code>packages/modules/Nfc/framework/java/android/nfc/NfcAdapter.java</code>（NFC 入口，约 3160 行）</li><li><code>frameworks/base/core/java/android/hardware/usb/UsbManager.java</code>（USB 入口，约 2787 行）</li><li><code>frameworks/base/media/java/android/media/projection/MediaProjection.java</code>（投屏，约 487 行）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「蓝牙扫描不出设备」「NFC 读不到标签」「USB 设备 <code>openDevice</code> 失败」「投屏录制黑屏」——这些问题的入口都在这几个门面类里，但真因在远端协议栈/内核：蓝牙靠 <code>bluetooth</code> 服务与控制器，NFC 靠 <code>nfcd</code>，USB 靠内核 <code>usb</code> 子系统与权限策略，投屏靠 <code>SurfaceFlinger</code> 的虚拟显示。本文把四族入口在代码层面钉死。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p>四个入口各自封装一类外设的获取与状态：<code>BluetoothAdapter</code> 表征本机蓝牙适配器（含 BR/EDR 与 LE），<code>NfcAdapter</code> 表征 NFC 控制器，<code>UsbManager</code> 管理 USB 设备/配件枚举，<code>MediaProjection</code> 是录屏/投屏的授权令牌。GATT（蓝牙低功耗属性协议）是 LE 设备通信的承载层。</p>
+<p>图 1：四类外设的入口与远端落地</p>
+<pre><code>BluetoothAdapter -&gt; bluetooth服务 -&gt; 控制器(BR/EDR/LE/GATT)
+NfcAdapter       -&gt; nfcd          -&gt; NFC控制器
+UsbManager       -&gt; usb子系统(内核) -&gt; 设备/配件
+MediaProjection  -&gt; SurfaceFlinger -&gt; VirtualDisplay(录屏)</code></pre>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>蓝牙：<code>getDefaultAdapter</code>（<code>BluetoothAdapter.java:972</code>）取适配器，<code>isEnabled</code>（<code>BluetoothAdapter.java:1226</code>）查状态，<code>startDiscovery</code>（<code>BluetoothAdapter.java:1841</code>）发起发现，<code>getBondedDevices</code>（<code>BluetoothAdapter.java:2425</code>）取已配对设备，<code>getRemoteDevice</code>（<code>BluetoothAdapter.java:1083</code>/<code>:1126</code>）按地址取远端设备。失败路径：未授予定位/蓝牙权限导致发现为空、适配器未启用、控制器不可用。</p>
+<p>NFC：<code>getDefaultAdapter</code>（<code>NfcAdapter.java:927</code>/<code>:965</code>）取适配器，<code>isEnabled</code>（<code>NfcAdapter.java:1134</code>）查状态，<code>enable</code>（<code>NfcAdapter.java:1178</code>）申请开启。失败路径：硬件缺失、被系统策略禁用。</p>
+<p>USB：<code>UsbManager.getDeviceList</code>（<code>UsbManager.java:1322</code>）枚举设备，<code>openDevice</code>（<code>UsbManager.java:1347</code>）打开，<code>getAccessoryList</code>（<code>UsbManager.java:1372</code>）取配件；<code>UsbDevice.getVendorId</code>（<code>UsbDevice.java:195</code>）/<code>getProductId</code>（<code>UsbDevice.java:204</code>）识别厂商与产品。失败路径：缺少 <code>USB_PERMISSION</code>、设备被其他应用占用。</p>
+<p>投屏：<code>MediaProjection.createVirtualDisplay</code>（<code>MediaProjection.java:167</code>/<code>:236</code>/<code>:278</code>）创建虚拟显示，其 <code>Surface</code>（<code>frameworks/base/core/java/android/hardware/display/VirtualDisplay.java:57</code>，注意这个类不在 projection 目录下）是录制/投屏的画面来源，<code>stop</code>（<code>MediaProjection.java:317</code>）结束，<code>VirtualDisplay.release</code>（<code>VirtualDisplay.java:106</code>，同上路径）释放。失败路径：用户未授权、Surface 未就绪导致黑屏。</p>
+<p>图 2：MediaProjection 投屏链路</p>
+<pre><code>MediaProjection -&gt; createVirtualDisplay -&gt; VirtualDisplay(Surface) -&gt; 录屏/投屏
+   stop/release 回收资源</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>蓝牙 <code>BluetoothAdapter.java</code>：<code>getDefaultAdapter</code>（<code>:972</code>）是单例入口，<code>getRemoteDevice</code>（<code>BluetoothAdapter.java:1083</code>/<code>:1126</code>）按地址解析远端设备，<code>isEnabled</code>（<code>:1226</code>）查启用态，<code>startDiscovery</code>（<code>:1841</code>）发起扫描，<code>getBondedDevices</code>（<code>:2425</code>）取已配对集合。</p>
+<p>NFC <code>NfcAdapter.java</code>：<code>getDefaultAdapter</code>（<code>:927</code>/<code>:965</code>）取适配器，<code>isEnabled</code>（<code>NfcAdapter.java:1134</code>）查状态，<code>enable</code>（<code>NfcAdapter.java:1178</code>）发起开启。</p>
+<p>USB <code>UsbManager.java</code>：<code>getDeviceList</code>（<code>:1322</code>）枚举、<code>openDevice</code>（<code>:1347</code>）打开、<code>getAccessoryList</code>（<code>:1372</code>）取配件；<code>UsbDevice</code> 的 <code>getVendorId</code>（<code>:195</code>）/<code>getProductId</code>（<code>:204</code>）提供身份识别。</p>
+<p>投屏 <code>MediaProjection.java</code>：<code>createVirtualDisplay</code>（<code>:167</code>/<code>:236</code>/<code>:278</code>）是核心，返回带 <code>Surface</code> 的 <code>VirtualDisplay</code>；<code>stop</code>（<code>:317</code>）结束录制。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与 <code>AND-P7-401</code> 的关系：蓝牙通话（HFP）经本篇的蓝牙链路，音频再走 201/202 的路由。</li><li>与 <code>AND-P6-401</code> 的关系：投屏 <code>VirtualDisplay</code> 的创建与使用在图形卷多屏/外接显示互引。</li><li>与 <code>AND-P7-201</code> 的关系：蓝牙 A2DP 音频出声依赖 202 的路由决策。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>蓝牙入口</td><td><code>packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</code></td><td><code>getDefaultAdapter</code>、<code>startDiscovery</code>、<code>getBondedDevices</code></td><td>BR/EDR/LE 入口</td></tr><tr><td>NFC 入口</td><td><code>packages/modules/Nfc/framework/java/android/nfc/NfcAdapter.java</code></td><td><code>getDefaultAdapter</code>、<code>isEnabled</code>、<code>enable</code></td><td>NFC 控制器</td></tr><tr><td>USB 入口</td><td><code>frameworks/base/core/java/android/hardware/usb/UsbManager.java</code></td><td><code>getDeviceList</code>、<code>openDevice</code></td><td>设备/配件枚举</td></tr><tr><td>投屏</td><td><code>frameworks/base/media/java/android/media/projection/MediaProjection.java</code></td><td><code>createVirtualDisplay</code>、<code>stop</code></td><td>虚拟显示授权令牌</td></tr><tr><td>虚拟显示</td><td><code>frameworks/base/core/java/android/hardware/display/VirtualDisplay.java</code></td><td><code>getSurface</code>、<code>release</code></td><td>承载录屏画面（在 <code>display/</code>，不在 <code>projection/</code>）</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：packages/modules/Bluetooth:c77db469de80 锚点：packages/modules/Nfc:940212c440f5 锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C packages/modules/Bluetooth rev-parse HEAD
+git -C packages/modules/Nfc rev-parse HEAD
+git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望分别得到 <code>c77db469de80</code>、<code>940212c440f5</code>、<code>94b4c163b7df</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;getDefaultAdapter\|isEnabled\|startDiscovery\|getBondedDevices\|getRemoteDevice&quot; \
+  packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>getDefaultAdapter</code> <code>:972</code>、<code>isEnabled</code> <code>:1226</code>、<code>startDiscovery</code> <code>:1841</code>、<code>getBondedDevices</code> <code>:2425</code>、<code>getRemoteDevice</code> <code>:1083</code>/<code>:1126</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;getDefaultAdapter\|isEnabled\|public boolean enable&quot; \
+  packages/modules/Nfc/framework/java/android/nfc/NfcAdapter.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>getDefaultAdapter</code> <code>:927</code>/<code>:965</code>、<code>isEnabled</code> <code>:1134</code>、<code>enable</code> <code>:1178</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;getDeviceList\|openDevice\|getAccessoryList&quot; \
+  frameworks/base/core/java/android/hardware/usb/UsbManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>getDeviceList</code> <code>:1322</code>、<code>openDevice</code> <code>:1347</code>、<code>getAccessoryList</code> <code>:1372</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;createVirtualDisplay\|public void stop&quot; \
+  frameworks/base/media/java/android/media/projection/MediaProjection.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>createVirtualDisplay</code> <code>:167</code>/<code>:236</code>/<code>:278</code>、<code>stop</code> <code>:317</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「蓝牙 <code>startDiscovery</code> 一定能搜到设备」。缺定位/蓝牙权限、适配器未启用、设备不可发现都会导致空集。</li><li>「<code>openDevice</code> 失败是代码问题」。更常见是缺 <code>USB_PERMISSION</code> 或设备被占用，属权限与策略问题。</li><li>「看起来对其实是错的」：以为 <code>NfcAdapter.enable</code> 一定能开 NFC。硬件缺失或系统策略禁用时它无法开启。</li><li>「投屏黑屏是录制代码错」。更可能是 <code>VirtualDisplay</code> 的 <code>Surface</code> 未就绪或未授权，画面源为空。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：蓝牙搜不到设备先查什么？ <strong>答</strong>：查 <code>isEnabled</code>（<code>:1226</code>）是否启用、定位/蓝牙权限是否授予、目标是否可发现；再查 <code>startDiscovery</code>（<code>:1841</code>）结果。 <strong>追问</strong>：已配对设备怎么取？ <strong>答</strong>：<code>getBondedDevices</code>（<code>:2425</code>），不依赖实时扫描。</p>
+<p><strong>问</strong>：投屏黑屏怎么定位？ <strong>答</strong>：确认 <code>MediaProjection</code> 授权通过、<code>createVirtualDisplay</code>（<code>:167</code>）返回的 <code>Surface</code> 已传给录制器；否则画面源为空。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>蓝牙搜不到</td><td><code>dumpsys bluetooth_manager</code></td><td>适配器状态/权限</td><td>查 <code>isEnabled</code>/<code>startDiscovery</code>，转 §4.2</td></tr><tr><td>NFC 不可用</td><td><code>dumpsys nfc</code></td><td>控制器状态</td><td>查 <code>isEnabled</code>/<code>enable</code>，转 §4.2</td></tr><tr><td>USB 打不开</td><td><code>lsusb</code> / 日志</td><td>权限与占用</td><td>查 <code>openDevice</code>，转 §4.3</td></tr><tr><td>投屏黑屏</td><td><code>dumpsys display</code></td><td>VirtualDisplay 状态</td><td>查 <code>createVirtualDisplay</code>/<code>Surface</code>，转 §4.2</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：蓝牙 GATT 通信细节、NFC 标签读写协议、USB 驱动、投屏画面编码（见 101）。</li><li><strong>本篇建议先读</strong>：<code>AND-P7-G01</code>、<code>AND-P7-401</code>、<code>AND-P7-201</code>（硬依赖仅 <code>AND-P7-G01</code>，见 P7 卷纲篇目表；401/201 为建议先读，与 §2 表述对齐）。</li><li><strong>本篇后继</strong>：<code>AND-P6-401</code>（多屏/外接显示）、<code>AND-P7-202</code>（蓝牙音频路由）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>BluetoothAdapter.java</code> 约 5461 行、<code>NfcAdapter.java</code> 约 3160 行、<code>UsbManager.java</code> 约 2787 行、<code>MediaProjection.java</code> 约 487 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>蓝牙含 BR/EDR 与 LE 两类链路，GATT 为 LE 通信承载（口径：架构语义）。</li><li>USB 设备以 <code>getVendorId</code>/<code>getProductId</code>（<code>:195</code>/<code>:204</code>）标识（口径：源码符号）。</li><li>投屏以授权令牌 <code>MediaProjection</code> 为前置，<code>stop</code>（<code>:317</code>）回收（口径：架构语义）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td>蓝牙/NFC 包位于 <code>packages/modules/*</code></td><td>本篇路径与行号基准</td></tr><tr><td>旧版本</td><td>蓝牙/NFC 在 <code>frameworks/base</code> 内（口径：演进史，本树只有 mainline 后的布局，无迁移提交可核）</td><td>按符号重锚，路径不可沿用</td></tr><tr><td>演进</td><td>LE Audio / GATT 持续增强</td><td>蓝牙能力随版本扩展</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：developer.android.com 站内检索 <code>BluetoothAdapter</code>、<code>NfcAdapter</code>、<code>UsbManager</code>、<code>MediaProjection</code>；source.android.com 站内检索 <code>bluetooth</code>、<code>nfc</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>BluetoothAdapter.java</code>、<code>NfcAdapter.java</code>。</li><li>承接篇：<code>AND-P7-401</code>、<code>AND-P6-401</code>、<code>AND-P7-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

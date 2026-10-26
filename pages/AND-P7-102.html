@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>媒体会话与播放器：MediaSession、ExoPlayer 与音频焦点</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>媒体会话与播放器：MediaSession、ExoPlayer 与音频焦点</h1>
+<div class="kv"><span>ID：AND-P7-102</span><span>卷：P7</span><span>章：7.1</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/media/java/android/media/session/MediaSession.java ；frameworks/base/media/java/android/media/session/MediaSessionManager.java ；frameworks/base/media/java/android/media/AudioFocusRequest.java ；frameworks/base/media/java/android/media/AudioManager.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>媒体播放不是一个函数，而是一组协作机制：<code>MediaSession</code> 把「播放状态与按键控制」抽象成一个可被系统/其他应用发现的会话；<code>AudioFocus</code> 决定「此刻你能不能出声」；ExoPlayer 这类播放器负责真正的解码与渲染（见 101）。三者分工明确——Session 管控制面，Focus 管资源仲裁，Player 管数据流。应用若只写播放器而不申请焦点、不建会话，就会在来电、多应用并存时失控。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P7-101</code>（MediaCodec 底层）、<code>AND-P7-G01</code>（本卷导航）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/media/java/android/media/session/MediaSession.java</code>（会话，约 1831 行）</li><li><code>frameworks/base/media/java/android/media/session/MediaSessionManager.java</code>（会话管理）</li><li><code>frameworks/base/media/java/android/media/AudioFocusRequest.java</code>（焦点请求，约 596 行）</li><li><code>frameworks/base/media/java/android/media/AudioManager.java</code>（焦点 API，约 11360 行）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「我在放音乐，来电后还在响」「两个播放器同时出声」「蓝牙按键控制不了我的播放器」——这些都不是解码问题，而是控制面与资源仲裁缺失。MediaSession 让系统知道「谁在播放、怎么控制」，AudioFocus 让多个声音源有序共存。本文把这两块在代码层面讲清，ExoPlayer 只作角色介绍。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p><code>MediaSession</code> 由应用创建（构造 <code>MediaSession.java:170</code>/<code>:194</code>/<code>:229</code>），通过 <code>setCallback</code>（<code>MediaSession.java:304</code>/<code>:317</code>）接收播放/暂停/切歌等指令，并通过 <code>setActive(true)</code>（<code>:489</code>）对外发布会话。<code>MediaSessionManager</code> 是系统侧的管理者：<code>createSession</code>（<code>MediaSessionManager.java:157</code>）打 <code>@hide</code>，其 <code>@RequiresPermission</code>（<code>:154-156</code>）标了 <code>conditional = true</code>——Javadoc <code>:142-145</code> 说明仅当 <code>overridePackageName</code> 非空且异于本包时才要求 <code>OVERRIDE_MEDIA_SESSION_OWNER</code>；正常应用路径在 <code>MediaSession</code> 构造器里传的是 <code>null</code>（<code>MediaSession.java:274</code>），并不触发该权限。它<strong>不是应用直接调用的 API</strong>：系统注册由 <code>MediaSession</code> 构造器代为调用完成（<code>MediaSession.java:270-276</code> 的 <code>manager.createSession(...)</code>）；其他应用/系统经 <code>getActiveSessions</code>（<code>:207</code>）发现活跃会话。</p>
+<p>图 1：MediaSession 的发布与控制链</p>
+<pre><code>App --setCallback--&gt; MediaSession --setActive(经 ISession binder)--&gt; MediaSessionService(系统服务)
+   控制器(MediaController) &lt;--getActiveSessions-- 系统/其他App</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>音频焦点：应用构建 <code>AudioFocusRequest</code>（<code>AudioFocusRequest.java:362</code> 的 <code>Builder</code>、<code>:572</code> 的 <code>build</code>），通过 <code>AudioManager.requestAudioFocus</code>（<code>:4834</code>/<code>:4925</code>）申请；系统按 <code>AUDIOFOCUS_GAIN</code>（<code>:4516</code>）等类型仲裁，授予或拒绝。失去焦点时通过回调要求应用暂停/压低音量；不再需要时 <code>abandonAudioFocusRequest</code>（<code>:4936</code>）释放。失败路径：未申请焦点就播放（被其他声音源打断且无回调）、长时间持有焦点导致别人无声。</p>
+<p>图 2：音频焦点仲裁</p>
+<pre><code>App --requestAudioFocus(GAIN)--&gt; AudioManager --授予/拒绝--&gt; App
+   其他源抢占 -&gt; onAudioFocusChange(LOSS) -&gt; App 暂停/压低</code></pre>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>会话侧：<code>MediaSession</code> 的 <code>setCallback</code>（<code>MediaSession.java:304</code>/<code>:317</code>）注册回调，<code>setActive</code>（<code>MediaSession.java:489</code>）发布会话，<code>MediaSessionManager.createSession</code>（<code>:157</code>）由 <code>MediaSession</code> 构造器代为调用（<code>:270-276</code>），完成系统注册，<code>getActiveSessions</code>（<code>:207</code>）供外部发现。播放器侧：ExoPlayer 是应用层库（不在 framework 内），承担解码与渲染，并通过 <code>MediaSession</code> 暴露控制点；其解码底层正是 101 的 <code>MediaCodec</code>。</p>
+<p>焦点侧：<code>AudioFocusRequest.Builder</code>（<code>AudioFocusRequest.java:362</code>）配置焦点类型与接受者，<code>build</code>（<code>:572</code>）生成请求；<code>AudioManager</code> 的 <code>AUDIOFOCUS_GAIN</code>（<code>:4516</code>）是最常用的「持续获取」类型，<code>requestAudioFocus</code>（<code>:4834</code>/<code>:4925</code>）发起申请，<code>abandonAudioFocusRequest</code>（<code>:4936</code>）释放。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与 <code>AND-P7-101</code> 的关系：播放器的解码底层是 <code>MediaCodec</code>，本篇站在它之上讲控制面与资源面。</li><li>与 <code>AND-P7-202</code>（AudioPolicy）的关系：焦点决定「能不能出声」，AudioPolicy 决定「出了声去哪个设备」，二者分层。</li><li>与 ExoPlayer 的关系：ExoPlayer 是 Player 实现，本篇不展开其内部，只说明它与 Session/Focus 的接线方式。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>会话</td><td><code>frameworks/base/media/java/android/media/session/MediaSession.java</code></td><td><code>setCallback</code>、<code>setActive</code></td><td>控制面</td></tr><tr><td>会话管理</td><td><code>frameworks/base/media/java/android/media/session/MediaSessionManager.java</code></td><td><code>createSession</code>、<code>getActiveSessions</code></td><td>系统注册/发现</td></tr><tr><td>焦点请求</td><td><code>frameworks/base/media/java/android/media/AudioFocusRequest.java</code></td><td><code>Builder</code>、<code>build</code></td><td>焦点配置</td></tr><tr><td>焦点 API</td><td><code>frameworks/base/media/java/android/media/AudioManager.java</code></td><td><code>requestAudioFocus</code>、<code>AUDIOFOCUS_GAIN</code></td><td>焦点仲裁入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望得到 <code>94b4c163b7df</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;public void setCallback\|public void setActive\|public MediaSession(&quot; \
+  frameworks/base/media/java/android/media/session/MediaSession.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>setCallback</code> <code>:304</code>/<code>:317</code>、<code>setActive</code> <code>:489</code>、构造 <code>:170</code>/<code>:194</code>/<code>:229</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;createSession\|getActiveSessions&quot; \
+  frameworks/base/media/java/android/media/session/MediaSessionManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>createSession</code> <code>:157</code>、<code>getActiveSessions</code> <code>:207</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;public static final class Builder\|public AudioFocusRequest build&quot; \
+  frameworks/base/media/java/android/media/AudioFocusRequest.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>Builder</code> <code>:362</code>、<code>build</code> <code>:572</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;AUDIOFOCUS_GAIN = 1\|public int requestAudioFocus\|abandonAudioFocusRequest&quot; \
+  frameworks/base/media/java/android/media/AudioManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>AUDIOFOCUS_GAIN</code> <code>:4516</code>、<code>requestAudioFocus</code> <code>:4834</code>/<code>:4925</code>、<code>abandonAudioFocusRequest</code> <code>:4936</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「写了播放器就能播」。缺 <code>MediaSession</code> 会导致系统/蓝牙按键无法控制你的播放器；缺 <code>AudioFocus</code> 会导致与其他声音源冲突。</li><li>「焦点申请一次管永久」。焦点可被其他源抢占，必须处理 <code>onAudioFocusChange</code> 的 LOSS 回调，否则会和其他应用同时出声。</li><li>「看起来对其实是错的」：以为 <code>setActive(true)</code> 后就一定能播。它只发布会话，能否出声还取决于焦点仲裁（202 的 AudioPolicy 也参与）。</li><li>「ExoPlayer 是 framework 的一部分」。ExoPlayer 是应用层库，不在 <code>frameworks/</code> 内，其解码底层才是 101 的 <code>MediaCodec</code>。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：来电后音乐不停怎么办？ <strong>答</strong>：在 <code>AudioFocus</code> 的 LOSS 回调里暂停/压低，并在重新获得时恢复；系统不会替你静音。 <strong>追问</strong>：蓝牙耳机按键控制不了我的 App？ <strong>答</strong>：检查是否用 <code>MediaSession.setCallback</code> 暴露了控制点，并有活跃会话。</p>
+<p><strong>问</strong>：两个播放器同时响怎么避免？ <strong>答</strong>：每个播放器都应申请 <code>AUDIOFOCUS_GAIN</code>，系统按优先级仲裁，未申请的一方本就违规。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一个定位点</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>来电不停</td><td>查焦点回调日志</td><td>是否处理 LOSS</td><td>查 <code>requestAudioFocus</code>，转 §4.2</td></tr><tr><td>按键失控</td><td><code>dumpsys media_session</code></td><td>活跃会话与回调</td><td>查 <code>setCallback</code>/<code>setActive</code>，转 §4.1</td></tr><tr><td>多源同响</td><td>查焦点持有</td><td>谁持焦点</td><td>查 <code>abandonAudioFocusRequest</code>，转 §4.3</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/base rev-parse HEAD</code></td><td>是否 <code>94b4c163b7df</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：<code>MediaCodec</code> 解码（101）、音频路由（202）、ExoPlayer 内部结构。</li><li><strong>本篇前置依赖</strong>：<code>AND-P7-101</code>、<code>AND-P7-G01</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-202</code>（路由）、<code>AND-P6-102</code>（渲染消费）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>MediaSession.java</code> 约 1831 行、<code>AudioFocusRequest.java</code> 约 596 行、<code>AudioManager.java</code> 约 11360 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>焦点类型 <code>AUDIOFOCUS_GAIN = 1</code>（<code>:4516</code>）最常用；源码对该类型的措辞是「持续时间未知」——获取后不预设释放时机，与 <code>AUDIOFOCUS_GAIN_TRANSIENT</code>（短音频）相对（口径：源码常量与 Javadoc）。</li><li>焦点仲裁为系统级串行，多源竞争由 <code>AudioManager</code> 统一裁决（口径：架构语义）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td>焦点以 <code>AudioFocusRequest</code> 构建，<code>AUDIOFOCUS_GAIN</code> 为 <code>:4516</code></td><td>本篇行号基准</td></tr><tr><td>API 26+</td><td><code>AudioFocusRequest</code> 引入，替代旧 <code>requestAudioFocus</code> 重载（口径：官方文档 / Android 演进史，本树单分支不可核验）</td><td>新代码用 <code>Builder</code> 模式</td></tr><tr><td>演进</td><td>ExoPlayer 逐步迁移到 <code>frameworks/ex</code> 与 Media3（口径：第三方库演进史，本树未保留迁移提交）</td><td>应用层库，本文只作角色介绍</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：developer.android.com 站内检索 <code>MediaSession</code>、<code>AudioFocus</code>、<code>ExoPlayer</code>；source.android.com 站内检索 <code>media_session</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>MediaSession.java</code>、<code>AudioFocusRequest.java</code>。</li><li>承接篇：<code>AND-P7-101</code>、<code>AND-P7-202</code>、<code>AND-P6-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>五条调用链：本书的主线骨架</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>五条调用链：本书的主线骨架</h1>
+<div class="kv"><span>ID：AND-P0-301</span><span>卷：P0</span><span>章：0.3</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/init/main.cpp ；system/core/init/init.cpp ；frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/core/java/android/view/ViewRootImpl.java ；frameworks/native/services/inputflinger/reader/InputReader.cpp ；frameworks/native/libs/binder/ProcessState.cpp ；frameworks/native/libs/binder/IPCThreadState.cpp ；frameworks/base/core/java/android/hardware/camera2/CameraManager.java ；frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>全书用五条调用链当骨架：开机到桌面、一次点击到界面响应、一次跨进程调用、一次相机预览、一次 APK 安装。每条链都有入口文件与「哪一卷讲哪段」的挂载点。五链是选题骨架，任何选题必须挂到至少一条；总纲的双纵链（一次点击、一次开机）是叙事主线，五链在其框架内定位。本篇只给骨架与索引。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P0-G01</code>，先建分层与纵链的整体视角。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>system/core/init/main.cpp</code></li><li><code>system/core/init/init.cpp</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></li><li><code>frameworks/native/services/inputflinger/reader/InputReader.cpp</code></li><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></li><li><code>frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树 + git/grep；本篇为静态源码分析，不需要编译与真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>读 AOSP 最常见的困境是「知道很多点，连不成线」：单独看 Zygote 能懂，单独看 Binder 也能懂，一问「点一下图标之后发生了什么」就说不清。原因是知识点没挂在同一条链上。本篇给出五链骨架与挂载索引，让后续每篇都能落到某条链的一段。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：<strong>链</strong>（端到端路径）、<strong>入口</strong>（链的起点文件与符号）、<strong>挂载点</strong>（链的某段归哪一卷哪一篇）、<strong>纵链</strong>（总纲的叙事主线）。</p>
+<p>图 1：五条主链在各卷各篇的挂载关系</p>
+<pre><code>五条链 ──挂载到──&gt; P1..P11 各卷各篇
+   └────框架内定位──&gt; 双纵链（一次点击 / 一次开机）</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>五链定义与其入口文件（口径为《选题规划》§1.2，2026-10-14 本地 AOSP 树实测入口）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td>链 1 开机到桌面</td><td><code>init</code> → Zygote fork → SystemServer → AMS/PMS/WMS/InputManager → Launcher → app 进程 → 首帧渲染 → SurfaceFlinger 上屏</td><td><code>system/core/init/main.cpp</code>、<code>ZygoteInit.java</code></td></tr><tr><td>链 2 点击到响应</td><td><code>/dev/input/eventX</code> → InputReader → 输入分发 → ViewRootImpl → Choreographer → RenderThread → HWUI → BufferQueue → SurfaceFlinger</td><td><code>ViewRootImpl.java</code>、<code>InputReader.cpp</code></td></tr><tr><td>链 3 跨进程调用</td><td>Binder.transact → ioctl(BINDER_WRITE_READ) → 驱动 → 目标进程 binder 线程 → onTransact → reply</td><td><code>ProcessState.cpp</code>、<code>IPCThreadState.cpp</code></td></tr><tr><td>链 4 相机预览</td><td>Camera2 API → CameraService → Camera3Device → Camera HAL → ISP 驱动 → gralloc buffer → BufferQueue → SurfaceFlinger</td><td><code>CameraManager.java</code></td></tr><tr><td>链 5 APK 安装</td><td>PackageInstallerSession → PackageManagerService → 目录与权限写入（改名在 dexopt 之前，见 1099 行注释）→ dex2oat → Settings 通知 → Intent 广播</td><td><code>InstallPackageHelper.java</code></td></tr></tbody></table>
+<p>各链入口的符号与行号见 §5 表格，本节不重复列。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>拿链 1 走一遍骨架（只标挂载点）：开机后 <code>main.cpp</code> 的 <code>int main</code>（约 53 行）按 argv 分发 ueventd、subcontext、selinux_setup、second_stage；二阶段进 <code>init.cpp</code> 的 <code>SecondStageMain</code>（约 1066 行），主循环同文件。之后 <code>ZygoteInit.java</code> 的 <code>main</code> 起 Zygote，fork 出 SystemServer，加载 AMS/PMS/WMS/InputManager 与 Launcher，app 进程 fork 后走 <code>Application.onCreate</code>、首帧渲染、SurfaceFlinger 合成、vsync 上屏。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>与前置篇 <code>AND-P0-G01</code>：G01 给分层与双纵链，本篇给操作骨架，二者互相定位。五链的挂载分工如下（口径为各卷篇序表，2026-10-14）：</p>
+<table><thead><tr><th>链</th><th>挂载篇目</th></tr></thead><tbody><tr><td>链 1 开机到桌面</td><td>P8-101/102、P8-201/202、P8-301/302、P8-401/402、P2-401、P2-201/202、P6-201</td></tr><tr><td>链 2 点击到响应</td><td>P5-302、P2-203、P6-302、P6-301、P6-202、P6-102、P6-201、P10 性能卷</td></tr><tr><td>链 3 跨进程调用</td><td>P2-101/102、P2-301、P3-302、P5-201、P5-202</td></tr><tr><td>链 4 相机预览</td><td>P7-301、P4-401、P6-102、P6-201</td></tr><tr><td>链 5 APK 安装</td><td>P2-203、P3-201、P9 安全卷</td></tr></tbody></table>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号</th></tr></thead><tbody><tr><td>链 1 C 入口</td><td><code>system/core/init/main.cpp</code></td><td><code>int main</code>（约 53 行）</td></tr><tr><td>链 1 二阶段</td><td><code>system/core/init/init.cpp</code></td><td><code>SecondStageMain</code>（约 1066 行）</td></tr><tr><td>链 1 Java 入口</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>public static void main</code>（约 824 行）</td></tr><tr><td>链 2 视图入口</td><td><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td><code>setView</code>（约 1642 行）、<code>WindowInputEventReceiver</code>（实例化 1898 行，类定义 11453 行）</td></tr><tr><td>链 2 输入读取</td><td><code>frameworks/native/services/inputflinger/reader/InputReader.cpp</code></td><td>事件读取</td></tr><tr><td>链 3 发起侧</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>ProcessState::self()</code>（约 106 行）、构造函数（约 606 行）</td></tr><tr><td>链 3 下发侧</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>ioctl(...BINDER_WRITE_READ...)</code>（约 1304 行）</td></tr><tr><td>链 4 入口</td><td><code>frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></td><td><code>openCamera</code>（约 1237 行）</td></tr><tr><td>链 5 入口</td><td><code>frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code></td><td><code>installPackagesTraced</code>（约 1081 行）</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70（参考快照仓；其余仓的行号以本树实测为准）</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 链 1 C 侧分发入口（期望命中 int main）
+grep -n &quot;int main&quot; system/core/init/main.cpp
+# 链 1 二阶段入口（期望命中 SecondStageMain，主循环同文件）
+grep -n &quot;SecondStageMain&quot; system/core/init/init.cpp
+# 链 1 Java 侧入口（期望命中 public static void main）
+grep -n &quot;public static void main&quot; frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+# 链 2 输入事件进入点（期望命中 WindowInputEventReceiver）
+grep -n &quot;WindowInputEventReceiver&quot; frameworks/base/core/java/android/view/ViewRootImpl.java
+# 链 3 ioctl 下发点（期望命中 BINDER_WRITE_READ）
+grep -n &quot;BINDER_WRITE_READ&quot; frameworks/native/libs/binder/IPCThreadState.cpp
+# 链 4 入口（期望命中 openCamera）
+grep -n &quot;openCamera&quot; frameworks/base/core/java/android/hardware/camera2/CameraManager.java
+# 链 5 入口（期望命中 installPackagesTraced）
+grep -n &quot;installPackagesTraced&quot; frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号仅为「怎么找」的示范；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一</strong>：五条链可以任选一条精读。纠正：链 3 是多数链的公共底座——凡涉及系统服务的调用都走 Binder，跳过链 3 会在后面反复卡住。</p>
+<p><strong>误区二</strong>：链是严格的时间轴，一条走完再走下条。纠正：链 1 未结束时链 2、链 3 就已经在跑，链之间是并发交织，不是排队。</p>
+<p><strong>误区三</strong>（看起来对其实是错的）：只要记住每条链的入口文件就等于掌握该链。纠正：入口只负责「从哪进」，链的价值在中间段的挂载关系。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：五链和双纵链是什么关系？ <strong>答</strong>：五链是操作骨架，选题必须挂到至少一条；双纵链是叙事主线。 <strong>追问</strong>：链 1 算不算「一次开机」？ <strong>答</strong>：链 1 是它的操作化展开，侧重进程与服务启动序；纵链侧重完整叙事。</p>
+<p><strong>问</strong>：链 4 为什么到 SurfaceFlinger 就停，不上屏？ <strong>答</strong>：边界定在合成环节，上屏段与链 1 收尾重合。 <strong>追问</strong>：两条链共用 SurfaceFlinger 会重复吗？ <strong>答</strong>：合成段统一归 P6-201，链 4 只讲相机特有的 buffer 衔接。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>找不到某链入口</td><td><code>grep -rn &quot;openCamera&quot; frameworks/base/core/java/android/hardware/camera2/</code></td><td>是否命中符号</td><td>未命中则确认树版本</td></tr><tr><td>行号对不上</td><td><code>grep -n &quot;SecondStageMain&quot; system/core/init/init.cpp</code></td><td>符号是否仍在</td><td>按符号重锚，忽略行号</td></tr><tr><td>链归属不清</td><td><code>grep -rn &quot;installPackagesTraced&quot; frameworks/base/services/</code></td><td>文件落在哪个模块</td><td>回 §4.4 查挂载索引</td></tr><tr><td>链 3 找不到 ioctl</td><td><code>grep -rn &quot;BINDER_WRITE_READ&quot; frameworks/native/libs/binder/</code></td><td>下发点是否存在</td><td>检查 libbinder 路径</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：各链逐跳走读归 P1–P11 对应篇，源码细节不进本篇。</li><li><strong>前置依赖</strong>：<code>AND-P0-G01</code>。</li><li><strong>后继</strong>：P2–P10 各卷中挂载到五链的篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>链的总数：5 条，口径为《选题规划》§1.2。</li><li>链 1 C 侧分发分支数：4 个（ueventd / subcontext / selinux_setup / second_stage），口径为 <code>main.cpp</code>（2026-10-14 实测）。</li><li>链 2 挂载篇数：7 篇以上（另加 P10），属估算待核。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td>五链定义与入口符号如 §4.2 所列，2026-10-14 实测</td><td>本篇所有入口与挂载点以此为准</td></tr><tr><td>更早版本</td><td>入口符号与文件组织可能变化</td><td>链 5 入口按 <code>installPackagesTraced</code> 等符号 grep 重锚，本篇不断言具体历史位置</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>architecture</code>、<code>binder ipc</code>、<code>camera3</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ZygoteInit</code>、<code>IPCThreadState</code>、<code>InstallPackageHelper</code>。</li><li>本仓关键路径：<code>system/core/init/init.cpp</code>、<code>frameworks/native/libs/binder/ProcessState.cpp</code>、<code>frameworks/base/core/java/android/view/ViewRootImpl.java</code>。</li><li>承接篇：<code>AND-P0-G01</code>、P8-401。</li></ul>
+</article>
+<footer>android-100 · AND-P0-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

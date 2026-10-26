@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HWUI 与 RenderThread：DisplayList 与 Skia/Vulkan 后端</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>HWUI 与 RenderThread：DisplayList 与 Skia/Vulkan 后端</h1>
+<div class="kv"><span>ID：AND-P6-202</span><span>卷：P6</span><span>章：6.2</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/libs/hwui/renderthread/RenderThread.cpp ；frameworks/base/libs/hwui/renderthread/CanvasContext.cpp ；frameworks/base/libs/hwui/RenderNode.cpp ；frameworks/base/libs/hwui/pipeline/skia/SkiaPipeline.cpp ；frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp ；frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp ；frameworks/base/core/java/android/view/ThreadedRenderer.java ；frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>View 画完不出图，真正落笔的是 RenderThread：UI 线程只把 DisplayList 同步进 <code>RenderNode</code>，RenderThread 把它转成 Skia 记录并提交给 GL 或 Vulkan 后端。<code>RenderThread::getInstance()</code> 是进程内单例，后端上下文分两个入口创建：GL 走 <code>requireGlContext()</code>（内部 <code>GrDirectContexts::MakeGL</code>），Vulkan 走 <code>requireVkContext()</code>（内部 <code>mVkManager-&gt;createContext(options)</code>），两者由 <code>requireGrContext()</code> 按后端类型分派。<code>CanvasContext</code> 持有一条 <code>IRenderPipeline</code>，具体是 <code>SkiaOpenGLPipeline</code> 还是 <code>SkiaVulkanPipeline</code> 由上下文创建时的选择决定。首帧慢的主要原因是上下文初始化、gralloc 缓冲与首帧绘制串在同一条线程上，而不是渲染指令本身慢。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读｜路径 C 只读 §4.2/§9</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P1-401</code>。它讲清 View 测量布局的产物是什么，本篇接着讲这些产物怎么变成 DisplayList 并上屏。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></li><li><code>frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</code></li><li><code>frameworks/base/libs/hwui/RenderNode.cpp</code></li><li><code>frameworks/base/libs/hwui/pipeline/skia/SkiaPipeline.cpp</code></li><li><code>frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp</code></li><li><code>frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp</code></li><li><code>frameworks/base/core/java/android/view/ThreadedRenderer.java</code></li><li><code>frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> 与 <code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p><code>onDraw</code> 里加了一行日志，发现它只被调用一次；可界面明明每帧都在动，日志却不涨。反过来，清掉一个自定义 View 的绘制代码，掉帧也没好转。于是有人怀疑「绘制在别的线程」，但说不清那个线程是谁、什么时候被唤醒、<code>Canvas</code> 里的指令最后交给了谁。还有人第一次把后端切到 Vulkan，发现首帧明显变慢，却找不到慢在哪一步。这些问题的共性是：缺一张从 <code>ThreadedRenderer</code> 到 <code>IRenderPipeline</code> 的调用链地图。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个角色。<code>ThreadedRenderer</code> 是 Java 侧入口，<code>extends HardwareRenderer</code>，由它把 <code>Surface</code> 交给 native。<code>RenderThread</code> 是进程内唯一渲染线程，管理 EGL 与 Vulkan 上下文。<code>CanvasContext</code> 是「一块画布」的 native 表示，持有一条 <code>IRenderPipeline</code>。<code>RenderNode</code> 持有 DisplayList，是 UI 线程与渲染线程之间传递绘制内容的载体。</p>
+<p>图 1：一次绘制从 Java 到后端的角色链</p>
+<pre><code>ThreadedRenderer (Java)
+   |
+   v
+RenderThread (进程内单例, 持上下文)
+   |
+   v
+CanvasContext (持 IRenderPipeline)
+   |
+   +--&gt; SkiaOpenGLPipeline
+   +--&gt; SkiaVulkanPipeline</code></pre>
+<p><code>RenderThread</code> 与 <code>CanvasContext</code> 是一对多：一个渲染线程服务同一进程内多个窗口，每个窗口一份 <code>CanvasContext</code>。<code>CanvasContext</code> 与 pipeline 是一对一：<code>mRenderPipeline</code> 字段是 <code>std::unique_ptr&lt;IRenderPipeline&gt;</code>，只在构造时确定。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>单例与上下文创建。</strong> <code>RenderThread::getInstance()</code> 返回进程级单例，内部是文件作用域的 <code>static sp&lt;RenderThread&gt; sInstance</code>。上下文不随线程创建而创建，而是延后到首次使用时。GL 与 Vulkan 各有一个创建函数：<code>requireGlContext</code>（RenderThread.cpp:235-252）先调 <code>mEglManager-&gt;initialize()</code> 把 EGL 初始化好（:239），再用 <code>GrDirectContexts::MakeGL</code> 建出 Skia 的 GL 后端上下文（:249）；<code>requireVkContext</code>（:254-270）则先 <code>mVkManager-&gt;initialize()</code>（:262），再 <code>mVkManager-&gt;createContext(options)</code>（:267）。两者都通过 <code>setGrContext</code>（:344）落位，对外统一由 <code>requireGrContext</code>（:356-363）给出——它按 <code>Properties::getRenderPipelineType()</code> 是否为 <code>RenderPipelineType::SkiaGL</code> 分派到上述两个函数之一。</p>
+<p>这里的名称容易误导：<code>requireGlContext</code> 这个名字容易让人以为它是统一入口，实际它只建 GL；Vulkan 走独立的 <code>requireVkContext</code>。读代码时不能凭名字判断后端，要看 <code>requireGrContext</code> 的分派。</p>
+<p><strong>树同步。</strong> UI 线程一侧的核心动作在 <code>RenderNode</code>：<code>prepareTreeImpl</code>（:228）沿树遍历并做属性更新，遍历末尾调 <code>pushStagingDisplayListChanges</code>（:268）把 staging 状态提交，后者内部（:563）再调 <code>syncDisplayList</code>（:569）把新的 DisplayList 挂到渲染侧的 <code>RenderNode</code> 上。这一步只搬运描述，不做栅格化。</p>
+<p><strong>绘制与呈现。</strong> RenderThread 的 <code>threadLoop</code> 是取任务的主循环。绘制落到 <code>CanvasContext::draw</code>，返回值类型是 <code>IRenderPipeline::DrawResult</code>。<code>SkiaPipeline</code> 负责组织图层，<code>renderLayersImpl</code> 在构造后的两个位置被调用，分别对应常规渲染与需要额外处理的分支。具体后端里，<code>SkiaOpenGLPipeline::makeCurrent</code> 切换 EGL 上下文，<code>draw</code> 提交绘制，<code>SkSurfaces::WrapBackendRenderTarget</code> 把 ANativeWindow 的缓冲包装成 Skia 的渲染目标，最后由 <code>swapBuffers</code> 呈现。Vulkan 侧入口更薄，构造函数完成初始化，<code>vulkanManager()</code> 暴露管理器。</p>
+<p><strong>Surface 绑定。</strong> <code>CanvasContext::setSurface</code> 与 <code>setSurfaceControl</code> 是两条绑窗路径，前者直接挂 <code>ANativeWindow*</code> 并可带超时开关，后者走 <code>SurfaceControl</code>。Java 侧 <code>ThreadedRenderer.setSurface</code> 把 <code>Surface</code> 传下来，<code>destroyHardwareResources</code> 在视图树销毁时释放 GPU 资源。</p>
+<p><strong>帧信息。</strong> <code>FrameInfo</code> 类的 <code>importUiThreadInfo</code> 把 UI 线程侧的帧耗时并入渲染线程的记录，这是跨线程对账一帧的接口。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>requireGlContext</code></td><td>只建 GL 上下文（:235-252）</td><td><code>RenderThread.cpp</code></td></tr><tr><td><code>requireVkContext</code></td><td>只建 Vulkan 上下文（:254-270）</td><td><code>RenderThread.cpp</code></td></tr><tr><td><code>setGrContext</code> / <code>requireGrContext</code></td><td>写入与读取 Skia 上下文；<code>requireGrContext</code>（:356-363）按后端类型分派</td><td><code>RenderThread.cpp</code></td></tr><tr><td><code>SkiaOpenGLPipeline</code></td><td>GL 后端管线实现</td><td><code>SkiaOpenGLPipeline.cpp</code></td></tr><tr><td><code>SkiaVulkanPipeline</code></td><td>Vulkan 后端管线实现</td><td><code>SkiaVulkanPipeline.cpp</code></td></tr><tr><td><code>IRenderPipeline::DrawResult</code></td><td>一次绘制的返回结果类型</td><td><code>CanvasContext.cpp</code></td></tr></tbody></table>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以打开一个普通的硬件加速窗口为例。</p>
+<ol><li>Java 侧 <code>ThreadedRenderer</code> 拿到 <code>Surface</code>，调 <code>setSurface</code>，native 侧进入 <code>CanvasContext::setSurface</code>。</li><li>首次绘制经 <code>requireGrContext</code> 分派：选 GL 后端进 <code>requireGlContext</code>，<code>mEglManager-&gt;initialize()</code> 建立 EGL 后走 <code>GrDirectContexts::MakeGL</code>；选 Vulkan 后端进 <code>requireVkContext</code>，先 <code>mVkManager-&gt;initialize()</code> 再 <code>mVkManager-&gt;createContext(options)</code>。</li><li><code>setGrContext</code> 把上下文交给 <code>CanvasContext</code>；<code>mRenderPipeline</code> 中的 <code>SkiaOpenGLPipeline</code> 或 <code>SkiaVulkanPipeline</code> 后续都用它。</li><li>UI 线程 <code>prepareTreeImpl</code> → <code>pushStagingDisplayListChanges</code>（其内部调 <code>syncDisplayList</code>）把 DisplayList 同步过去并提交。</li><li><code>threadLoop</code> 取到绘制任务，进入 <code>CanvasContext::draw</code>。GL 后端在此走 <code>makeCurrent</code>、<code>SkSurfaces::WrapBackendRenderTarget</code>、<code>draw</code>、<code>swapBuffers</code>。</li><li><code>FrameInfo::importUiThreadInfo</code> 把 UI 线程耗时并入本帧记录。</li></ol>
+<p>第 2 步落在渲染线程上，且必须完成后才能出首帧。这就是首帧比之后每帧更慢的原因：初始化与第一笔绘制串行。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P1-401</code> 给出 View 的测量布局结果，本篇从「结果变成 DisplayList」接起。<code>AND-P6-301</code> 讲帧调度时机，即 vsync 怎么把任务唤醒给 <code>threadLoop</code>；本篇只讲被唤醒之后画什么、怎么画。<code>AND-P6-201</code> 讲 <code>SurfaceFlinger</code> 的合成，本篇的终点是 <code>swapBuffers</code> 把缓冲交出去，之后的合成归 201。<code>AND-P6-302</code> 讲窗口层级与 Surface 归属，与本篇的 <code>setSurfaceControl</code> 有交集，但本篇不展开层级规则。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>渲染线程与上下文</td><td><code>frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></td><td><code>getInstance</code>、<code>requireGlContext</code>、<code>requireVkContext</code>、<code>requireGrContext</code>、<code>setGrContext</code>、<code>threadLoop</code></td><td>512 行，单例与上下文创建</td></tr><tr><td>画布与管线持有</td><td><code>frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</code></td><td><code>mRenderPipeline</code>、<code>setSurface</code>、<code>setSurfaceControl</code>、<code>draw</code></td><td>1379 行，一窗一实例</td></tr><tr><td>树与 DisplayList 同步</td><td><code>frameworks/base/libs/hwui/RenderNode.cpp</code></td><td><code>prepareTreeImpl</code>、<code>syncDisplayList</code>、<code>pushStagingDisplayListChanges</code></td><td>730 行</td></tr><tr><td>图层组织</td><td><code>frameworks/base/libs/hwui/pipeline/skia/SkiaPipeline.cpp</code></td><td>构造函数、<code>renderLayersImpl</code></td><td>637 行</td></tr><tr><td>GL 后端</td><td><code>frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp</code></td><td><code>makeCurrent</code>、<code>draw</code>、<code>Surfaces::WrapBackendRenderTarget</code>、<code>swapBuffers</code></td><td>305 行</td></tr><tr><td>Vulkan 后端</td><td><code>frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp</code></td><td>构造函数、<code>vulkanManager</code></td><td>226 行</td></tr><tr><td>Java 入口</td><td><code>frameworks/base/core/java/android/view/ThreadedRenderer.java</code></td><td><code>setSurface</code>、<code>syncAndDrawFrame</code>、<code>destroyHardwareResources</code></td><td>927 行</td></tr><tr><td>公共基类</td><td><code>frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</code></td><td>后端选择与公共 API</td><td>1969 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">cd frameworks/base
+wc -l libs/hwui/renderthread/RenderThread.cpp libs/hwui/renderthread/CanvasContext.cpp libs/hwui/RenderNode.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出行数分别为 512、1379、730，对上文三处篇幅事实。</p>
+<pre><code class="lang-bash">grep -n &quot;requireGlContext\|requireVkContext\|requireGrContext\|setGrContext&quot; libs/hwui/renderthread/RenderThread.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到三个创建/分派函数与 <code>setGrContext</code> 的定义（:235、:254、:344、:356），GL 与 Vulkan 的初始化调用分处两个函数、不在同一函数体内。</p>
+<pre><code class="lang-bash">grep -n &quot;mRenderPipeline\|setSurface\|DrawResult&quot; libs/hwui/renderthread/CanvasContext.cpp | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>mRenderPipeline</code> 成员声明与 <code>setSurface</code>、<code>DrawResult</code> 的关键行。</p>
+<pre><code class="lang-bash">grep -n &quot;prepareTreeImpl\|syncDisplayList\|pushStagingDisplayListChanges&quot; libs/hwui/RenderNode.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望多行命中（≥7）：<code>prepareTreeImpl</code> 的调用与定义、<code>pushStagingDisplayListChanges</code> 的调用与定义、<code>syncDisplayList</code> 的定义与调用都在其列。</p>
+<pre><code class="lang-bash">grep -n &quot;makeCurrent\|WrapBackendRenderTarget\|swapBuffers&quot; libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 GL 后端三个关键步骤都出现，顺序即为 makeCurrent → 包装渲染目标 → 交换。</p>
+<pre><code class="lang-bash">grep -n &quot;setSurface\|syncAndDrawFrame\|destroyHardwareResources&quot; core/java/android/view/ThreadedRenderer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 Java 侧三条入口各自命中。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`onDraw` 每帧都会执行。</strong> 只有内容失效时 <code>syncDisplayList</code> 才有新东西同步；内容不变时渲染线程可以复用已有 DisplayList 重绘，UI 线程不参与。</p>
+<p><strong>误区二：`requireGlContext` 是所有后端的统一入口。</strong> 名字是历史遗留，容易误读。它只建 GL 上下文；Vulkan 走独立的 <code>requireVkContext</code>，两者的分派在 <code>requireGrContext</code>。读代码时不能凭名字判断后端。</p>
+<p><strong>误区三：每个窗口一个 `RenderThread`。</strong> <code>getInstance()</code> 返回进程级单例，<code>CanvasContext</code> 才是一窗一份。因此多个窗口共享同一渲染线程，一个窗口的初始化会挤占另一个窗口的绘制时间。</p>
+<p><strong>误区四：首帧慢是因为 DisplayList 太大。</strong> 首帧相比后续帧多出的是上下文初始化与首帧缓冲准备，这部分在 <code>requireGrContext</code> 分派的上下文创建路径（<code>requireGlContext</code>／<code>requireVkContext</code>）上，与 DisplayList 体量关系不大。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：切到 Vulkan 后端后，代码里要改什么？ <strong>答</strong>：Java 侧入口仍是 <code>ThreadedRenderer</code>，其父类 <code>HardwareRenderer</code> 暴露后端选择；native 侧由 <code>CanvasContext</code> 持有的 <code>mRenderPipeline</code> 实例区分，业务绘制代码不感知。 <strong>追问</strong>：那自定义 View 的 Canvas 调用会变吗？ <strong>答</strong>：不会。DisplayList 记录的是绘制语义，<code>SkiaOpenGLPipeline</code> 与 <code>SkiaVulkanPipeline</code> 都从同一份记录出发，差异在下游。</p>
+<p><strong>问</strong>：怎么知道某一帧是渲染线程还是 UI 线程慢？ <strong>答</strong>：看 <code>FrameInfo</code>，<code>importUiThreadInfo</code> 会把 UI 线程侧的耗时并入渲染线程的帧记录，两段可分开看。 <strong>追问</strong>：<code>FrameInfo</code> 能覆盖上下文创建阶段吗？ <strong>答</strong>：覆盖到的是帧记录口径，上下文初始化本身是否计入需按具体采集点确认，本篇不断言。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>首帧明显慢于后续帧</td><td><code>grep -n &quot;mEglManager-&gt;initialize|createContext&quot; frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></td><td>初始化是否与首帧绘制同函数</td><td>结合 <code>AND-P6-301</code> 看唤醒时机</td></tr><tr><td>怀疑后端不是预期那个</td><td><code>grep -n &quot;SkiaOpenGLPipeline|SkiaVulkanPipeline&quot; frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</code></td><td>pipeline 的实际构造点</td><td>追 <code>HardwareRenderer</code> 的后端选择</td></tr><tr><td>内容变了但界面不更新</td><td><code>grep -n &quot;syncDisplayList|pushStagingDisplayListChanges&quot; frameworks/base/libs/hwui/RenderNode.cpp</code></td><td>同步与提交是否成对</td><td>检查该节点是否被标记失效</td></tr><tr><td>换窗后画面错乱</td><td><code>grep -n &quot;setSurface|setSurfaceControl&quot; frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</code></td><td>新旧 Surface 的绑定路径</td><td>确认销毁时是否走了 <code>destroyHardwareResources</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：View 测量布局见 <code>AND-P1-401</code>；帧调度与 vsync 时机见 <code>AND-P6-301</code>；<code>SurfaceFlinger</code> 合成见 <code>AND-P6-201</code>；窗口层级与 Surface 归属见 <code>AND-P6-302</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-401</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P6-301</code>、<code>AND-P6-201</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>RenderThread.cpp</code> 512 行、<code>CanvasContext.cpp</code> 1379 行、<code>RenderNode.cpp</code> 730 行、<code>SkiaPipeline.cpp</code> 637 行、<code>SkiaOpenGLPipeline.cpp</code> 305 行、<code>SkiaVulkanPipeline.cpp</code> 226 行——口径为 2026-10-18 于 <code>android17-release</code> 实测。</li><li><code>ThreadedRenderer.java</code> 927 行、<code>HardwareRenderer.java</code> 1969 行、<code>DisplayList.h</code> 344 行、<code>SkiaDisplayList.cpp</code> 196 行——同为上述口径。</li><li><code>RenderThread</code> 单例数量固定为每进程 1 个，来自 <code>static sp&lt;RenderThread&gt; sInstance</code>；<code>CanvasContext</code> 数量随窗口数增长，无硬上界。</li><li>一篇渲染线程内可并行处理的 <code>CanvasContext</code> 数目：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本</td><td>GL 为唯一硬件加速后端，既有管线即 GL 管线</td><td><code>requireGlContext</code> 的命名由此而来，读旧代码时名实相符</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td>GL 与 Vulkan 两条管线并存，<code>CanvasContext</code> 通过 <code>std::unique_ptr&lt;IRenderPipeline&gt;</code> 持有实现</td><td>后端差异被隔离在 pipeline 层，<code>requireGlContext</code> 名称与行为已不一致</td></tr><tr><td>本树（<code>android17-release</code>）</td><td>Java 侧 <code>ThreadedRenderer</code> 继承 <code>HardwareRenderer</code>，后端选择经基类暴露</td><td>业务代码不需要感知后端切换</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>；developer.android.com 站内检索 <code>hardware acceleration</code> 与 <code>HardwareRenderer</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>RenderThread</code>、<code>SkiaVulkanPipeline</code>、<code>hwui pipeline</code>。</li><li>本仓关键路径：<code>frameworks/base/libs/hwui/renderthread/</code>、<code>frameworks/base/libs/hwui/pipeline/skia/</code>、<code>frameworks/base/libs/hwui/DisplayList.h</code>。</li><li>承接篇：<code>AND-P6-301</code>（帧调度时机）、<code>AND-P6-201</code>（合成）。</li></ul>
+</article>
+<footer>android-100 · AND-P6-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

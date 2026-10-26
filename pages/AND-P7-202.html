@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音频策略与通路：AudioPolicy、A2DP/USB/HDMI 路由</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>音频策略与通路：AudioPolicy、A2DP/USB/HDMI 路由</h1>
+<div class="kv"><span>ID：AND-P7-202</span><span>卷：P7</span><span>章：7.2</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/av/services/audiopolicy/managerdefault/AudioPolicyManager.cpp ；frameworks/av/services/audiopolicy/service/AudioPolicyService.cpp ；frameworks/base/media/java/android/media/AudioManager.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>AudioTrack</code> 写出的声音「去哪」不由播放方决定，而由 <code>AudioPolicy</code> 决定。<code>AudioPolicyManager</code> 根据音频流属性（<code>audio_attributes_t</code>）算出该走哪个输出设备与输出流，再交给 <code>AudioFlinger</code> 落地；耳机拔出、蓝牙连接、HDMI 接入这类设备状态变化，则经 <code>AudioManager.setWiredDeviceConnectionState</code> 上报到 <code>AudioPolicyService</code>，触发路由重算。理解这条「属性 → 决策 → 重路由」的链路，才能解释为什么插上蓝牙音乐就切到 A2DP、拔掉耳机就回到扬声器。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P7-201</code>（AudioTrack → AudioFlinger 数据流）、<code>AND-P7-G01</code>（本卷导航）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/av/services/audiopolicy/managerdefault/AudioPolicyManager.cpp</code>（路由决策，约 10320 行）</li><li><code>frameworks/av/services/audiopolicy/service/AudioPolicyService.cpp</code>（Binder 服务端，约 2759 行）</li><li><code>frameworks/base/media/java/android/media/AudioManager.java</code>（设备连接上报，约 11360 行）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「插蓝牙后音乐还在手机响」「HDMI 接电视没声音」「为什么同样一首歌，戴耳机和接音响音量差很多」——这些问题的因果都在路由决策：是 <code>AudioPolicyManager</code> 的 <code>getOutputForAttr</code> 把流映射到错了设备，还是设备状态变更没触发重路由。本文把这条链路在代码层面钉死。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p>路由决策的输入是 <code>audio_attributes_t</code>（流用途、内容类型等），输出是「输出设备 + 输出流句柄」。设备类型涵盖听筒、扬声器、有线耳机、蓝牙 A2DP、USB 音频、HDMI 等。<code>AudioPolicyManager</code> 维护一组 <code>AudioOutputDescriptor</code>，记录每个输出当前的设备与音量曲线。</p>
+<p>图 1：属性到输出的路由决策</p>
+<pre><code>audio_attributes_t --getOutputForAttr--&gt; AudioPolicyManager --输出设备+流--&gt; AudioFlinger</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>播放时：<code>AudioFlinger</code> 在 <code>createTrack</code> 前（见 <code>AND-P7-201</code>）会向 <code>AudioPolicyManager::getOutputForAttr</code>（<code>AudioPolicyManager.cpp:1646</code>）询问该属性应走的输出；更底层再经 <code>getOutputForDevices</code>（<code>AudioPolicyManager.cpp:1862</code>）按设备收敛。<code>getOutputForAttrInt</code>（<code>:1392</code>）是其内部实现入口。失败路径：属性无法匹配任何输出（返回错误句柄）、设备不可用导致静默回退、音量曲线错配。</p>
+<p>设备状态变化时：框架侧 <code>AudioManager.setWiredDeviceConnectionState</code>（<code>AudioManager.java:7366</code>）上报，这条路是<strong>两跳 Binder</strong>：<code>AudioManager</code> 先经 <code>IAudioService</code> 落到 <code>system_server</code> 内的 <code>AudioService</code>（<code>AudioManager.java:7381</code> 取 <code>getService()</code>），再由 <code>AudioService</code> 调 <code>AudioSystem::setDeviceConnectionState</code>（<code>AudioSystem.cpp:1163</code>），由它经 <code>IAudioPolicyService</code>（<code>:1171</code> 的 <code>aps-&gt;setDeviceConnectionState</code>）进 <code>AudioPolicyService</code>。服务端方法表含 <code>setDeviceConnectionState</code>/<code>setForceUse</code> 等条目（<code>AudioPolicyService.cpp:76</code> 是 <code>setDeviceConnectionState</code>、<code>:80</code> 是 <code>setForceUse</code>；同一张方法表 <code>onNewAudioModulesAvailable</code> 在 <code>:75</code>、<code>getForceUse</code> 在 <code>:81</code>、<code>getOutputForAttr</code> 在 <code>:83</code>），调用方身份校验与分发是 <code>onTransact</code> 里的两级 switch——第一级 <code>:1355-:1378</code> 拦下 AudioFlinger 专属事务，第二级 <code>:1379-:1454</code> 校验调用方 uid；其中 <code>TRANSACTION_setForceUse</code> 那一支已被注释（<code>:1384</code>），方法表里有条目不等于事务真能进来。最后由服务端通知 <code>AudioPolicyManager</code> 重算路由并使活跃 track 失效（invalidate），客户端后续在新输出上重建。</p>
+<p>图 2：设备连接变更触发重路由</p>
+<pre><code>setWiredDeviceConnectionState -&gt; AudioService -&gt; AudioSystem -&gt; AudioPolicyService
+    -&gt; AudioPolicyManager 重算 -&gt; 活跃 track 失效(invalidate) -&gt; 客户端在新输出上重建</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>决策核心在 <code>AudioPolicyManager.cpp</code>：<code>getOutputForAttr</code>（<code>AudioPolicyManager.cpp:1646</code>）是公开的路由入口，把流属性映射到输出；<code>getOutputForDevices</code>（<code>AudioPolicyManager.cpp:1862</code>）按设备列表做最终收敛；<code>getOutputForAttrInt</code>（<code>AudioPolicyManager.cpp:1392</code>）承载实际匹配逻辑；<code>checkAndSetVolume</code>（<code>AudioPolicyManager.cpp:9220</code>）在路由确定后按曲线设定音量。</p>
+<p>服务端 <code>AudioPolicyService.cpp</code> 是 Binder 入口：其方法表与事务分发（方法表 <code>:75</code>–<code>:83</code>；两级 <code>TRANSACTION_*</code> switch 在 <code>:1355-:1378</code> 与 <code>:1379-:1454</code>）暴露 <code>setDeviceConnectionState</code>、<code>setForceUse</code>、<code>getForceUse</code>、<code>getOutputForAttr</code> 等接口，负责把框架请求转发给 <code>AudioPolicyManager</code> 实例。框架侧 <code>AudioManager.setWiredDeviceConnectionState</code>（<code>AudioManager.java:7366</code>）是应用/系统上报设备插拔的常用入口。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与 <code>AND-P7-201</code> 的关系：该篇讲「声音怎么从应用到 AudioFlinger」，本篇讲「AudioFlinger 把声音送到哪个设备」，二者接力。</li><li>与 <code>AudioFlinger</code> 的关系：AudioFlinger 执行混音与传输，AudioPolicy 决定目标设备与音量曲线。</li><li>与音频焦点（<code>AND-P7-102</code>）的关系：焦点决定「能不能出声」，策略决定「出了声去哪」。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>路由决策</td><td><code>frameworks/av/services/audiopolicy/managerdefault/AudioPolicyManager.cpp</code></td><td><code>getOutputForAttr</code>、<code>getOutputForDevices</code>、<code>checkAndSetVolume</code></td><td>策略核心</td></tr><tr><td>Binder 服务端</td><td><code>frameworks/av/services/audiopolicy/service/AudioPolicyService.cpp</code></td><td><code>setDeviceConnectionState</code>、<code>getForceUse</code></td><td>框架请求入口</td></tr><tr><td>框架上报</td><td><code>frameworks/base/media/java/android/media/AudioManager.java</code></td><td><code>setWiredDeviceConnectionState</code></td><td>设备插拔上报</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/av:475269ec44ac 锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/av rev-parse HEAD
+git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望分别得到 <code>475269ec44ac</code>、<code>94b4c163b7df</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;AudioPolicyManager::getOutputForAttr\|AudioPolicyManager::getOutputForDevices\|AudioPolicyManager::getOutputForAttrInt\|AudioPolicyManager::checkAndSetVolume&quot; \
+  frameworks/av/services/audiopolicy/managerdefault/AudioPolicyManager.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>getOutputForAttr</code> <code>:1646</code>、<code>getOutputForDevices</code> <code>:1862</code>、<code>getOutputForAttrInt</code> <code>:1392</code>、<code>checkAndSetVolume</code> <code>:9220</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;BINDER_METHOD_ENTRY(setDeviceConnectionState)\|BINDER_METHOD_ENTRY(getOutputForAttr)\|TRANSACTION_getOutputForAttr&quot; \
+  frameworks/av/services/audiopolicy/service/AudioPolicyService.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：方法表条目 <code>:76</code>（<code>setDeviceConnectionState</code>）/<code>:83</code>（<code>getOutputForAttr</code>），<code>TRANSACTION_getOutputForAttr</code> 分支在 <code>:1369</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;public void setWiredDeviceConnectionState&quot; \
+  frameworks/base/media/java/android/media/AudioManager.java</code></pre>
+<p>期望命中：<code>:7366</code>（及其重载 <code>:7380</code>）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「插蓝牙音乐就该自动切过去」。前提是 <code>AudioPolicyManager</code> 重路由成功且活跃 track 被失效（invalidate）；若重路由失败或 app 仍持有旧输出句柄，声音仍可能在手机响。</li><li>「没声音就是播放器问题」。更常是路由把流送到了当前未连接/无输出的设备上（如 HDMI 但电视未选源）。</li><li>「看起来对其实是错的」：以为 <code>AudioManager</code> 直接控制硬件。它只是上报设备状态与发起焦点/音量请求，真正改路由的是 <code>AudioPolicyManager</code>。</li><li>「音量差很多是播放器 bug」。不同输出设备有不同音量曲线（<code>checkAndSetVolume</code>），耳机与音响本就分流。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：如何确认声音被路由到了哪个设备？ <strong>答</strong>：<code>dumpsys audio</code> 看当前输出设备与 <code>AudioPolicyManager</code> 的路由结果；与 <code>dumpsys media.audio_flinger</code>（<code>AND-P7-201</code>）交叉验证。 <strong>追问</strong>：插拔设备后没切换？ <strong>答</strong>：查 <code>setWiredDeviceConnectionState</code> 是否上报、AudioPolicyService 是否重路由，转 §4.2。</p>
+<p><strong>问</strong>：为什么同一首歌蓝牙和扬声音量差很多？ <strong>答</strong>：设备音量曲线不同，由 <code>checkAndSetVolume</code>（<code>:9220</code>）按设备设定，并非应用音量。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>路由错误</td><td><code>dumpsys audio</code></td><td>当前输出设备</td><td>查 <code>getOutputForAttr</code>，转 §4.3</td></tr><tr><td>插拔不切换</td><td><code>dumpsys audio</code></td><td>设备连接状态</td><td>查 <code>setWiredDeviceConnectionState</code>，转 §4.2</td></tr><tr><td>音量异常</td><td><code>dumpsys audio</code></td><td>设备音量曲线</td><td>查 <code>checkAndSetVolume</code>，转 §4.3</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/av rev-parse HEAD</code></td><td>是否 <code>475269ec44ac</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：音频数据流本身（201）、audio HAL 契约（AND-P4-301）、音频焦点仲裁（102）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P7-201</code>、<code>AND-P7-G01</code>、<code>AND-P3-302</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-102</code>（焦点）、<code>AND-P10-301</code>（功耗与热管理）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>AudioPolicyManager.cpp</code> 约 10320 行、<code>AudioPolicyService.cpp</code> 约 2759 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>路由以「流属性 → 输出设备」映射，设备类型含 A2DP/USB/HDMI/有线耳机/扬声器（口径：架构语义）。</li><li>音量曲线按设备区分，由 <code>checkAndSetVolume</code>（<code>:9220</code>）落地（口径：源码符号）。</li><li>重路由时延依赖设备枚举速度，暂无统一实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>AudioPolicyManager.cpp</code> 约 10320 行，<code>getOutputForAttr</code> 在 <code>:1646</code></td><td>本篇行号基准</td></tr><tr><td>旧版本</td><td>策略实现类与路径略有差异</td><td>按符号重锚</td></tr><tr><td>演进</td><td>设备类型随硬件扩展（USB/HDMI/LE Audio）</td><td>路由表持续扩充</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>audio policy</code>、<code>AudioPolicyManager</code>；developer.android.com 站内检索 <code>AudioManager</code>、<code>audio device</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>AudioPolicyManager.cpp</code>、<code>AudioPolicyService.cpp</code>。</li><li>承接篇：<code>AND-P7-201</code>、<code>AND-P7-102</code>、<code>AND-P10-301</code>（功耗与热管理）。</li></ul>
+</article>
+<footer>android-100 · AND-P7-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>View 体系的 measure/layout/draw 与硬件加速</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>View 体系的 measure/layout/draw 与硬件加速</h1>
+<div class="kv"><span>ID：AND-P1-401</span><span>卷：P1</span><span>章：1.4</span><span>难度：3</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/view/View.java ；frameworks/base/core/java/android/view/ViewRootImpl.java ；frameworks/base/core/java/android/view/Choreographer.java ；frameworks/base/core/java/android/view/ThreadedRenderer.java ；frameworks/base/graphics/java/android/graphics/HardwareRenderer.java ；frameworks/base/libs/hwui/renderthread/RenderThread.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一帧的界面更新由三趟遍历完成：测量（measure）定每棵子树的大小，布局（layout）定位置，绘制（draw）产生绘制指令。这三趟不是随时都能跑，而是由帧调度器按显示信号节拍统一安排：请求重绘只是置一个标志位并登记一次遍历，真正的执行等到下一个帧时机。绘制完成后，若开启硬件加速，绘制指令被同步进渲染节点，再由渲染线程在另一侧执行，主线程因此不必等 GPU 完成。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-202（窗口如何建立并取得 Token）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/view/View.java</code></li><li><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></li><li><code>frameworks/base/core/java/android/view/Choreographer.java</code></li><li><code>frameworks/base/core/java/android/view/ThreadedRenderer.java</code></li><li><code>frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</code></li><li><code>frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep；带 V3 档的可选实验需要模拟器或真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>界面卡顿的排查往往止步于「优化布局层级」这类泛泛建议。要真正定位，需要知道一帧里主线程都干了什么、这些工作由谁触发、以及它们与显示节拍的关系。另一个常见困惑是「为什么在子线程改 View 会崩」——答案在于遍历的线程归属：遍历只在持有该窗口的线程上执行。这一篇把三趟遍历、帧调度与渲染线程的分工讲清。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>图 1：从请求重绘到出帧的链路</p>
+<pre><code>  请求重绘 ──▶ 登记遍历 ──▶ 帧时机 ──▶ 三趟遍历 ──▶ 出帧
+   (标志位)                              measure/layout/draw</code></pre>
+<p>四个角色：View（遍历的原语与虚方法）、ViewRootImpl（遍历的驱动者）、Choreographer（帧时机）、渲染线程（绘制指令的实际执行者）。</p>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>一个帧时机内，帧调度器按档依次回调：</p>
+<p>图 2：Choreographer 的帧回调类型与顺序</p>
+<pre><code>  帧时机 ─┬─ CALLBACK_INPUT(0)
+          ├─ CALLBACK_ANIMATION(1)
+          ├─ CALLBACK_INSETS_ANIMATION(2)
+          ├─ CALLBACK_TRAVERSAL(3)  ← 三趟遍历
+          └─ CALLBACK_COMMIT(4)</code></pre>
+<p><strong>遍历管线。</strong> 根视图的 <code>performTraversals</code> 依次调用 <code>performMeasure</code>、<code>performLayout</code>、<code>performDraw</code>。测量阶段对子视图递归调用 <code>measure</code>，最终落到 <code>onMeasure</code>；布局阶段递归调用 <code>layout</code> 落到 <code>onLayout</code>；绘制阶段调用 <code>draw</code>，其中包含背景、自身内容（<code>onDraw</code>）与子视图三部分。</p>
+<p><strong>帧调度。</strong> 调用 <code>requestLayout</code> 或使视图失效并不会立刻遍历，而是登记一次遍历请求。帧调度器按回调类型依次处理：输入、动画、内嵌动画、遍历、提交，依次为 0、1、2、3、4。遍历安排在 <code>CALLBACK_TRAVERSAL</code> 档，位于动画之后、提交之前。</p>
+<p><strong>硬件加速出帧。</strong> 绘制阶段把绘制记录同步到渲染节点后，交给渲染器线程。主线程只负责把「这一帧该画什么」描述出来，真正的栅格化与 GPU 提交在渲染线程完成，两者通过同步点配合。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>按钮被点击后调用使视图失效的接口。这一动作只把视图标脏并登记一次遍历。下一个帧时机到来时，帧调度器先跑输入与动画档，再跑遍历档：<code>performTraversals</code> 先按需测量、再布局、最后绘制。绘制产生显示列表并同步给渲染器，渲染线程在下一拍把它画出来。若主线程在三趟遍历里花了超过一个帧间隔的时间，这一帧就被推迟，表现为掉帧——这也是「不要在 <code>onDraw</code> 里做耗时操作」的机制性原因。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>窗口的建立与 Token 取得见 AND-P1-202；组件生命周期中的可见性变化见 AND-P1-102；绘制请求进入图形栈后的合成与上屏归 AND-P6 各篇；帧数据的采集与分析方法归 P10。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>测量原语</td><td><code>frameworks/base/core/java/android/view/View.java</code></td><td><code>measure</code>（约 28787 行）</td><td>最终落到 onMeasure</td></tr><tr><td>布局原语</td><td>同上</td><td><code>layout</code>（约 26040 行）</td><td>最终落到 onLayout</td></tr><tr><td>绘制原语</td><td>同上</td><td><code>draw</code>（约 25493 行）</td><td>背景、内容、子视图</td></tr><tr><td>请求重绘</td><td>同上</td><td><code>requestLayout</code>（约 28723 行）</td><td>登记遍历请求</td></tr><tr><td>遍历驱动</td><td><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td><code>performTraversals</code>（约 3924 行）</td><td>三趟遍历总入口</td></tr><tr><td>三趟实现</td><td>同上</td><td><code>performMeasure</code>（约 5472 行）等</td><td>分别对应测量/布局/绘制</td></tr><tr><td>登记遍历</td><td>同上</td><td><code>scheduleTraversals</code>（约 3307 行）</td><td>置位并排队</td></tr><tr><td>帧时机</td><td><code>frameworks/base/core/java/android/view/Choreographer.java</code></td><td><code>doCallbacks</code>（约 1229 行）</td><td>按档依次执行</td></tr><tr><td>加速渲染</td><td><code>frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</code></td><td><code>syncAndDrawFrame</code>（约 595 行，定义）</td><td>同步并提交渲染线程</td></tr><tr><td>渲染桥接</td><td><code>frameworks/base/core/java/android/view/ThreadedRenderer.java</code></td><td><code>ThreadedRenderer</code>（约 67 行，继承上者；帧同步调用在 <code>draw</code> 约 848 行）</td><td>线程化渲染的实现</td></tr><tr><td>渲染线程</td><td><code>frameworks/base/libs/hwui/renderthread/RenderThread.cpp</code></td><td><code>threadLoop</code>（约 420 行）</td><td>另一侧执行绘制</td></tr></tbody></table>
+<p>帧调度回调档位同族集中如下（口径为 <code>Choreographer.java</code>，2026-10-14 实测）：</p>
+<table><thead><tr><th>常量</th><th>值</th><th>语义</th><th>出处</th></tr></thead><tbody><tr><td><code>CALLBACK_INPUT</code></td><td>0</td><td>输入事件处理</td><td>约 321 行</td></tr><tr><td><code>CALLBACK_ANIMATION</code></td><td>1</td><td>动画</td><td>约 328 行</td></tr><tr><td><code>CALLBACK_INSETS_ANIMATION</code></td><td>2</td><td>内嵌动画</td><td>约 344 行</td></tr><tr><td><code>CALLBACK_TRAVERSAL</code></td><td>3</td><td>遍历（测量/布局/绘制）</td><td>约 351 行</td></tr><tr><td><code>CALLBACK_COMMIT</code></td><td>4</td><td>提交</td><td>约 363 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析（含可选运行时观察）。静态命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 三趟遍历原语与请求重绘
+grep -n &quot;public final void measure\|public void layout(int l\|public void draw(@NonNull Canvas\|public void requestLayout&quot; \
+  frameworks/base/core/java/android/view/View.java
+# 期望：命中约 28787/26040/25493/28723 行
+
+# 2. 遍历驱动与三趟实现
+grep -n &quot;private void performTraversals\|private void performMeasure\|private void performLayout\|private boolean performDraw&quot; \
+  frameworks/base/core/java/android/view/ViewRootImpl.java
+# 期望：命中约 3924/5472/5538/5940 行
+
+# 3. 帧调度档位
+grep -n &quot;public static final int CALLBACK_&quot; \
+  frameworks/base/core/java/android/view/Choreographer.java
+# 期望：命中 0/1/2/3/4 五个档位（约 321–363 行）
+
+# 4. 加速渲染的同步与提交
+grep -n &quot;syncAndDrawFrame\|updateRootDisplayList&quot; \
+  frameworks/base/core/java/android/view/ThreadedRenderer.java \
+  frameworks/base/graphics/java/android/graphics/HardwareRenderer.java
+# 期望：命中约 848 行与约 730 行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>可选运行时观察（V3，需模拟器，包名换成实际值）：</p>
+<pre><code class="lang-bash">adb shell dumpsys gfxinfo &lt;package&gt;
+# 期望：输出最近若干帧的绘制耗时分布与掉帧百分比
+
+adb shell dumpsys gfxinfo &lt;package&gt; framestats
+# 期望：逐帧给出各阶段耗时，可据以判断瓶颈在测量、布局还是绘制</code></pre>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为调了 `requestLayout` 会立刻重新布局。</strong> 它只登记请求；执行等到下一个帧时机。</p>
+<p><strong>误区二：以为绘制在子线程做就不用管主线程。</strong> 记录绘制指令仍在主线程；渲染线程只负责栅格化与提交。</p>
+<p><strong>误区三（看起来对其实是错的）：以为三趟遍历每帧都会全部执行。</strong> 若尺寸未变，测量与布局可能被跳过；只有内容变脏时才走到绘制。</p>
+<p><strong>误区四：以为硬件加速只是「更快」。</strong> 它改变了绘制的执行模型与线程归属，也带来记录与同步的额外约束。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么在子线程更新视图会抛异常？ <strong>答</strong>：遍历与视图状态绑定在持有该窗口的线程上；跨线程更新破坏了这一前提。</p>
+<p><strong>追问</strong>：那 <code>post</code> 为什么可以？ <strong>答</strong>：它把操作切回该视图所属线程的消息队列，仍在该线程执行。</p>
+<p><strong>问</strong>：掉帧该从哪里查？ <strong>答</strong>：用帧数据工具看逐帧各阶段耗时；若绘制阶段占比高，多与过度绘制或复杂显示列表有关。</p>
+<p><strong>追问</strong>：测量和布局阶段占比高说明什么？ <strong>答</strong>：多与布局层级过深或嵌套过密有关，属于结构性问题，不是单点优化能解决的。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>界面卡顿</td><td><code>adb shell dumpsys gfxinfo &lt;package&gt;</code></td><td>掉帧百分比</td><td>用 framestats 定位阶段</td></tr><tr><td>定位到绘制</td><td><code>adb shell dumpsys gfxinfo &lt;package&gt; framestats</code></td><td>绘制阶段耗时</td><td>减少过度绘制</td></tr><tr><td>定位到布局</td><td>同上</td><td>测量/布局耗时</td><td>减少层级嵌套</td></tr><tr><td>改视图崩溃</td><td><code>grep -n &quot;private void performTraversals&quot; frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td>遍历驱动线程</td><td>用 post 切回主线程</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：窗口建立与 Token（AND-P1-202）；组件生命周期（AND-P1-102）；合成与上屏（AND-P6-101、AND-P6-102）；帧数据采集方法（P10）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-202</code>。</p>
+<p><strong>本篇后继</strong>：被 <code>AND-P6-101</code>、<code>AND-P6-102</code>、P10 相关篇引用。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>帧调度回调档位共 5 档，取值 0–4，口径为 <code>Choreographer.java</code> 约 321–363 行，2026-10-14 实测。</li><li>三趟遍历总入口 <code>performTraversals</code> 位于约 3924 行，口径为该文件符号位置，2026-10-14 实测。</li><li>加速渲染提交 <code>syncAndDrawFrame</code> 定义在 <code>HardwareRenderer.java</code> 约 595 行（<code>ThreadedRenderer</code> 于 <code>draw</code> 内约 848 行调用），口径同上。</li><li>一帧的时间预算与设备刷新率相关，60Hz 与 120Hz 设备不同，本篇不给单一毫秒数，实际操作以 <code>gfxinfo</code> 的帧分布为准。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>三趟遍历与帧调度档位如本篇所述，渲染经 <code>ThreadedRenderer</code></td><td>读者按本篇命令可复现</td></tr><tr><td>更早版本</td><td>早期硬件加速为可选且覆盖不全，帧调度档位更少（据官方公开资料，本树仅含 android17-release，无法回溯核验）</td><td>旧设备的性能特征与新版不同</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>hardware acceleration</code>、<code>rendering performance</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ViewRootImpl</code>、<code>ThreadedRenderer</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/view/</code>、<code>frameworks/base/libs/hwui/renderthread/</code>。</li><li>承接篇：<code>AND-P1-202</code>、<code>AND-P6-101</code>、<code>AND-P6-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

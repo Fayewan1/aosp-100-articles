@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资源体系与数据持久化：配置适配、Room/DataStore/Keystore</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>资源体系与数据持久化：配置适配、Room/DataStore/Keystore</h1>
+<div class="kv"><span>ID：AND-P1-402</span><span>卷：P1</span><span>章：1.4</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/content/res/Resources.java ；frameworks/base/core/java/android/content/res/ResourcesImpl.java ；frameworks/base/core/java/android/content/res/AssetManager.java ；frameworks/base/core/java/android/app/ResourcesManager.java ；frameworks/base/core/java/android/app/SharedPreferencesImpl.java ；frameworks/base/keystore/java/android/security/keystore/KeyGenParameterSpec.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>资源体系解决「同一份界面适配不同屏幕与语言」：资源按配置限定符分目录存放，运行时由资源管理器按当前配置挑出最匹配的一份，配置变化时重新选路。数据持久化按性质分三类：键值类用偏好设置，关系类用数据库，密钥类必须交给密钥库。前两类可在 AOSP 树内核验，现代封装（Room、DataStore）属 AndroidX、不在本树。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-202（界面层级如何建立）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/content/res/Resources.java</code></li><li><code>frameworks/base/core/java/android/content/res/ResourcesImpl.java</code></li><li><code>frameworks/base/core/java/android/content/res/AssetManager.java</code></li><li><code>frameworks/base/core/java/android/app/ResourcesManager.java</code></li><li><code>frameworks/base/core/java/android/app/SharedPreferencesImpl.java</code></li><li><code>frameworks/base/keystore/java/android/security/keystore/KeyGenParameterSpec.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep；本篇为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>三个常见疑问：为什么同一套代码在不同手机上取到不同图片？为什么切到横屏后文字还是竖屏那份？为什么在偏好设置里存敏感信息会被判定有风险？三者指向资源选路、配置变更与存储选型，共用一条判断线——数据是「随配置变」还是「与应用状态绑定」，以及「是否属于密钥材料」。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>图 1：资源选路与三类持久化的边界</p>
+<pre><code>  资源：限定符目录 ──按当前配置匹配──▶ 具体条目
+  存储：键值 / 关系 / 密钥 三类 ──各有适用边界</code></pre>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>资源选路。入口是 <code>Resources</code>，实际选路由其内部实现与资源管理器协作完成：资源管理器维护「配置到资源集合」的映射，配置变化时更新映射并让资源对象重新绑定；底层读取由资产管理器承担，它面对编译后的资源表而非目录树。选路即「匹配」——同一份资源可有多个变体，目录名里的限定符（语言、屏幕密度、横竖屏等）表达适用条件，系统按当前配置选出最匹配的一个，无精确匹配时按最近似规则回退。</p>
+<p>三类持久化。键值类由偏好设置实现，其内部实现负责磁盘加载与提交；关系类由数据库接口承担；密钥类必须走密钥库——密钥材料不交给应用保管，应用只持有密钥别名与使用策略。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>用户把系统语言从中文切到英文。资源管理器得知配置变化后，让窗口的资源对象按新配置重新选路；此后同一份「欢迎」字符串取到英文变体，而图片若不区分语言则仍取同一份——应用代码没改，变的是选路结果。不过这只是资源层的视角：设备上语系变更默认会触发组件重建（除非在清单里显式声明拦截该配置变更），重建与复用见 AND-P1-102。数据侧同理：把登录令牌存进偏好设置，问题不在「能不能存」，而在「存得对不对」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>界面层级见 AND-P1-202；组件在配置变更时的重建见 AND-P1-102；密钥库的完整安全模型归 P9；数据库与文件系统底层归 P3 与 P11。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>资源入口</td><td><code>frameworks/base/core/java/android/content/res/Resources.java</code></td><td><code>updateConfiguration</code>（约 2196 行）</td><td>配置变化时重新绑定</td></tr><tr><td>资源实现</td><td><code>frameworks/base/core/java/android/content/res/ResourcesImpl.java</code></td><td>实现类</td><td>选路与读取</td></tr><tr><td>资产读取</td><td><code>frameworks/base/core/java/android/content/res/AssetManager.java</code></td><td>读取编译后资源表</td><td>面对资源表</td></tr><tr><td>配置映射</td><td><code>frameworks/base/core/java/android/app/ResourcesManager.java</code></td><td><code>applyConfigurationToResources</code>（约 1554 行）</td><td>更新映射</td></tr><tr><td>键值存储</td><td><code>frameworks/base/core/java/android/app/SharedPreferencesImpl.java</code></td><td><code>loadFromDisk</code>（约 155）、<code>commit</code>（约 605）、<code>apply</code>（约 485）</td><td>加载与两种提交</td></tr><tr><td>密钥策略</td><td><code>frameworks/base/keystore/java/android/security/keystore/KeyGenParameterSpec.java</code></td><td><code>Builder</code>（约 1008 行）</td><td>生成密钥的策略</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析；命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 资源配置重新绑定与映射更新
+grep -n &quot;public void updateConfiguration&quot; \
+  frameworks/base/core/java/android/content/res/Resources.java
+grep -n &quot;public final boolean applyConfigurationToResources&quot; \
+  frameworks/base/core/java/android/app/ResourcesManager.java
+# 期望：命中约 2196 行与约 1554 行
+
+# 2. 键值存储的加载与两种提交
+grep -n &quot;private void loadFromDisk\|public boolean commit\|public void apply&quot; \
+  frameworks/base/core/java/android/app/SharedPreferencesImpl.java
+# 期望：命中约 155/605/485 行
+
+# 3. 密钥生成策略与使用前置条件
+grep -n &quot;public final static class Builder\|setUserAuthenticationRequired&quot; \
+  frameworks/base/keystore/java/android/security/keystore/KeyGenParameterSpec.java
+# 期望：命中约 1008/1513 行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>边界说明：Room 与 DataStore 属 AndroidX，<strong>不在本 AOSP 树内</strong>，无法用上述命令核验；本篇只做选型层面的描述，不给源码锚点。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为资源是按目录顺序取的。</strong> 实际按限定符优先级匹配，取最匹配的一份。</p>
+<p><strong>误区二：以为配置变化会重建资源对象。</strong> 通常是让既有资源对象按新配置重新绑定，而非整体重建。</p>
+<p><strong>误区三（看起来对其实是错的）：以为偏好设置可以安全存任何数据。</strong> 它只提供轻量持久化，不做密钥保护；敏感材料必须交给密钥库。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：同一份资源在不同设备上表现不同，怎么排查？ <strong>答</strong>：先确认限定符目录是否覆盖目标配置，再看是否有更匹配的变体覆盖了预期那份；一份都不匹配才报错。</p>
+<p><strong>问</strong>：敏感数据放哪？ <strong>答</strong>：交给密钥库，并用使用前置条件约束何时可用；不要自行加密后放进普通存储。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>取到错误的资源</td><td><code>grep -n &quot;public void updateConfiguration&quot; frameworks/base/core/java/android/content/res/Resources.java</code></td><td>重新绑定入口</td><td>检查限定符目录</td></tr><tr><td>切语言不生效</td><td><code>grep -n &quot;applyConfigurationToResources&quot; frameworks/base/core/java/android/app/ResourcesManager.java</code></td><td>映射是否更新</td><td>核对组件是否重建</td></tr><tr><td>存了读不到</td><td><code>grep -n &quot;private void loadFromDisk&quot; frameworks/base/core/java/android/app/SharedPreferencesImpl.java</code></td><td>加载时机</td><td>检查提交方式</td></tr><tr><td>密钥被拒用</td><td><code>grep -n &quot;setUserAuthenticationRequired&quot; frameworks/base/keystore/java/android/security/keystore/KeyGenParameterSpec.java</code></td><td>使用前置条件</td><td>核对解锁状态</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：界面层级（AND-P1-202）；组件配置变更重建（AND-P1-102）；密钥库安全模型（P9）；数据库与文件系统底层（P3、P11）。<strong>明确不覆盖</strong>：Room、DataStore 的实现细节（AndroidX，不在本树）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-202</code>。<strong>本篇后继</strong>：被 P9 与 P11 相关篇引用。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>资源重新绑定入口 <code>updateConfiguration</code> 约 2196 行，配置映射更新 <code>applyConfigurationToResources</code> 约 1554 行。</li><li>键值存储两种提交：同步 <code>commit</code>（约 605 行）与异步 <code>apply</code>（约 485 行）。</li><li>资源变体数量没有全局上限常量，取决于各应用自己的限定符目录，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>资源选路与键值存储实现如本篇所述</td><td>按本篇命令可复现</td></tr><tr><td>更早版本</td><td>选路规则大体稳定，键值存储实现细节有调整</td><td>按符号重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>app resources</code>、<code>data storage</code>、<code>keystore</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ResourcesManager</code>、<code>SharedPreferencesImpl</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/content/res/</code>、<code>frameworks/base/keystore/</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

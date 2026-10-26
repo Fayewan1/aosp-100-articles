@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ART 内存与 GC：堆布局、并发 GC 与对象移动</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>ART 内存与 GC：堆布局、并发 GC 与对象移动</h1>
+<div class="kv"><span>ID：AND-P3-202</span><span>卷：P3</span><span>章：3.2</span><span>难度：4</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：art/runtime/gc/heap.h ；art/runtime/gc/heap.cc ；art/runtime/gc/space/region_space.h ；art/runtime/gc/space/large_object_space.h ；art/runtime/gc/collector/concurrent_copying.h ；art/runtime/read_barrier-inl.h ；art/runtime/lock_word.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>ART 的 Java 堆不是一整块，而是由若干空间（space）拼起来的；小对象住在按 <code>kRegionSize = 256 * KB</code> 切分的区域空间里，超过 12KB 的对象直接进大对象空间。堆的空闲水位上下限默认是 32MB 与 8MB，水位也是触发 GC 的主要依据之一。collector 的默认类型由编译期决定：本树 <code>ART_DEFAULT_GC_TYPE</code> 默认为 <code>CMC</code>（并发标记压缩，<code>art/build/art.go:50</code>），<code>CMS</code>/<code>SS</code> 等是可配置备选；启用读屏障走 CC（并发拷贝），启用 userfaultfd 走 CMC。移动式回收靠锁字（lock word）里的转发地址把旧对象指向新位置，应用线程通过读屏障（read barrier）在访问引用时顺便把自己引用的对象也「跟着搬」到新副本，所以上层看到的对象引用始终有效。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P3-201</code>。它讲了类与 OAT 装载，本篇的堆对象从哪里来、引用字段怎么描述，接在那篇之后理解成本最低。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>art/runtime/gc/heap.h</code></li><li><code>art/runtime/gc/heap.cc</code></li><li><code>art/runtime/gc/space/region_space.h</code></li><li><code>art/runtime/gc/space/large_object_space.h</code></li><li><code>art/runtime/gc/collector/concurrent_copying.h</code></li><li><code>art/runtime/read_barrier-inl.h</code></li><li><code>art/runtime/lock_word.h</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>线上看到一个进程的 Java 堆只有 20MB 上下，GC 日志却一直在打，于是有人怀疑「堆没满为什么还回收」。另一个常见困惑是：在 <code>MAT</code> 里抓到的对象地址，和上一次抓的对不上，但应用里的引用明明没改过——对象到底被搬走没有？</p>
+<p>这两个问题指向同一块知识：堆被切成什么形状、空闲水位怎么算、回收器在什么时候被选中、对象移动后引用又靠什么保持有效。不了解这些，看 <code>logcat</code> 里的 GC 行只能猜。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念先立住：空间（space）是堆的物理分区；区域（region）是区域空间内部的分配粒度；collector 是被选中的回收算法实现；锁字（lock word）是每个对象头里的一段复用字段，转发时借它存新地址。</p>
+<p>图 1：堆空间构成与 GC 参与方</p>
+<pre><code>  Java heap
+  +-------------------------------+
+  | region space (256KB regions)  |  &lt;- 小对象、可移动
+  +-------------------------------+
+  | large object space            |  &lt;- &gt;12KB，freelist 或 map
+  +-------------------------------+
+  | image / zygote / non-moving   |  &lt;- 启动期只读或不可移动
+  +-------------------------------+
+
+  mutator  --read barrier--&gt;  reference  --forwarding--&gt;  new copy</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关系上：collector 负责决定哪些空间被扫、哪些对象被搬；搬家时把新地址写进锁字；应用线程（mutator）不主动查表，而是在每次读引用时由读屏障（read barrier）兜底修正。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>堆的空闲水位。</strong> 堆默认最大空闲 <code>kDefaultMaxFree = 32 * MB</code>，最小空闲 <code>kDefaultMinFree = kDefaultMaxFree / 4</code>，也就是 8MB。这两个值不是堆上限，而是「GC 之后希望剩下多少空闲」的目标区间；堆增长策略与 GC 触发判断都围绕这条区间展开。</p>
+<p><strong>区域粒度。</strong> 区域空间把映射区按固定粒度切开：<code>kRegionSize = 256 * KB</code>，区域数量 <code>num_regions_ = mem_map_.Size() / kRegionSize</code>。所以一个 4MB 的映射区就是 16 个区域。这个粒度决定了回收时「按区域腾挪」的最小单位。</p>
+<p><strong>大对象直通。</strong> 超过阈值的对象不进区域空间，直接进大对象空间。下限常量 <code>kMinLargeObjectThreshold = 12 * KB</code>，默认阈值 <code>kDefaultLargeObjectThreshold = kMinLargeObjectThreshold</code>，即默认 12KB。运行期可以通过 <code>LargeObjectThreshold</code> 选项调整。大对象空间有两种实现：<code>kFreeList</code> 与 <code>kMap</code>。</p>
+<p><strong>collector 选择。</strong> 枚举 <code>art/runtime/gc/collector_type.h</code> 里列了 <code>kCollectorTypeMS</code>、<code>CMS</code>、<code>CMC</code>、<code>CMCBackground</code>、<code>SS</code>、<code>CC</code>、<code>CCBackground</code>、<code>HomogeneousSpaceCompact</code> 等。默认 collector 由编译期常量 <code>kCollectorTypeDefault</code> 决定（<code>collector_type.h:71-84</code>，随 <code>ART_DEFAULT_GC_TYPE</code> 宏切换，本树为 CMC），运行期选项可以改选。<code>heap.cc</code> 构造流程里的两个分支（userfaultfd→CMC/CMCBackground，读屏障→CC/CCBackground）不是选型逻辑本身，而是对选型结果的一致性校验（<code>CHECK_EQ</code>，<code>heap.cc:452-469</code>）：先打一行日志 <code>Using &lt;generational&gt; &lt;foreground&gt; GC.</code>，再断言前台/后台类型与当前配置匹配；非 zygote 且是命令行运行的情况会关闭后台压缩（<code>:478-484</code>）。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>kDefaultMaxFree</code></td><td>堆 GC 后目标最大空闲，32MB</td><td><code>art/runtime/gc/heap.h:144</code></td></tr><tr><td><code>kDefaultMinFree</code></td><td>目标最小空闲，取最大值四分之一</td><td><code>art/runtime/gc/heap.h:145</code></td></tr><tr><td><code>kRegionSize</code></td><td>区域空间粒度，256KB</td><td><code>art/runtime/gc/space/region_space.h:236</code></td></tr><tr><td><code>kMinLargeObjectThreshold</code></td><td>大对象阈值下限，12KB</td><td><code>art/runtime/gc/heap.h:160</code></td></tr><tr><td><code>kDefaultLargeObjectThreshold</code></td><td>默认大对象阈值，等于下限</td><td><code>art/runtime/gc/heap.h:161</code></td></tr></tbody></table>
+<p><strong>对象移动的转发。</strong> 并发拷贝 collector 持有一个区域空间成员 <code>region_space_</code>，并对 to-space 维持不变式断言。对象被搬走后，旧副本的锁字被改写成转发状态：<code>LockWord::kForwardingAddress</code> 表示该锁字当前存的不是锁信息而是转发地址，<code>LockWord::FromForwardingAddress</code> 用来取出它，<code>kForwardingAddressShift = kObjectAlignmentShift</code> 说明地址是按对象对齐位数编码的。判断一个对象是否已被搬走，就看 <code>old_lock_word.GetState() == LockWord::kForwardingAddress</code>。</p>
+<p><strong>读屏障。</strong> 应用线程拿到一个引用时，<code>ReadBarrier::Barrier</code> 先查对象的读屏障状态：是灰对象才进慢路径 <code>Mark(ref)</code>（<code>read_barrier-inl.h:51-63</code>），Mark 内部再经锁字判断是否已转发（<code>GetState() == LockWord::kForwardingAddress</code>，<code>concurrent_copying.cc:3458</code>），是则取新副本地址；<code>ReadBarrier::BarrierForRoot</code> 负责根集里引用的同样处理。这是「移动式 GC 对上层透明」的全部秘密——引用值本身没变，变的是解引用路径。</p>
+<p><strong>堆大小相关的属性。</strong> <code>dalvik.vm.heapgrowthlimit</code>、<code>dalvik.vm.heapmaxfree</code>、<code>dalvik.vm.heapminfree</code>、<code>dalvik.vm.heapstartsize</code> 这几个属性由 <code>art/runtime/metrics/statsd.cc</code> 读取（<code>:498-502</code>），用于把当前堆配置带进指标上报；它们本身不是调水位或堆增长行为的入口。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设进程的 region space 映射了 4MB。按 <code>num_regions_ = mem_map_.Size() / kRegionSize</code>，即 <code>4MB / 256KB = 16</code> 个区域。</p>
+<p>一次 GC 后，堆里剩余空闲 8MB 以上、32MB 以下，落在 <code>kDefaultMinFree</code> 到 <code>kDefaultMaxFree</code> 的带子里，堆暂不扩张。此时应用分配一个 16KB 的数组：它超过 <code>kDefaultLargeObjectThreshold</code>（12KB），不走区域空间，直接进大对象空间，落在 <code>kFreeList</code> 或 <code>kMap</code> 实现之一上。随后应用分配一个 4KB 的小对象：走区域空间，占用 16 个区域中某一个区域的一段。</p>
+<p>如果这轮选中的是 CC，小对象可能在下一轮被搬到 to-space。搬完之后，栈上那个引用还是老地址值，但读屏障一读，命中 <code>LockWord::kForwardingAddress</code>，取到新副本。应用代码零感知。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P3-201</code> 负责类与 OAT/镜像的装载：本篇的堆里那些对象，其类型元数据与代码来自那篇讲的装载路径。<code>AND-P3-203</code> 负责 JIT 与代码缓存：那部分内存不在本篇讲的 Java 堆里，别混着算。内存归因分析的方法论放在 <code>P10-201</code>，本篇只交代「空间怎么切、回收怎么做」。设备端的低内存处置（LMK/PSI、lmkd）属于 P5/P10 的范围，本篇不涉及。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>堆配置与水位</td><td><code>art/runtime/gc/heap.h</code></td><td><code>kDefaultMaxFree</code>、<code>kDefaultMinFree</code>、<code>kMinLargeObjectThreshold</code></td><td>默认值与阈值都在这一个头文件里</td></tr><tr><td>collector 选择</td><td><code>art/runtime/gc/heap.cc</code></td><td><code>Using &lt;generational&gt; &lt;foreground&gt; GC.</code>、userfaultfd/读屏障分支</td><td>看选型逻辑与日志格式</td></tr><tr><td>区域粒度</td><td><code>art/runtime/gc/space/region_space.h</code></td><td><code>kRegionSize</code></td><td>区域空间的基本单位</td></tr><tr><td>区域数量</td><td><code>art/runtime/gc/space/region_space.cc</code></td><td><code>num_regions_</code></td><td>映射大小换算成区域数</td></tr><tr><td>大对象空间</td><td><code>art/runtime/gc/space/large_object_space.h</code></td><td>大对象存放实现</td><td>与 <code>kFreeList</code>/<code>kMap</code> 对应</td></tr><tr><td>并发拷贝</td><td><code>art/runtime/gc/collector/concurrent_copying.h</code></td><td><code>region_space_</code>、to-space 不变式</td><td>看移动式回收持有什么</td></tr><tr><td>转发状态</td><td><code>art/runtime/lock_word.h</code></td><td><code>kForwardingAddress</code>、<code>FromForwardingAddress</code>、<code>kForwardingAddressShift</code></td><td>地址存在锁字里</td></tr><tr><td>读屏障</td><td><code>art/runtime/read_barrier-inl.h</code></td><td><code>ReadBarrier::Barrier</code>、<code>BarrierForRoot</code></td><td>引用修正的实际入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：art:b753cf97923c</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">cd art &amp;&amp; git rev-parse HEAD</code></pre>
+<p>期望输出 <code>b753cf97923c</code> 开头的完整提交号，确认树与本文口径一致。</p>
+<pre><code class="lang-bash">grep -n &quot;kDefaultMaxFree\|kDefaultMinFree&quot; runtime/gc/heap.h | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到第 144、145 行两条定义，前者是 <code>32 * MB</code>，后者是前者四分之一。</p>
+<pre><code class="lang-bash">grep -n &quot;kRegionSize\|num_regions_&quot; runtime/gc/space/region_space.h runtime/gc/space/region_space.cc | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>region_space.h:236</code> 的 <code>kRegionSize = 256 * KB</code>，以及 <code>region_space.cc:112</code> 的区域数换算。</p>
+<pre><code class="lang-bash">grep -n &quot;kMinLargeObjectThreshold\|kDefaultLargeObjectThreshold&quot; runtime/gc/heap.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 160/161 两行，默认阈值等于下限。</p>
+<pre><code class="lang-bash">grep -n &quot;Using .*GC\.&quot; runtime/gc/heap.cc</code></pre>
+<p>期望在 450–451 行附近命中那行日志格式，紧随其后是 userfaultfd 与读屏障分支。</p>
+<pre><code class="lang-bash">grep -n &quot;kForwardingAddress\|FromForwardingAddress\|kForwardingAddressShift&quot; runtime/lock_word.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在 132、154、182 行命中三个符号。</p>
+<pre><code class="lang-bash">grep -n &quot;ReadBarrier::Barrier&quot; runtime/read_barrier-inl.h</code></pre>
+<p>期望在 35 行与 107 行分别命中 <code>Barrier</code> 与 <code>BarrierForRoot</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：堆没满就不会 GC。</strong> 错。触发判断看的是空闲水位与分配速率，不是「堆用光」。一次 GC 后空闲量还没跌到 <code>kDefaultMinFree</code> 附近，也可能因为别的原因触发。</p>
+<p><strong>误区二：GC 后对象地址变了一定是应用出了问题。</strong> 错。移动式 collector 本来就会搬对象，搬到哪是它的事。应用看到的引用一直是有效的，因为读屏障在解引用时修正。</p>
+<p><strong>误区三（看起来对其实是错的）：引用值在对象移动后会同步改写成新地址。</strong> 不会。栈上和寄存器里的引用值保持原样，旧副本的锁字被写成转发地址。读屏障走一跳才拿到新副本。正因为如此，才不需要全量扫描并改写所有引用位置。</p>
+<p><strong>误区四：大对象和小对象走同一套回收逻辑。</strong> 不完全。超过 <code>kDefaultLargeObjectThreshold</code> 的对象进大对象空间，实现是 <code>kFreeList</code> 或 <code>kMap</code>，与区域空间的区域腾挪不是一回事。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：怎么确认当前进程用的是哪个 collector？ <strong>答</strong>：看启动日志里 <code>Using &lt;generational&gt; &lt;foreground&gt; GC.</code> 那一行，它把代际与前台回收器都打出来了。 <strong>追问</strong>：那后台回收器呢？ <strong>答</strong>：日志行只给前台；后台是从启用 userfaultfd 或读屏障的分支推出来的，分别是 CMCBackground 与 CCBackground。</p>
+<p><strong>问</strong>：把 <code>dalvik.vm.heapmaxfree</code> 调大能减少 GC 吗？ <strong>答</strong>：这个属性和 <code>dalvik.vm.heapminfree</code> 一起影响 GC 后的目标空闲区间，从而影响堆增长与下一次触发的时机，但不保证「调大就不 GC」。 <strong>追问</strong>：那 <code>dalvik.vm.heapstartsize</code> 呢？ <strong>答</strong>：它决定初始堆规模，影响的是早期分配要不要立刻扩张，属于起点而非上限。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑 collector 类型与预期不符</td><td><code>grep -n &quot;Using .*GC\.&quot; art/runtime/gc/heap.cc</code></td><td>日志格式与两个分支的先后顺序</td><td>回设备侧抓启动日志比对实际打印</td></tr><tr><td>大对象阈值被改过</td><td><code>grep -rn &quot;LargeObjectThreshold&quot; art/runtime/runtime_options.def</code></td><td>选项是否存在及默认引用</td><td>查设备上的运行期属性设置</td></tr><tr><td>区域数量算不对</td><td><code>grep -n &quot;num_regions_&quot; art/runtime/gc/space/region_space.cc</code></td><td>换算公式与 <code>kRegionSize</code></td><td>核对映射大小是否与预期一致</td></tr><tr><td>想确认转发判断条件</td><td><code>grep -n &quot;kForwardingAddress&quot; art/runtime/gc/collector/concurrent_copying.cc</code></td><td>状态比较的那一行</td><td>顺着看 to-space 不变式断言</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：类与 OAT/镜像装载见 <code>AND-P3-201</code>；JIT 与代码缓存见 <code>AND-P3-203</code>；堆内存归因分析方法见 <code>P10-201</code>；LMK/PSI 与 lmkd 见 P5/P10 相关篇。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P3-201</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P3-203</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>默认最大空闲 32MB、最小空闲 8MB：源码常量口径（<code>art/runtime/gc/heap.h:144/145</code>）。</li><li>区域粒度 256KB：源码常量口径（<code>art/runtime/gc/space/region_space.h:236</code>）。</li><li>大对象默认阈值 12KB：源码常量口径（<code>art/runtime/gc/heap.h:160/161</code>）。</li><li>转发地址的位宽与对齐关系：由 <code>kForwardingAddressShift = kObjectAlignmentShift</code> 决定，具体对齐位数本篇不断言。</li><li>各机型上 <code>dalvik.vm.heap*</code> 的实际取值：设备属性口径，本篇无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td>实测状态：水位 32MB/8MB、区域 256KB、大对象默认 12KB 并存；collector 分支含 userfaultfd 与读屏障两条</td><td>选型看开关，不看机型</td></tr><tr><td>未列入本树事实清单的版本</td><td>本篇不断言</td><td>迁移到别的版本时以符号 grep 为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>art runtime docs</code>、<code>garbage collection</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>concurrent copying</code>、<code>read barrier</code>、<code>region space</code>。</li><li>本仓关键路径：<code>art/runtime/gc/heap.cc</code>、<code>art/runtime/gc/collector/concurrent_copying.cc</code>、<code>art/runtime/read_barrier-inl.h</code>。</li><li>承接篇：<code>AND-P3-201</code>、<code>AND-P3-203</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P3-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

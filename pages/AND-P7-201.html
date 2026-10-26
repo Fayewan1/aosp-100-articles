@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音频框架：AudioTrack/AudioRecord 到 AudioFlinger</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>音频框架：AudioTrack/AudioRecord 到 AudioFlinger</h1>
+<div class="kv"><span>ID：AND-P7-201</span><span>卷：P7</span><span>章：7.2</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/media/java/android/media/AudioTrack.java ；frameworks/base/media/java/android/media/AudioRecord.java ；frameworks/av/media/libaudioclient/AudioTrack.cpp ；frameworks/av/services/audioflinger/AudioFlinger.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>AudioTrack</code> 与 <code>AudioRecord</code> 是应用播放与录制音频的唯一门面，但它们的 buffer 从不直达硬件：控制面经 Binder 让 <code>audioserver</code> 里的 <code>AudioFlinger</code> 建出一根 track，<strong>数据面则走共享内存环形缓冲</strong>——那块内存的句柄由 <code>createTrack</code> 的返回对象带来：<code>AudioTrack.cpp:1906</code> 调 <code>audioFlinger-&gt;createTrack(aidlInput, response)</code>，随后 <code>:1946-1959</code> 通过 <code>output.audioTrack-&gt;getCblk(&amp;sfr)</code> 取出控制块与其背后的 <code>sp&lt;IMemory&gt;</code>。于是 <code>write()</code>/<code>read()</code> 只是在这块共享内存上搬运字节，不再经过 Binder 事务。混音、重采样在 <code>AudioFlinger</code> 里完成后，才交给 audio HAL。理解这条「控制走 Binder、数据走共享内存」的二分（以及 STATIC/STREAM 两种模式），是定位一切音频问题的起点。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P4-301</code>（音频 HAL 契约侧）、<code>AND-P7-G01</code>（本卷导航）、<code>AND-P3-302</code>（Native Binder 全貌）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/media/java/android/media/AudioTrack.java</code>（播放门面，约 4971 行）</li><li><code>frameworks/base/media/java/android/media/AudioRecord.java</code>（录制门面，约 2681 行）</li><li><code>frameworks/av/media/libaudioclient/AudioTrack.cpp</code>（native 客户端，约 3960 行）</li><li><code>frameworks/av/services/audioflinger/AudioFlinger.cpp</code>（混音服务，约 5288 行）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「我 <code>AudioTrack.write</code> 写了数据却没声音」「录音读到全零」这类问题，根因常在链路中段而非两端：可能是 <code>AudioFlinger</code> 没把 track 接到正确的输出设备，可能是 HAL 没被打开，也可能是 buffer 模式选错导致数据被丢弃。本文把「应用写数据 → 混音 → 出声」这条链路在代码层面钉死，让定位有确定方向。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p><code>AudioTrack</code> 在 Java 侧以两种模式运行：<code>MODE_STATIC</code>（一次性把全部数据写入，用于短音效，<code>:147</code> 定义 <code>MODE_STATIC = 0</code>）与 <code>MODE_STREAM</code>（流式持续写入，<code>:152</code> 定义 <code>MODE_STREAM = 1</code>）。无论哪种，track 成功初始化后状态为 <code>STATE_INITIALIZED</code>（<code>:169</code>）。<code>AudioRecord</code> 同样有 <code>STATE_INITIALIZED</code>（<code>:113</code>），是开始录制的前置条件。</p>
+<p>图 1：AudioTrack 播放数据流</p>
+<pre><code>App --write()--&gt; AudioTrack(本地 buffer) --Binder--&gt; AudioFlinger(混音)
+   AudioFlinger --HAL--&gt; audio_device --→ 扬声器</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>播放侧：构造 <code>AudioTrack</code>（构造在 <code>:746</code>/<code>:804</code>）→ <code>play()</code>（<code>:3171</code>）→ 循环 <code>write()</code>（字节版 <code>:3417</code>、ByteBuffer 版 <code>:3749</code>）→ <code>stop()</code>（<code>:3229</code>）。<code>write</code> 的返回值表示本次消费/阻塞的字节数，负值代表错误。录制侧：<code>startRecording()</code>（<code>:1501</code>）→ 循环 <code>read()</code>（<code>:1593</code>）→ <code>stop()</code>（<code>:1544</code>）。</p>
+<p>失败路径主要有：初始化未达 <code>STATE_INITIALIZED</code>（后续 <code>write</code>/<code>read</code> 直接报错）、<code>AudioFlinger</code> 连接失败（Binder 断连）、以及<strong>写速快于消费时的写侧行为</strong>（见下，这一点最常被写反）。</p>
+<p>关于第三点，源码口径是明确的：<code>write(...)</code> 的默认重载走的是 <strong>`WRITE_BLOCKING`</strong>（<code>AudioTrack.java:3418</code> 把 <code>WRITE_BLOCKING</code> 传给内部 <code>write</code>；常量定义在 <code>:438</code>，<code>WRITE_NON_BLOCKING = 1</code> 在 <code>:448</code>）。也就是说：</p>
+<ul><li><strong>默认（阻塞）</strong>：写速超过消费时，<code>write</code> 会<strong>阻塞等待</strong>共享内存环形缓冲腾出位置，而不是把数据丢掉；数据只在 buffer 满到超时才可能报错，不会静默丢弃。</li><li><strong>`WRITE_NON_BLOCKING`</strong>：写不动时立即返回 <code>WOULD_BLOCK</code>（或只写入一部分），由调用方决定重试还是跳帧。此时「丢弃」行为发生在应用自己选择丢弃，而不是框架替你丢。</li></ul>
+<p>反过来说，<code>AudioTrack</code> 侧常见的 <strong>`underrun`</strong> 才是「消费侧没跟上」的信号：buffer 被读空而没有新数据补上，由服务端/设备侧报告，方向与「生产者溢出」相反。把这两件事混为一谈，就会出现「write 卡住＝write 在丢数据」这种反向诊断。</p>
+<p>图 2：STATIC 与 STREAM 两种模式的差异</p>
+<pre><code>STATIC : 应用一次写入全部数据 -&gt; 框架按需播放（适合短音效）
+STREAM : 应用边产边写 -&gt; 框架边消费（适合音乐/实时）</code></pre>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>Java 门面只做封装与状态管理，<code>play</code>/<code>stop</code>/<code>write</code> 最终都走到 native。native 客户端 <code>AudioTrack.cpp</code> 是真正的传输层：<code>start</code>（<code>:695</code>）建立传输、<code>stop</code>（<code>:835</code>）结束、<code>flush</code>（<code>:900</code>）清空缓冲队列、<code>setVolume</code>（<code>:1071</code>/<code>:1097</code>）调增益、<code>write</code>（<code>:2323</code>）把用户 buffer 拷入共享内存环形队列。</p>
+<p>跨进程的落点是 <code>AudioFlinger.cpp</code> 的 <code>createTrack</code>（<code>:1048</code>），它在 <code>audioserver</code> 进程里为本次播放创建一个服务端 track 对象，负责把多个客户端的 track 混音到同一输出。主音量由 <code>setMasterVolume</code>（<code>:1311</code>）统一管理。注意 <code>AudioTrack</code> 客户端库在 <code>android17-release</code> 已位于 <code>frameworks/av/media/libaudioclient</code>，与早期版本路径不同。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与 audio HAL（<code>AND-P4-301</code>）的关系：<code>AudioFlinger</code> 通过 HAL 接口把混音结果写到硬件；HAL 篇讲契约，本篇讲框架侧如何驱动它。</li><li>与 <code>AudioPolicy</code>（<code>AND-P7-202</code>）的关系：<code>AudioFlinger</code> 决定「怎么混」，AudioPolicy 决定「混完去哪个设备」，二者协作完成出声。</li><li>与录制的关系：<code>AudioRecord</code> 是反向路径，数据从 HAL 经 <code>AudioFlinger</code> 的 record 分支回到应用（<code>read</code>）。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>Java 播放门面</td><td><code>frameworks/base/media/java/android/media/AudioTrack.java</code></td><td><code>AudioTrack</code>、<code>play</code>、<code>write</code></td><td>应用直接调用</td></tr><tr><td>Java 录制门面</td><td><code>frameworks/base/media/java/android/media/AudioRecord.java</code></td><td><code>startRecording</code>、<code>read</code></td><td>录制入口</td></tr><tr><td>native 客户端</td><td><code>frameworks/av/media/libaudioclient/AudioTrack.cpp</code></td><td><code>start</code>、<code>write</code>、<code>setVolume</code></td><td>跨进程传输层</td></tr><tr><td>混音服务</td><td><code>frameworks/av/services/audioflinger/AudioFlinger.cpp</code></td><td><code>createTrack</code>、<code>setMasterVolume</code></td><td><code>audioserver</code> 落点</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df 锚点：frameworks/av:475269ec44ac</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD
+git -C frameworks/av rev-parse HEAD</code></pre>
+<p>期望分别得到 <code>94b4c163b7df</code>、<code>475269ec44ac</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;MODE_STATIC\|MODE_STREAM\|STATE_INITIALIZED\|public void play\|public void stop\|public int write&quot; \
+  frameworks/base/media/java/android/media/AudioTrack.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：模式常量 <code>:147</code>/<code>:152</code>、状态 <code>:169</code>、<code>play</code> <code>:3171</code>、<code>stop</code> <code>:3229</code>、<code>write</code> 字节版 <code>:3417</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;AudioTrack::start\|AudioTrack::stop\|AudioTrack::flush\|AudioTrack::setVolume\|AudioTrack::write&quot; \
+  frameworks/av/media/libaudioclient/AudioTrack.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>start</code> <code>:695</code>、<code>stop</code> <code>:835</code>、<code>flush</code> <code>:900</code>、<code>setVolume</code> <code>:1071</code>/<code>:1097</code>、<code>write</code> <code>:2323</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;AudioFlinger::createTrack\|AudioFlinger::setMasterVolume&quot; \
+  frameworks/av/services/audioflinger/AudioFlinger.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>createTrack</code> <code>:1048</code>、<code>setMasterVolume</code> <code>:1311</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「<code>AudioTrack.write</code> 返回就代表播出去了」。它只代表数据进了框架队列，<code>AudioFlinger</code> 何时混音、HAL 何时出声是后续步骤。</li><li>「没声音一定是应用写错了」。更常见的是 <code>AudioPolicy</code> 把输出路由到了错误设备（见 202），或 <code>AudioFlinger</code> 未连接。</li><li>「看起来对其实是错的」：以为 STATIC 模式适合长音频。STATIC 需一次性驻留全部数据，长音频应选 STREAM，否则内存与延迟都不可控。</li><li>「录音读到零就是麦克风坏了」。更可能是权限、<code>AudioRecord</code> 未达 <code>STATE_INITIALIZED</code>，或 source 选错。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：如何判断声音卡在中段还是两端？ <strong>答</strong>：<code>dumpsys media.audio_flinger</code> 看 track 是否已创建、buffer 是否流动；若 track 在但无输出，问题在 <code>AudioFlinger</code>→HAL 或路由（转 202）。 <strong>追问</strong>：STREAM 模式写入过快会怎样？ <strong>答</strong>：默认走 <code>WRITE_BLOCKING</code>（<code>AudioTrack.java:3418</code>），写速超过消费时 <code>write</code> 会阻塞等待环形缓冲腾位；只有显式传 <code>WRITE_NON_BLOCKING</code>（<code>:448</code>）才会立刻返回 <code>WOULD_BLOCK</code> 或只写一部分。数据不会被框架静默丢弃——诊断到位见 §4.2。</p>
+<p><strong>问</strong>：为什么我的音量设置不生效？ <strong>答</strong>：区分应用 <code>setVolume</code>（track 级增益）与 <code>setMasterVolume</code>（设备主音量），二者作用点不同。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>无声音</td><td><code>dumpsys media.audio_flinger</code></td><td>track 列表与状态</td><td>确认 createTrack 成功，转 §4.3</td></tr><tr><td>路由错误</td><td><code>dumpsys audio</code></td><td>当前输出设备</td><td>转 <code>AND-P7-202</code></td></tr><tr><td>录音为零</td><td><code>dumpsys media.audio_flinger</code></td><td>record track 状态</td><td>查权限与 source，转 §4.1</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/av rev-parse HEAD</code></td><td>是否 <code>475269ec44ac</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：音频路由与策略（202）、audio HAL 契约（AND-P4-301）、音频焦点抢占（102）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P4-301</code>、<code>AND-P7-G01</code>、<code>AND-P3-302</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-202</code>（策略路由）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>AudioTrack.java</code> 约 4971 行、<code>AudioTrack.cpp</code> 约 3960 行、<code>AudioFlinger.cpp</code> 约 5288 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>音频客户端库在 <code>android17-release</code> 位于 <code>frameworks/av/media/libaudioclient</code>（口径：源码目录实测，旧版在 <code>frameworks/av/media/libmedia</code>）。</li><li>单帧音频延迟依赖buffer大小与采样率，暂无统一实测，列为待补。</li><li>混音以「输出流」为单位，<code>AudioFlinger</code> 同时服务多个 track（口径：架构语义 + <code>createTrack</code> 多实例）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td>音频客户端库路径为 <code>frameworks/av/media/libaudioclient</code></td><td>本篇路径与行号基准</td></tr><tr><td>较早版本</td><td>客户端库在 <code>frameworks/av/media/libmedia</code></td><td>按符号重锚，路径不可沿用</td></tr><tr><td>API 演进</td><td><code>AudioTrack</code>/<code>AudioRecord</code> 的 <code>write</code>/<code>read</code> 多次增加 Buffer 重载</td><td>多重载并存，本文列其一</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>audio</code>、<code>AudioFlinger</code>；developer.android.com 站内检索 <code>AudioTrack</code>、<code>AudioRecord</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>AudioFlinger.cpp</code>、<code>libaudioclient</code>。</li><li>承接篇：<code>AND-P7-202</code>、<code>AND-P4-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

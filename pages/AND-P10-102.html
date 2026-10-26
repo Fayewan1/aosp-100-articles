@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>启动性能优化实战：从冷启动指标到手段</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>启动性能优化实战：从冷启动指标到手段</h1>
+<div class="kv"><span>ID：AND-P10-102</span><span>卷：P10</span><span>章：10.1</span><span>难度：4</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/ApplicationStartInfo.java ；frameworks/base/services/core/java/com/android/server/wm/ActivityMetricsLogger.java ；frameworks/base/core/java/android/content/ContentResolver.java ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:14px"><a href="#h7-启动类型枚举">启动类型枚举</a></li><li style="margin-left:14px"><a href="#h8-启动模式枚举">启动模式枚举</a></li><li style="margin-left:14px"><a href="#h9-启动原因枚举-共-12-个-此处列-8-个">启动原因枚举（共 12 个，此处列 8 个）</a></li><li style="margin-left:14px"><a href="#h10-时间戳与服务端度量">时间戳与服务端度量</a></li><li style="margin-left:14px"><a href="#h11-service-侧启动超时常量">Service 侧启动超时常量</a></li><li style="margin-left:14px"><a href="#h12-contentprovider-发布超时">ContentProvider 发布超时</a></li><li style="margin-left:0px"><a href="#h13-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h14-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h15-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h16-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h17-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h18-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h19-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h20-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h21-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h22-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h23-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>冷启动、温启动、热启动在 AOSP 里是三个枚举值，不是形容词：<code>START_TYPE_COLD</code>=1、<code>START_TYPE_WARM</code>=2、<code>START_TYPE_HOT</code>=3，定义在 <code>ApplicationStartInfo.java</code>。要优化，先把「启动」拆成可查询的时间戳点，再看窗口侧的 <code>notifyWindowsDrawn</code> 什么时候被判定为「已绘制」。应用侧真正会卡死启动的是几个源码常量级的超时：<code>ContentProvider</code> 发布的 10 秒乘硬件倍率，以及 Service 侧的启动超时——后者作用于 Service 的启动与放行，不与冷启动分段直接对照。本篇不给任何设备上的实测耗时，所有数字都是源码常量口径。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P8-402</code>。开机侧已给出「时间戳埋点 + 阶段耗时」的分段口径，本篇的应用启动分段与之同构，只是对象从「开机阶段」换成「进程与 Activity」。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/ActivityMetricsLogger.java</code></li><li><code>frameworks/base/core/java/android/content/ContentResolver.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「这个应用启动慢」几乎无法直接回答，因为它同时指三件不同的事：进程还没起来、进程起来但 Activity 要重建、进程和 Activity 都在只是重新走到前台。三者的可观测节点不同，能改的地方也不同。更麻烦的是，很多人把「启动期间黑屏」和「启动耗时长」混为一谈，前者是窗口绘制问题，后者是时间戳问题。要把话说清楚，得先拿到一份能按时刻查询的启动记录。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念要分开：<strong>启动类型</strong>（按冷/温/热三态区分起始状态）、<strong>启动原因</strong>（谁把它拉起来的）、<strong>启动时间戳</strong>（每个阶段结束在什么时刻）。类型决定你能省多少工作，原因决定哪些前置条件必须先满足，时间戳决定差值是几毫秒。三者由同一个对象 <code>ApplicationStartInfo</code> 承载，服务端度量则由 <code>ActivityMetricsLogger</code> 补齐「窗口何时算画完」。</p>
+<p>图 1：启动三类信息与两处数据源</p>
+<pre><code>  ApplicationStartInfo          ActivityMetricsLogger
+   ├─ START_TYPE_*（冷/温/热）     └─ notifyWindowsDrawn
+   ├─ LAUNCH_MODE_*（怎么开）          ├─ addStartInfoTimestamp（投递：只写时间戳）
+   ├─ START_REASON_*（谁拉起）          └─ done() → logAppTransition
+   └─ getStartupTimestamps()（何时）        └─ FrameworkStatsLog.write
+                                          └─ APP_START_OCCURRED</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<h3 id="h7-启动类型枚举">启动类型枚举</h3>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>START_TYPE_UNSET</code>=0</td><td>未设置，数据缺失</td><td><code>ApplicationStartInfo.java</code> :133</td></tr><tr><td><code>START_TYPE_COLD</code>=1</td><td><code>Process started from scratch.</code>（javadoc 原文，:135）</td><td>同文件 :136</td></tr><tr><td><code>START_TYPE_WARM</code>=2</td><td><code>Process retained minimally SavedInstanceState.</code>（javadoc 原文，:138）</td><td>同文件 :139</td></tr><tr><td><code>START_TYPE_HOT</code>=3</td><td><code>Process brought back to foreground.</code>（javadoc 原文，:141）；本树无写入方，见表下注</td><td>同文件 :142</td></tr></tbody></table>
+<p>源码侧真正支撑的判据只有「进程是否新建」这一层：赋值点 <code>AppStartInfoTracker.java</code> :505-506 的 <code>cold ? START_TYPE_COLD : START_TYPE_WARM</code> 三元式只区分冷与温，其余写点也只写 <code>UNSET</code>（:297）与 <code>COLD</code>（:435/:462/:486）；<code>START_TYPE_HOT</code> 的写入方不是字面量 <code>START_TYPE_HOT</code>，而是一条<strong>温度转换链</strong>——<code>ActivityMetricsLogger.java</code>（wm）:2079-2087 的 <code>convertTransitionTypeToLaunchObserverTemperature</code> 把 <code>TYPE_TRANSITION_HOT_LAUNCH</code> 映射为 <code>TEMPERATURE_HOT</code>，经 :2033 <code>mLaunchObserver.onActivityLaunched(...)</code> 送进 <code>AMS</code> :1250，最终落在 <code>AppStartInfoTracker.java</code> :351 的 <code>info.setStartType((int) temperature)</code>（<code>AMS</code> :1255 把 <code>temperature</code> 与 <code>START_TYPE_COLD</code> 等值比较，可自证取值域就是这套枚举）。所以写点全集是 :297（UNSET）/<strong>:351</strong>（温度写入）/:435/:462/:486（COLD）/:505-506（COLD/WARM 三元）。还是要提醒：别把「Activity 是否需要重建」当成源码结论——那是开发者文档口径。</p>
+<h3 id="h8-启动模式枚举">启动模式枚举</h3>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>LAUNCH_MODE_STANDARD</code>=0</td><td>标准模式，可多实例</td><td><code>ApplicationStartInfo.java</code> :148</td></tr><tr><td><code>LAUNCH_MODE_SINGLE_TOP</code>=1</td><td>栈顶复用</td><td>同文件 :155</td></tr><tr><td><code>LAUNCH_MODE_SINGLE_INSTANCE</code>=2</td><td>全局单实例</td><td>同文件 :163</td></tr><tr><td><code>LAUNCH_MODE_SINGLE_TASK</code>=3</td><td>任务内单实例</td><td>同文件 :169</td></tr><tr><td><code>LAUNCH_MODE_SINGLE_INSTANCE_PER_TASK</code>=4</td><td>每个任务内单实例</td><td>同文件 :176</td></tr></tbody></table>
+<p>启动模式影响的是「这次启动是否真的新建了 Activity 实例」，因此会反过来影响你观测到的启动类型。</p>
+<h3 id="h9-启动原因枚举-共-12-个-此处列-8-个">启动原因枚举（共 12 个，此处列 8 个）</h3>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>START_REASON_ALARM</code>=0</td><td>闹钟触发</td><td><code>ApplicationStartInfo.java</code> :97 起</td></tr><tr><td><code>START_REASON_BACKUP</code>=1</td><td>备份触发</td><td>同区间</td></tr><tr><td><code>START_REASON_BOOT_COMPLETE</code>=2</td><td>开机完成触发</td><td>同区间</td></tr><tr><td><code>START_REASON_BROADCAST</code>=3</td><td>广播触发</td><td>同区间</td></tr><tr><td><code>START_REASON_CONTENT_PROVIDER</code>=4</td><td>ContentProvider 触发</td><td>同区间</td></tr><tr><td><code>START_REASON_JOB</code>=5</td><td>Job 触发</td><td>同区间</td></tr><tr><td><code>START_REASON_LAUNCHER</code>=6</td><td>桌面图标点击</td><td>同区间</td></tr><tr><td><code>START_REASON_LAUNCHER_RECENTS</code>=7</td><td>最近任务进入</td><td>同区间</td></tr></tbody></table>
+<p>区间为 :97–:130。其余四个本篇不断言。原因决定「前置工作是否被算进启动」：用户点图标，桌面侧的开销不应记在应用账上；广播拉起应用，则分发链路要先完成。</p>
+<h3 id="h10-时间戳与服务端度量">时间戳与服务端度量</h3>
+<p><code>getStartupTimestamps()</code> 在 <code>ApplicationStartInfo.java</code> :654，返回 <code>Map&lt;Integer, Long&gt;</code>。它把「启动的哪个时刻」变成可查询的键值对，这是自己算分段差值的唯一入口。</p>
+<p>窗口侧的另一半在 <code>ActivityMetricsLogger.java</code>（共 2116 行）：<code>notifyWindowsDrawn(ActivityRecord)</code> 在 :1047，度量经 <code>mLoggerHandler</code>（:184，FgThread 的 Handler）投递到 <code>addStartInfoTimestamp</code>，真正的启动写出点是 :1438 的 <code>FrameworkStatsLog.write(APP_START_OCCURRED, ...)</code>。含义是：绘制完成的通知不在调用线程上同步算账，而是投递到 FgThread 串行补时间戳，最后由启动统计点写出。注意 :955 那处 <code>FrameworkStatsLog::write</code> 属于 <code>ACTION_PROCESS_TEXT</code> 的 <code>PROCESS_TEXT_ACTION_LAUNCHED_REPORTED</code> 分支，与绘制度量链无关，不要误引。</p>
+<h3 id="h11-service-侧启动超时常量">Service 侧启动超时常量</h3>
+<table><thead><tr><th>名称</th><th>值</th><th>出处</th></tr></thead><tbody><tr><td><code>DEFAULT_FGS_START_FOREGROUND_TIMEOUT_MS</code></td><td><code>10 * 1000</code></td><td><code>ActivityManagerConstants.java</code> :244</td></tr><tr><td><code>DEFAULT_SERVICE_BG_ACTIVITY_START_TIMEOUT</code></td><td><code>10_000</code></td><td>同文件 :228</td></tr><tr><td><code>DEFAULT_SERVICE_TIMEOUT</code></td><td><code>20 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code></td><td>同文件 :320</td></tr><tr><td><code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code></td><td>前者乘 10</td><td>同文件 :325</td></tr><tr><td><code>DEFAULT_BG_START_TIMEOUT</code></td><td><code>15*1000</code></td><td>同文件 :227</td></tr></tbody></table>
+<p>这五个是 Service 域「等待方最多等多久」的上界，其中 <code>DEFAULT_SERVICE_TIMEOUT</code>（后台再乘 10 得 <code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code>）才是 Service 启动/执行超时（ANR in service 类）的计时本体，投递点在 <code>ActiveServices.java</code> :820 起的 <code>mActiveServiceAnrTimer</code> 构造，前后台二选一在 :8472-:8473、起表在 :8474；<code>DEFAULT_BG_START_TIMEOUT</code> 是后台 Service 启动在 <code>mStartingBackground</code> 并发槽位中的驻留上界，超时后移出该集合并放行 <code>mDelayedStartList</code> 中的下一个（<code>ActiveServices.java</code> :1656 设值、:762-:796 移出与放行）；<code>DEFAULT_SERVICE_BG_ACTIVITY_START_TIMEOUT</code> 用于限定已获准启动后台 Activity 的 Service 在进程起来后的可启动窗口；<code>DEFAULT_FGS_START_FOREGROUND_TIMEOUT_MS</code> 用于前台服务进入前台的等待（<code>startService()</code> 拉起的前台服务若未在窗口内 <code>startForeground</code>，<code>ActiveServices.java</code> :2593-2605 会重算 FGS 限制而非直接放行）。它们约束的是 Service 生命周期，不是冷启动分段的阈值，不要拿它们去卡「某一段耗时是否超界」。此外服务域还有 <code>DEFAULT_SERVICE_START_FOREGROUND_TIMEOUT_MS</code>（<code>ActivityManagerConstants.java</code> :311，30 秒），由 <code>ActiveServices.java</code> :8478 <code>scheduleServiceForegroundTransitionTimeoutLocked</code>（:8484 起表）消费，管的是服务转入前台的超时，归 <code>AND-P10-101</code> 的基线条目表登记，同样不是冷启动分段阈值。</p>
+<h3 id="h12-contentprovider-发布超时">ContentProvider 发布超时</h3>
+<p><code>ContentResolver.java</code>（共 4369 行）:806 定义 <code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MILLIS</code>，值为 <code>10 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>。服务端对应 <code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MSG</code>：<code>ActivityManagerService.java</code> :1712 定义消息号 57、:1980 处理、:5327 发送——但发送点外面还有一道门禁（:5326 <code>providers != null &amp;&amp; mCpHelper.checkAppInLaunchingProvidersLocked(app)</code>），没有客户端等待发布的启动根本不会挂这张超时表。注意这里带了硬件倍率，慢设备上这个上界会被放大，不能按固定 10 秒理解。</p>
+<h2 id="h13-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>用户从桌面点图标，应用冷启动卡了两秒才显示界面。按顺序取证据：</p>
+<p>第一步，确认类型。查 <code>ApplicationStartInfo</code>，看到 <code>START_TYPE_COLD</code>=1，说明进程本来不存在，进程创建与初始化被算进了这段时间。</p>
+<p>第二步，确认原因。看到 <code>START_REASON_LAUNCHER</code>=6，说明是桌面图标点击，前置链路在桌面侧，不属于应用可改范围。</p>
+<p>第三步，取时间戳。调用 <code>getStartupTimestamps()</code> 拿到 <code>Map&lt;Integer, Long&gt;</code>，把各时刻做差，得到分段耗时。这一步的意义是把「两秒」拆成若干段，而不是笼统归因。</p>
+<p>第四步，核对上界。若应用启动时先发布了 ContentProvider，<strong>且本次启动是 provider 托管启动（有外部客户端正在等这个 provider 发布）</strong>，才看那一段是否逼近 <code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MILLIS</code>——因为这条超时只在 <code>ActivityManagerService.java</code> :5326 的 <code>checkAppInLaunchingProvidersLocked(app)</code> 为真时才挂（该函数在 <code>ContentProviderHelper.java</code> :1895-1901 遍历 <code>mLaunchingProviders</code> 判 <code>cpr.mLaunchingApp == app</code>）；桌面点图标的普通冷启动（§4.3 设定的 <code>START_REASON_LAUNCHER</code> 场景）恰好不挂表，此时拿它当上界是自相矛盾的；若启动过程伴随 Service 拉起，再另行核对 Service 侧超时常量（§4.2 表列五个，计时本体是 <code>DEFAULT_SERVICE_TIMEOUT</code> 与后台乘 10 的 <code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code>），但那属于 Service 生命周期，不参与冷启动分段对照。</p>
+<p>第五步，核对绘制判定。看 <code>notifyWindowsDrawn</code> 是否已触发、度量是否经 <code>mLoggerHandler</code> 落到 <code>addStartInfoTimestamp</code>，并在 :1438 由 <code>APP_START_OCCURRED</code> 写出。若时间戳显示应用侧早已就绪、统计却迟迟不结束，问题在绘制判定而不是应用逻辑。</p>
+<h2 id="h14-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P8-402</code> 给开机侧的分段口径，本篇借用其「时间戳 + 阶段」的方法，对象换成进程与 Activity。Zygote 预加载机制归 <code>AND-P8-301</code>——那里解释冷启动为什么必须付进程创建的成本，本篇只把它当作既定前提；<code>AND-P8-401</code> 讲的是 SystemServer 启动序列与三阶段服务编排，与本篇无前置关系。构建期优化（含编译产物形态）归 <code>AND-P11-101</code>，本篇不涉及。</p>
+<h1 id="h15-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>启动类型/模式/原因与时间戳</td><td><code>frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></td><td><code>START_TYPE_COLD</code>、<code>LAUNCH_MODE_*</code>、<code>START_REASON_*</code>、<code>getStartupTimestamps()</code></td><td>共 1131 行，客户端唯一入口</td></tr><tr><td>窗口绘制完成度量</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityMetricsLogger.java</code></td><td><code>notifyWindowsDrawn(ActivityRecord)</code>、<code>mLoggerHandler</code>、<code>addStartInfoTimestamp</code>、<code>APP_START_OCCURRED</code></td><td>共 2116 行，服务端统计账本</td></tr><tr><td>ContentProvider 发布超时</td><td><code>frameworks/base/core/java/android/content/ContentResolver.java</code></td><td><code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MILLIS</code></td><td>共 4369 行，带硬件倍率</td></tr><tr><td>Service 侧启动超时常量</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></td><td><code>DEFAULT_SERVICE_TIMEOUT</code> :320、<code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code> :325、<code>DEFAULT_FGS_START_FOREGROUND_TIMEOUT_MS</code> :244、<code>DEFAULT_SERVICE_BG_ACTIVITY_START_TIMEOUT</code> :228、<code>DEFAULT_BG_START_TIMEOUT</code> :227 共五个</td><td>Service 生命周期上界</td></tr><tr><td>发布超时消息处理</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td><code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MSG</code></td><td>定义消息号 57，引用共四处（:1712 定义、:1980 处理、:5327 发送、:14402 <code>removeMessages</code>）</td></tr></tbody></table>
+<h1 id="h16-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;START_TYPE_&quot; frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：四行，分别为 <code>START_TYPE_UNSET</code>=0、<code>START_TYPE_COLD</code>=1、<code>START_TYPE_WARM</code>=2、<code>START_TYPE_HOT</code>=3。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>1131</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;getStartupTimestamps&quot; frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：定义行落在 :654，返回类型 <code>Map&lt;Integer, Long&gt;</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;notifyWindowsDrawn\|mLoggerHandler\|APP_START_OCCURRED&quot; frameworks/base/services/core/java/com/android/server/wm/ActivityMetricsLogger.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>notifyWindowsDrawn</code> 在 :1047，<code>mLoggerHandler</code> 初始化在 :184，<code>APP_START_OCCURRED</code> 写出点在 :1438。</p>
+<pre><code class="lang-bash">grep -n &quot;DEFAULT_.*TIMEOUT&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：能看到 <code>DEFAULT_SERVICE_TIMEOUT</code>=:320（<code>20 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>）、<code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code>=:325（前者乘 10）、<code>DEFAULT_FGS_START_FOREGROUND_TIMEOUT_MS</code>=:244、<code>DEFAULT_SERVICE_BG_ACTIVITY_START_TIMEOUT</code>=:228、<code>DEFAULT_BG_START_TIMEOUT</code>=:227。</p>
+<pre><code class="lang-bash">grep -n &quot;CONTENT_PROVIDER_PUBLISH_TIMEOUT&quot; frameworks/base/core/java/android/content/ContentResolver.java frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：常量在 <code>ContentResolver.java</code> :806；消息号 57 定义在 <code>ActivityManagerService.java</code> :1712，处理在 :1980，发送在 :5327。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h17-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h18-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：启动耗时只有「应用自己这段」值得优化。</strong> 实际上时间戳把一次启动切成多段，其中包含等待方（系统侧）的等待与调度。若某段耗时贴到常量上界附近，改应用代码不会让这段消失。</p>
+<p><strong>误区二：把启动慢等同于启动期间显示黑屏。</strong> 黑屏是窗口绘制判定问题，证据在 <code>notifyWindowsDrawn</code> 到 <code>APP_START_OCCURRED</code> 这条链路；启动慢是时间戳差值问题。两者可以同时存在，但归因和手段不同。</p>
+<p><strong>误区三（看起来对其实是错的）：ContentProvider 发布超时就是 10 秒。</strong> 源值是 <code>10 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>，硬件倍率会把这个上界放大。按固定 10 秒去判断「有没有到超时」在慢设备上会判错。</p>
+<p>**误区四：拿 <code>15*1000</code> 去卡冷启动的某一段。** <code>DEFAULT_BG_START_TIMEOUT</code> 等五个常量都作用于 Service 生命周期，不是启动分段的阈值；其中 <code>DEFAULT_SERVICE_TIMEOUT</code>/<code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code>（:320/:325）是 Service 启动/执行超时的本体，也不要误当成启动分段阈值。启动分段可直接做数值对照的上界，本篇只列 <code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MILLIS</code>，且它只在 provider 托管启动（有客户端等待发布、<code>AMS</code> :5326 门禁为真）时才适用；广播拉起的启动另受广播分发超时约束（<code>ActivityManagerService.java</code> :664/:665），归 <code>AND-P10-403</code> 展开。</p>
+<h2 id="h19-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：怎么判断这次是冷启动还是热启动？ <strong>答</strong>：看 <code>ApplicationStartInfo</code> 的启动类型字段，取值为 <code>START_TYPE_COLD</code>=1、<code>START_TYPE_WARM</code>=2、<code>START_TYPE_HOT</code>=3。 <strong>追问</strong>：那能不能靠「应用有没有被杀」来推断？ <strong>答</strong>：不能可靠推断。进程是否被杀只是冷/温的分界依据（赋值点 <code>AppStartInfoTracker.java</code> :505-506 的三元式）；至于温与热怎么分，写入方并不直接写 <code>START_TYPE_HOT</code> 字面量：<code>ActivityMetricsLogger.java</code>（wm）:2079-2087 先把 transition 类型换算成 temperature，再经 <code>AMS</code> :1250 落到 <code>AppStartInfoTracker.java</code> :351 的 <code>setStartType((int) temperature)</code>——所以按常量名去 grep 会漏掉这条链。判据本身由窗口侧给出，不是由应用存活状态推出来的。</p>
+<p><strong>问</strong>：时间戳拿到后，怎么知道哪一段是异常？ <strong>答</strong>：先算差值，再与真正作用于启动的上界对照，例如 ContentProvider 发布段的 <code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MILLIS</code>。 <strong>追问</strong>：Service 侧那三个常量呢？ <strong>答</strong>：它们约束 Service 生命周期（Service 启动/执行超时的本体是 <code>DEFAULT_SERVICE_TIMEOUT</code> 与后台乘 10 版，见 §4.2），只在与启动同一过程里出现 Service 拉起时才参考；是否真的被放弃，要看是否走到对应超时处理路径。</p>
+<h2 id="h20-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知道这次启动属于哪一类</td><td><code>grep -n &quot;START_TYPE_&quot; frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></td><td>四个枚举值与行号，确认字段取值</td><td>按取值分流：冷启动查进程创建，温启动查 Activity 重建</td></tr><tr><td>拿不到分段耗时</td><td><code>grep -n &quot;getStartupTimestamps&quot; frameworks/base/core/java/android/app/ApplicationStartInfo.java</code></td><td>方法签名与返回的 <code>Map&lt;Integer, Long&gt;</code></td><td>按 key 取值做差，得到每段耗时</td></tr><tr><td>应用已就绪但统计迟迟不结束</td><td><code>grep -n &quot;notifyWindowsDrawn|APP_START_OCCURRED&quot; frameworks/base/services/core/java/com/android/server/wm/ActivityMetricsLogger.java</code></td><td>:1047 的通知点与 :1438 的启动写出点</td><td>判断是绘制未完成还是统计未落盘</td></tr><tr><td>怀疑发布被超时截断</td><td><code>grep -n &quot;CONTENT_PROVIDER_PUBLISH_TIMEOUT&quot; frameworks/base/core/java/android/content/ContentResolver.java</code></td><td>:806 的常量与硬件倍率</td><td>对照发布段长度，并注意慢设备倍率放大</td></tr></tbody></table>
+<h1 id="h21-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：开机侧时间戳埋点与阶段耗时（<code>AND-P8-402</code>）；Zygote 预加载机制（<code>AND-P8-301</code>）；SystemServer 启动序列（<code>AND-P8-401</code>）；构建期优化（<code>AND-P11-101</code>）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P8-402</code>。</li><li><strong>本篇后继</strong>：P10 卷内与卡顿、掉电、崩溃分析相邻的篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>前台服务进入前台的超时常量 <code>10 * 1000</code> 毫秒（源码常量，<code>ActivityManagerConstants.java</code> :244）。</li><li>Service 启动后台 Activity 的窗口常量 <code>10_000</code> 毫秒（源码常量，同文件 :228）。</li><li>后台 Service 启动等待常量 <code>15*1000</code> 毫秒（源码常量，同文件 :227；语义为 <code>mStartingBackground</code> 槽位驻留上界，超时移出并放行延迟启动列表下一个，<code>ActiveServices.java</code> :1656/:762-:796）。</li><li>Service 启动/执行超时常量 <code>20 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code> 毫秒、后台为其 10 倍（源码常量，同文件 :320/:325；<code>ActiveServices.java</code> :820 起定时器构造、:8472-:8473 前后台二选一、:8474 起表）。</li><li>ContentProvider 发布超时 = <code>10 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>（源码常量，<code>ContentResolver.java</code> :806）。</li><li>设备上的实际冷启动耗时：本篇不断言，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h22-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td><code>ApplicationStartInfo.java</code> 共 1131 行，启动类型/模式/原因三组枚举齐备，<code>getStartupTimestamps()</code> 在 :654</td><td>可直接按类型 + 原因 + 时间戳三段取证</td></tr><tr><td>更早版本</td><td>启动类型与时间戳的对外出口形态不同，部分枚举可能不存在</td><td>早期版本无法用同一套枚举判定冷/温/热，需按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h23-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>app startup time</code>、<code>ApplicationStartInfo</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ApplicationStartInfo</code>、<code>ActivityMetricsLogger</code>、<code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MSG</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/app/ApplicationStartInfo.java</code>、<code>frameworks/base/services/core/java/com/android/server/wm/ActivityMetricsLogger.java</code>。</li><li>承接篇：<code>AND-P8-402</code>（开机侧分段口径）、<code>AND-P8-301</code>（Zygote 预加载）。</li></ul>
+</article>
+<footer>android-100 · AND-P10-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

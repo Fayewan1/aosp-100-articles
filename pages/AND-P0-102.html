@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AOSP 源码树全景：1084 个 git 项目如何构成一个系统</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>AOSP 源码树全景：1084 个 git 项目如何构成一个系统</h1>
+<div class="kv"><span>ID：AND-P0-102</span><span>卷：P0</span><span>章：0.1</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：.repo/manifests/default.xml ；build/make/core/Makefile ；frameworks/base/Android.bp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>AOSP 不是一个大仓，而是 1084 个独立 git 项目拼成的树。树根的 <code>.repo/manifests/default.xml</code> 声明了 1087 个 <code>&lt;project&gt;</code>，多出的 3 个是 darwin 主机的预编译项目，Linux 上不同步。项目密度极不均匀：<code>external</code> 一个目录就占 557 个，超过全树一半。目录层级不表达依赖，manifest 的 path、remote、revision 才决定「谁在树的哪个位置」。理解这层关系，比记住任何单个模块都重要。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 D 读 §1/§4.1/§9</p></blockquote>
+<p><strong>建议先读</strong>：AND-P0-G01，先建立「Android 系统分层」的整体印象，再看树的物理摆放。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>.repo/manifests/default.xml</code></li><li><code>build/make/core/Makefile</code></li><li><code>frameworks/base/Android.bp</code></li></ul>
+<p><strong>环境要求</strong>：一份已 <code>repo sync</code> 的 AOSP 源码树 + <code>git</code>/<code>grep</code>/<code>wc</code> 即可。本篇验证方式为静态源码分析，不需要编译与真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>第一次打开 AOSP 源码树，<code>ls</code> 一下会看到 <code>frameworks</code>、<code>packages</code>、<code>system</code>、<code>external</code> 十几个顶层目录。想看窗口管理器在哪儿，凭直觉进 <code>frameworks/base</code>，确实在。换个目标，凭直觉就不灵了：有的代码在 <code>packages</code> 下的模块仓里，有的在 <code>system</code> 或 <code>hardware</code> 里。想找内核调度器代码，整个树翻遍也没有。真正的索引只有一份文件，藏在 <code>.repo</code> 里。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：<strong>manifest</strong> 声明「树里应该有什么」；<strong>git 项目</strong>是实际被同步下来的代码单元；<strong>linkfile</strong> 在树里制造符号链接，把某个仓内的路径伪装成另一个位置的稳定入口。</p>
+<p>图 1：</p>
+<pre><code>manifest(声明) -&gt; git 项目(实体) -&gt; 树根工作区
+                     |
+                 linkfile(别名入口)</code></pre>
+<p>manifest 是意图，项目是实体，工作区是投影结果；三者对不上时按这个顺序回退查。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>配额与清单的差额是本篇最容易被误读的地方。<code>wc -l .repo/project.list</code> 得到 1084，而 manifest 里 <code>&lt;project&gt;</code> 有 1087 个。差额 3 个全部是 darwin 主机预编译项目（<code>prebuilts/clang/host/darwin-x86</code> 等三个），它们的 <code>groups</code> 含 <code>notdefault</code> 与 <code>darwin</code>，Linux 主机不同步。所以「声明数」永远 ≥ 「本地项目数」，差值取决于你选的 groups。</p>
+<p>顶层项目数分布按 <code>project.list</code> 统计（2026-10-14 实测）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>external</code></td><td>557 个第三方与导入仓</td><td><code>.repo/project.list</code></td></tr><tr><td><code>packages</code></td><td>161 个应用与模块</td><td><code>.repo/project.list</code></td></tr><tr><td><code>system</code></td><td>88 个系统基础组件</td><td><code>.repo/project.list</code></td></tr><tr><td><code>prebuilts</code></td><td>70 个预编译产物</td><td><code>.repo/project.list</code></td></tr></tbody></table>
+<p>其余：<code>frameworks</code> 36、<code>tools</code> 36、<code>device</code> 27、<code>hardware</code> 27、<code>kernel</code> 24、<code>trusty</code> 22、<code>test</code> 15、<code>build</code> 5、<code>bootable</code> 3、<code>developers</code> 2，另有 11 个目录各 1 个项目。</p>
+<p>manifest 的关键属性：default revision 为 <code>android17-release</code>；remote <code>aosp</code> 的 fetch 是 <code>..</code>；review 指向 <code>android-review.googlesource.com</code>；<code>sync-j</code> 为 4。<code>fetch=&quot;..&quot;</code> 表示相对 manifest 仓自身位置解析远端地址，这是 repo 自举的常见写法。</p>
+<p>linkfile 解决的是「路径搬家但入口不能变」的问题。<code>&lt;project path=&quot;build/make&quot; name=&quot;platform/build&quot;&gt;</code> 配 linkfile，把 <code>build/make/envsetup.sh</code> 链接成树根的 <code>build/envsetup.sh</code>。你在树根 <code>source build/envsetup.sh</code> 时，实际读的是 <code>build/make</code> 仓内的文件。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>把 1087 减去 3 得到 1084，与 <code>project.list</code> 行数完全吻合。再进一步：<code>kernel/</code> 前缀的项目在 <code>project.list</code> 里是 24 个，全树含 <code>kernel</code> 的路径行共 31 个（多出的落在 <code>device/linaro/*-kernel</code>、<code>trusty/kernel</code> 等）。这 31 个绝大多数是预编译与配置（<code>kernel/prebuilts/{6.1,6.6,6.12,6.18}/{arm64,x86_64}</code>、<code>kernel/configs</code>、<code>kernel/tests</code>、<code>prebuilts/qemu-kernel</code>）；两个例外是源码与头文件仓：<code>trusty/kernel</code>（含 <code>app/</code>、<code>include/</code>、<code>Android.bp</code>）与 <code>external/kernel-headers</code>（导入的 Linux UAPI 头）。树内没有 Linux/GKI 内核源码。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P0-201 讲 repo 日常操作，本篇不讲 <code>sync</code>/<code>start</code>/<code>upload</code> 的用法。AND-P0-202 讲模块构建，本篇只点出 <code>build/make/core/Makefile</code> 与 <code>frameworks/base/Android.bp</code> 两套描述并存，不展开 Soong 语法。§7 的排障命令全部是只读的，不改树状态。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>项目清单</td><td><code>.repo/manifests/default.xml</code></td><td><code>&lt;project&gt;</code> 1087 个</td><td>manifest 声明源头</td></tr><tr><td>实际同步</td><td><code>.repo/project.list</code></td><td>1084 行</td><td>每行一个已同步项目</td></tr><tr><td>repo 生成文件</td><td><code>.repo/manifest.xml</code></td><td>头部 DO NOT EDIT</td><td>init/sync 时生成，约 514 字节</td></tr><tr><td>linkfile 入口</td><td><code>build/make/envsetup.sh</code></td><td>链接为 <code>build/envsetup.sh</code></td><td>在 build/make 仓内可核验</td></tr><tr><td>Make 描述</td><td><code>build/make/core/Makefile</code></td><td>Make 入口</td><td>与 Soong 并存</td></tr><tr><td>Soong 描述</td><td><code>frameworks/base/Android.bp</code></td><td><code>Android.bp</code></td><td>单模块示例</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：.repo/manifests:ad156f32c</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l .repo/project.list</code></pre>
+<p>期望 1084，对应 §4.2 的实体数。</p>
+<pre><code class="lang-bash">grep -c '&lt;project ' .repo/manifests/default.xml</code></pre>
+<p>期望 1087，对应声明数。</p>
+<pre><code class="lang-bash">grep -E 'darwin' .repo/manifests/default.xml</code></pre>
+<p>应看到 3 个 darwin 预编译项目，即 1087 与 1084 的差额来源。</p>
+<pre><code class="lang-bash">awk -F/ '/^\S/{print $1}' .repo/project.list | sort | uniq -c | sort -rn | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>external</code> 应为 557，<code>packages</code> 161，与 §4.2 表格对齐。</p>
+<pre><code class="lang-bash">ls -l build/envsetup.sh</code></pre>
+<p>应显示指向 <code>build/make/envsetup.sh</code> 的符号链接。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>错：1084 是 AOSP 的官方项目总数。</strong> 更正：1084 只是 <code>.repo/project.list</code> 行数，即本树当前 groups 组合下的已同步数。换主机、改 groups，这个数就变。</p>
+<p><strong>错：顶层目录名代表代码归属模块。</strong> 更正：目录是 manifest 的 <code>path</code> 决定的摆放位置，与仓名 <code>name</code> 可以不同，<code>build/make</code> 与 <code>platform/build</code> 就是一对。</p>
+<p><strong>错：kernel 就在树的 `kernel` 目录里。</strong> 更正：全树 31 个含 <code>kernel</code> 的项目里只有 <code>trusty/kernel</code> 是源码仓，没有 Linux/GKI 内核源码。</p>
+<p><strong>看起来对其实是错的：manifest 里 1087 个 `&lt;project&gt;` 就代表树里有 1087 个仓。</strong> 更正：声明包含 <code>notdefault</code> 与 <code>darwin</code> groups，Linux 上不同步那 3 个，实际只落 1084 个。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>.repo/manifest.xml</code> 能改吗？ <strong>答</strong>：不能，头部写明 DO NOT EDIT，它是 repo 在 init/sync 时生成的。<strong>追问</strong>：那要改配置改哪里？<strong>答</strong>：改 <code>.repo/manifests/default.xml</code>，再重新 sync。</p>
+<p><strong>问</strong>：<code>fetch=&quot;..&quot;</code> 是什么意思？ <strong>答</strong>：remote 地址相对 manifest 仓自身位置解析，不写死主机名。<strong>追问</strong>：为什么这么写？<strong>答</strong>：地址随 manifest 仓走，整套树连同 manifest 一起镜像搬迁时不用改远端配置。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>项目数对不上</td><td><code>wc -l .repo/project.list</code></td><td>是否为 1084</td><td>与 <code>grep -c '&lt;project ' .repo/manifests/default.xml</code> 比</td></tr><tr><td>找不到某仓</td><td><code>grep -i camera .repo/project.list</code></td><td>是否有匹配行</td><td>无则查 manifest groups</td></tr><tr><td>符号链接失效</td><td><code>ls -l build/envsetup.sh</code></td><td>是否仍指向 <code>build/make/envsetup.sh</code></td><td>重新 sync 该仓</td></tr><tr><td>搞不清哪个是生成物</td><td><code>head -3 .repo/manifest.xml</code></td><td>是否含 DO NOT EDIT</td><td>改 <code>.repo/manifests/default.xml</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：repo 日常操作见 AND-P0-201；模块构建见 AND-P0-202。</p>
+<p><strong>本篇前置依赖</strong>：AND-P0-G01。</p>
+<p><strong>本篇后继</strong>：AND-P0-201、AND-P0-202。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>项目数 1084，口径为 <code>.repo/project.list</code> 行数（2026-10-14 实测）。</li><li>声明数 1087，口径为 <code>.repo/manifests/default.xml</code> 的 <code>&lt;project&gt;</code> 计数，来源为 manifest 元数据。</li><li>差额 3，口径为 darwin 预编译项目数，来源为 manifest groups。</li><li><code>sync-j</code> 为 4，来源为 manifest 属性。</li><li>含 <code>kernel</code> 的路径行 31 个（其中 <code>kernel/</code> 前缀 24 个），口径为 <code>.repo/project.list</code>，2026-10-14 实测。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树（android17-release）</td><td>实测 1084 项目 / 1087 声明</td><td>差额 3 为 darwin 项目</td></tr><tr><td>更早 release 分支</td><td>项目数与 revision 不同</td><td><code>project.list</code> 行数需重新实测</td></tr><tr><td>更晚 release 分支</td><td>项目数可能增长</td><td>差额可能不再是 3</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>repo manifest format</code>、<code>linkfile</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>manifest</code> 看变更。</li><li>本仓关键路径：<code>.repo/manifests/default.xml</code>、<code>build/make/core/Makefile</code>、<code>frameworks/base/Android.bp</code>。</li><li>承接篇：AND-P0-201、AND-P0-202。</li></ul>
+</article>
+<footer>android-100 · AND-P0-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

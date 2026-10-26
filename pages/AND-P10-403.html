@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANR/Crash 根因定位与 simpleperf/lldb 实战</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>ANR/Crash 根因定位与 simpleperf/lldb 实战</h1>
+<div class="kv"><span>ID：AND-P10-403</span><span>卷：P10</span><span>章：10.4</span><span>难度：5</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/am/AnrHelper.java ；frameworks/base/core/java/com/android/internal/os/TimeoutRecord.java ；frameworks/base/core/java/android/os/InputConstants.java ；frameworks/native/libs/input/android/os/IInputConstants.aidl ；frameworks/base/services/core/java/com/android/server/wm/ActivityRecord.java ；frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java ；system/core/debuggerd/libdebuggerd/tombstone.cpp ；system/core/debuggerd/crash_dump.cpp ；frameworks/base/services/core/java/com/android/server/am/NativeCrashListener.java ；system/extras/simpleperf/cmd_record.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:14px"><a href="#h7-anr-侧-从超时种类到排队消费">ANR 侧：从超时种类到排队消费</a></li><li style="margin-left:14px"><a href="#h8-输入分发-5000-毫秒的来路">输入分发：5000 毫秒的来路</a></li><li style="margin-left:14px"><a href="#h9-各类超时常量">各类超时常量</a></li><li style="margin-left:14px"><a href="#h10-状态落点与崩溃入口">状态落点与崩溃入口</a></li><li style="margin-left:0px"><a href="#h11-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h12-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h13-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h14-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h15-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h16-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h17-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h18-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h19-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h20-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h21-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>ANR 与崩溃是两条完全不同的链路：ANR 是「有人在等」，由 <code>TimeoutRecord</code> 记录超时种类、<code>AnrHelper</code> 排队、<code>ProcessErrorStateRecord</code> 落状态；崩溃是「有人死了」，由 debuggerd 抓现场、<code>tombstone.cpp</code> 刻盘、<code>NativeCrashListener</code> 回传 Java 侧。</p>
+<p>判断 ANR 的第一步不是看 Java 调用栈，而是看这次 ANR 的 <code>mReason</code> 是哪种超时记录——它决定了「谁在等谁」的初始拓扑。</p>
+<p>输入分发的超时常量是 5000 毫秒（AIDL 字面值，Java 侧 <code>InputConstants</code> 再乘 <code>Build.HW_TIMEOUT_MULTIPLIER</code>），广播前台 10 秒、后台 60 秒，Service 默认 20 秒、后台放大 10 倍，ContentProvider 发布 10 秒——这些都是源码常量的口径，不是某台机器的实测值。注意 instrumentation / wrapper 场景另有一条 60 秒的取值，不经过这个 5000。</p>
+<p>simpleperf 与 lldb 在这条链上的作用是取证据：前者按 <code>-e cpu-cycles -f 4000</code> 的默认速率采样热点，后者接 debuggerd 交出的现场。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P10-402</code>。上一篇给了采样与 trace 的观测面，本篇把观测面接到具体的 ANR 记录与 tombstone 产物上。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/services/core/java/com/android/server/am/AnrHelper.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/TimeoutRecord.java</code></li><li><code>frameworks/base/core/java/android/os/InputConstants.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/ActivityRecord.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></li><li><code>system/core/debuggerd/crash_dump.cpp</code></li><li><code>system/core/debuggerd/libdebuggerd/tombstone.cpp</code></li><li><code>system/core/debuggerd/libdebuggerd/tombstone_proto.cpp</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/NativeCrashListener.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> 与 <code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>手上有一份额外的 <code>anr_</code> 文件，打开是几百行线程栈；另有一具 tombstone，第一行是一串信号名和地址。两份产物的共同点是「信息很多，但看不出起点」。</p>
+<p>常见的错法是直接跳到最长的那个线程栈里找可疑函数。ANR 的答案往往不在栈里，而在「这次判定的超时由谁设定、用的是哪个常量」；崩溃的答案往往不在最后一帧，而在信号是谁发的、<code>ptrace</code> 是在哪一步接管的。</p>
+<p>本篇只讲判定链路与产物解读：超时由谁记录、ANR 怎么产生、tombstone 怎么生成、采样与调试器的命令契约是什么。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念要分清。<strong>超时记录</strong>（<code>TimeoutRecord</code>）是「这次判定的理由书」，回答是哪种超时、等了多久。<strong>ANR 记录</strong>（<code>AnrRecord</code>）是排队单元，每条待处理 ANR 占一行。<strong>错误状态</strong>（<code>ProcessErrorStateRecord</code>）是进程对象的持久标记，<code>isNotResponding()</code> 读它。<strong>tombstone</strong> 是崩溃现场的落盘产物，与 ANR 链路在 <code>DropBoxManagerService</code> 之前互不相干。</p>
+<p>图 1：ANR 与崩溃两条链路的汇合点</p>
+<pre><code>超时发生
+  -&gt; TimeoutRecord (mReason)
+    -&gt; AnrHelper.mAnrRecords 排队
+      -&gt; AnrConsumerThread 消费
+        -&gt; ProcessErrorStateRecord.setNotResponding
+          -&gt; DropBoxManagerService.isTagEnabled
+
+native 崩溃
+  -&gt; debuggerd 接管 (ptrace)
+    -&gt; crash_dump 回溯
+      -&gt; tombstone.cpp 刻盘
+        -&gt; NativeCrashListener 读 socket
+          -&gt; DropBoxManagerService.isTagEnabled</code></pre>
+<p>两条链路在归档处汇合，但前面每一步的责任主体完全不同。判读时先确定产物属于哪条链路，再看该链路的第一个分叉点。</p>
+<p>注：图 1 的崩溃分支里，<code>crash_dump</code> 的两路输出是并行的——tombstone 刻盘（<code>tombstone.cpp</code> :861/:865）与回传 Java 侧的 AM socket（<code>NativeCrashListener</code>，<code>crash_dump.cpp</code> :875）同源并行，并非严格的「先落盘再回传」；上图按责任主体先后简化绘制。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<h3 id="h7-anr-侧-从超时种类到排队消费">ANR 侧：从超时种类到排队消费</h3>
+<p><code>AnrHelper</code> 是统一入口，全文 336 行。待处理队列是 <code>ArrayList&lt;AnrRecord&gt; mAnrRecords</code>（:81）。入口方法 <code>appNotResponding(ProcessRecord, TimeoutRecord)</code>（:117）与带组件名的重载（:123）。消费线程 <code>AnrConsumerThread</code>（:205）由 <code>startAnrConsumerIfNeeded()</code>（:178/:185）按需拉起——没有 ANR 时不占线程。</p>
+<p>队列化的意义：ANR 处理本身要做 dump、要写文件，耗时不可控；放在消费线程里做，避免阻塞调用方。</p>
+<p><code>TimeoutRecord</code> 全文 304 行，字段 <code>mReason</code>（:74）记录理由，<code>mLatencyTracker</code>（:86）挂延迟追踪。工厂方法决定「谁在等谁」：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>forInputDispatchNoFocusedWindow</code></td><td>输入事件无焦点窗口</td><td><code>TimeoutRecord.java</code> :143</td></tr><tr><td><code>forInputDispatchWindowUnresponsive</code></td><td>窗口不响应输入</td><td><code>TimeoutRecord.java</code> :149</td></tr><tr><td><code>forServiceExec</code></td><td>Service 执行超时</td><td><code>TimeoutRecord.java</code> :155</td></tr><tr><td><code>forServiceStartWithEndTime</code></td><td>Service 启动带结束时间</td><td><code>TimeoutRecord.java</code> :165</td></tr><tr><td><code>forBroadcastReceiver</code></td><td>广播接收超时</td><td><code>TimeoutRecord.java</code> :115/:123/:131</td></tr><tr><td><code>forContentProvider</code></td><td>ContentProvider 相关超时</td><td><code>TimeoutRecord.java</code> :173</td></tr><tr><td><code>forShortFgsTimeout</code></td><td>短时前台服务超时</td><td><code>TimeoutRecord.java</code> :185</td></tr><tr><td><code>forJobService</code></td><td>JobService 超时</td><td><code>TimeoutRecord.java</code> :191</td></tr><tr><td><code>forApp</code> / <code>forAppStart</code></td><td>应用通用 / 启动超时</td><td><code>TimeoutRecord.java</code> :179/:197</td></tr></tbody></table>
+<p>看到 ANR，先定 <code>mReason</code> 属于上面哪一行。它决定了「等待方」是输入分发器、ActivityManagerService 的广播队列，还是 Service 的启动路径。</p>
+<h3 id="h8-输入分发-5000-毫秒的来路">输入分发：5000 毫秒的来路</h3>
+<p><code>InputConstants.java</code> :24–:26 的 <code>DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code> 取 <code>IInputConstants.UNMULTIPLIED_DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code>（后者定义在 <code>frameworks/native/libs/input/android/os/IInputConstants.aidl</code> :26，字面值 5000，注释写 <code>// 5 seconds</code>）再乘 <code>Build.HW_TIMEOUT_MULTIPLIER</code>——Java 侧不是裸 5000，普通进程口径同样带硬件倍率。</p>
+<p>消费侧在 <code>ActivityRecord.java</code>（全文 9918 行）：<code>mInputDispatchingTimeoutMillis</code> 初始化于 :674，在 :4087 重置，超时回调 <code>inputDispatchingTimedOut(TimeoutRecord, int)</code> 在 :6819。</p>
+<p>但这不只有初始化这一条赋值。<code>setProcess</code> 路径在 <code>ActivityRecord.java</code> :2184 把 <code>mInputDispatchingTimeoutMillis</code> 重新赋值为 <code>getInputDispatchingTimeoutMillisLocked(this)</code>；该函数在 <code>ActivityTaskManagerService.java</code> :5586（有进程则转 :5590 → :5593），最终落到 <code>WindowProcessController.java</code> :1487 的 <code>getInputDispatchingTimeoutMillis()</code>，其返回</p>
+<pre><code>isInstrumenting() || isUsingWrapper()
+    ? INSTRUMENTATION_KEY_DISPATCHING_TIMEOUT_MILLIS
+    : DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code></pre>
+<p>前者定义于 <code>ActivityTaskManagerService.java</code> :345，值为 <code>60 * 1000</code>。也就是说，带 instrumentation 或 wrapper 的进程，输入分发判定阈值是 60 秒，这个值不再由 <code>IInputConstants.aidl</code> 决定；只有普通情况才回到 5000。</p>
+<p>再者，「判定对象是 Activity」这个说法要收窄。按 <code>frameworks/base/services/core/java/com/android/server/wm/AnrController.java</code> :304–:306（注意 <code>core/java/android/app/</code> 下另有同名类，内容吻合的是 wm 侧这个），activity 为空或为 embedded 时直接按 pid 归因，aboveSystem 另判；<code>ActivityRecord.java</code> :6835–:6847 里 <code>blameActivityProcess</code> 为 false 时同样转 pid 路径。即便走 Activity 分支，最终仍是以 <code>ProcessRecord</code> 进入 <code>AnrHelper</code>（<code>ActivityManagerService.java</code> :19354）——Activity 只用于定组件与归因，不构成独立判定对象。pid 归因的具体取值点是 <code>ActivityManagerService.java</code> :19314 取出 <code>ProcessRecord</code> 的 <code>pid</code>（<code>ProcessRecord.java</code> :1861–:1862 的 <code>pid</code> 字段，经 <code>WindowProcessController.java</code> :1487 同函数回写），再交给 <code>AnrHelper</code>；而 <code>ActivityTaskManagerService.java</code> :5587–:5588／:5594–:5595 在 <code>r == null</code>、无进程或 <code>WPC</code> 为 null 时直接返回 <code>DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code>，60 秒分支此时不生效。</p>
+<h3 id="h9-各类超时常量">各类超时常量</h3>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BROADCAST_FG_TIMEOUT</code></td><td>前台广播 10 秒</td><td><code>ActivityManagerService.java</code> :664</td></tr><tr><td><code>BROADCAST_BG_TIMEOUT</code></td><td>后台广播 60 秒</td><td><code>ActivityManagerService.java</code> :665</td></tr><tr><td><code>DEFAULT_SERVICE_TIMEOUT</code></td><td>Service 20 秒</td><td><code>ActivityManagerConstants.java</code> :320</td></tr><tr><td><code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code></td><td>后台 Service 为前者 ×10</td><td><code>ActivityManagerConstants.java</code> :325</td></tr><tr><td><code>DEFAULT_SHORT_FGS_TIMEOUT_DURATION</code></td><td>短时前台服务 3 分钟</td><td><code>ActivityManagerConstants.java</code> :1064</td></tr><tr><td><code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MILLIS</code></td><td>ContentProvider 发布 10 秒</td><td><code>ContentResolver.java</code> :806</td></tr></tbody></table>
+<p>广播的前台/后台常量在 <code>ActivityManagerService.java</code> :20157 与 :20161 赋值到常量对象。ContentProvider 的服务端消息是 <code>CONTENT_PROVIDER_PUBLISH_TIMEOUT_MSG</code>（消息号 57），在 :1712 定义、:1980 处理、:5327 发送，超时值取自该常量（:5330）。</p>
+<p>注意这些值都乘了 <code>Build.HW_TIMEOUT_MULTIPLIER</code>（短时前台服务那条除外）。看到「日志里的时间和常量对不上」，先怀疑这个倍数。</p>
+<h3 id="h10-状态落点与崩溃入口">状态落点与崩溃入口</h3>
+<p>ANR 状态落在 <code>ProcessErrorStateRecord</code>（全文 977 行）：<code>isNotResponding()</code> :207、<code>setNotResponding(boolean)</code> :212（:214 联动 <code>getWindowProcessController().setNotResponding</code>）、<code>getAnrAnnotation()</code> :276、<code>setNotRespondingReport(...)</code> :291。</p>
+<p>崩溃入口在 <code>AppErrors</code>（全文 1254 行）：<code>crashApplication</code> :623 → <code>crashApplicationInner</code> :635；<code>makeAppCrashingLocked</code> :817 在 :702 与 :799 被调用；用户主动杀掉走 <code>killAppAtUserRequestLocked</code> :479。</p>
+<h2 id="h11-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设一份 ANR 的 <code>mReason</code> 指向 <code>forInputDispatchWindowUnresponsive</code>。链路走一遍：</p>
+<p>输入分发器等待超过 <code>DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code>（AIDL 字面值 5000 乘 <code>Build.HW_TIMEOUT_MULTIPLIER</code>；instrumentation / wrapper 场景为 60 秒）→ 构造该 <code>TimeoutRecord</code> → 交给 <code>AnrHelper</code> :123 的 8 参重载 <code>appNotResponding(...)</code>（输入分发由 <code>ActivityManagerService.java</code> :19354 调用，末位 <code>isContinuousAnr=true</code>；:117 的两参版只作内部转调、传 <code>isContinuousAnr=false</code>，供 <code>AMS</code> :7791/:7805 等非输入类 ANR 使用）→ 入队 <code>mAnrRecords</code>（:81）→ <code>startAnrConsumerIfNeeded()</code>（:185）拉起 <code>AnrConsumerThread</code>（:205）→ 消费时写 <code>setNotResponding(true)</code>（:212）并联动窗口侧 → 归档时经 <code>DropBoxManagerService</code>，先判 <code>isTagEnabled</code>（:201/:593），未启用则直接返回（<code>if (!isTagEnabled(tag)) return;</code> :544）。</p>
+<p>这里每个箭头都有明确的代码落点，所以「5 秒」不是猜的，是 <code>IInputConstants.aidl</code> :26 的字面值。若日志显示的时间明显大于 5 秒，差额一般来自 dump 与队列等待，也可能是 instrumentation 分支取到了 60 秒，而不是判定阈值本身。</p>
+<p>对比 Service 场景：<code>DEFAULT_SERVICE_TIMEOUT</code> 是 20 秒，<code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code> 是它的 10 倍。同样一次「主线程卡住」，前台 Service 和后台 Service 的判定时刻差一个数量级——只看调用栈不看种类，很容易误判「为什么这次这么久才报」。</p>
+<h2 id="h12-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>Binder 线程池耗尽的机制归 <code>AND-P2-301</code>，本篇只承接它产出的「线程池满」现象如何进入 ANR 记录。各性能域的归因方法归 <code>AND-P10-201</code> 与 <code>AND-P10-202</code>；本篇给的是判定链路与产物口径，不做域级归因。构建与工具链的其余部分接 <code>AND-P10-402</code>。lldb 与 gdb 的交互式调试过程不在本篇范围，本篇只写命令契约与产物生成。</p>
+<h1 id="h13-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>ANR 排队与消费</td><td><code>frameworks/base/services/core/java/com/android/server/am/AnrHelper.java</code></td><td><code>mAnrRecords</code>（:81）、<code>appNotResponding</code>（:117/:123）、<code>AnrConsumerThread</code>（:205）</td><td>全文 336 行</td></tr><tr><td>超时种类</td><td><code>frameworks/base/core/java/com/android/internal/os/TimeoutRecord.java</code></td><td><code>mReason</code>（:74）、10 种超时、12 个工厂方法（<code>forBroadcastReceiver</code> 有三个重载 :115/:123/:131）</td><td>全文 304 行</td></tr><tr><td>输入超时常量</td><td><code>frameworks/base/core/java/android/os/InputConstants.java</code></td><td><code>DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code>（:24–:26，AIDL 值乘 <code>Build.HW_TIMEOUT_MULTIPLIER</code>）</td><td>取值来自 AIDL</td></tr><tr><td>输入超时数值</td><td><code>frameworks/native/libs/input/android/os/IInputConstants.aidl</code></td><td><code>UNMULTIPLIED_DEFAULT_DISPATCHING_TIMEOUT_MILLIS</code>（:26）</td><td>字面值 5000</td></tr><tr><td>输入超时消费</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityRecord.java</code></td><td><code>mInputDispatchingTimeoutMillis</code>（:674/:2184/:4087）、<code>inputDispatchingTimedOut</code>（:6819）</td><td>全文 9918 行；:2184 为 instrumentation 分支覆盖点</td></tr><tr><td>instrumentation 超时</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></td><td><code>INSTRUMENTATION_KEY_DISPATCHING_TIMEOUT_MILLIS</code>（:345）、<code>getInputDispatchingTimeoutMillisLocked</code>（:5586/:5590/:5593）</td><td>值 <code>60 * 1000</code></td></tr><tr><td>wrapper 判定</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowProcessController.java</code></td><td><code>getInputDispatchingTimeoutMillis()</code>（:1487）</td><td><code>isInstrumenting() || isUsingWrapper()</code> 分支</td></tr><tr><td>Service 超时</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></td><td><code>DEFAULT_SERVICE_TIMEOUT</code>（:320）、后台（:325）、短时 FGS（:1064）</td><td>含 <code>HW_TIMEOUT_MULTIPLIER</code></td></tr><tr><td>tombstone 现场编码</td><td><code>system/core/debuggerd/libdebuggerd/tombstone.cpp</code></td><td><code>engrave_tombstone_ucontext</code> 定义（:55）、<code>engrave_tombstone</code> 调用点（:134）</td><td>全文 169 行</td></tr><tr><td>tombstone 主体刻盘</td><td><code>system/core/debuggerd/libdebuggerd/tombstone.cpp</code></td><td><code>engrave_tombstone</code> 定义与函数体</td><td>同文件，注意与上一行区分</td></tr><tr><td>tombstone proto 刻盘</td><td><code>system/core/debuggerd/libdebuggerd/tombstone_proto.cpp</code></td><td><code>engrave_tombstone_proto</code> 定义（:902）</td><td>声明在 <code>system/core/debuggerd/libdebuggerd/include/libdebuggerd/tombstone.h</code> :66</td></tr><tr><td>崩溃转储</td><td><code>system/core/debuggerd/crash_dump.cpp</code></td><td><code>ptrace_seize_thread</code>（:111）、<code>AndroidRemoteUnwinder</code>（:826）</td><td>全文 900 行</td></tr><tr><td>崩溃回传</td><td><code>frameworks/base/services/core/java/com/android/server/am/NativeCrashListener.java</code></td><td><code>DEBUGGERD_SOCKET_PATH</code>（:51）、<code>readExactly</code>（:183）</td><td>全文 306 行</td></tr><tr><td>采样命令</td><td><code>system/extras/simpleperf/cmd_record.cpp</code></td><td><code>default_measured_event_type</code>（:85）、选项解析</td><td>全文 2381 行</td></tr></tbody></table>
+<h1 id="h14-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/services/core/java/com/android/server/am/AnrHelper.java \
+      frameworks/base/core/java/com/android/internal/os/TimeoutRecord.java \
+      system/core/debuggerd/libdebuggerd/tombstone.cpp \
+      system/core/debuggerd/crash_dump.cpp \
+      system/extras/simpleperf/cmd_record.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出行数依次为 336、304、169、900、2381，对上 §4.2 与 §5 的全文行数。</p>
+<pre><code class="lang-bash">grep -n &quot;UNMULTIPLIED_DEFAULT_DISPATCHING_TIMEOUT_MILLIS&quot; \
+  frameworks/native/libs/input/android/os/IInputConstants.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :26 一行，值为 <code>5000</code>，注释为 <code>// 5 seconds</code>——这是普通场景输入类 ANR 判定阈值的来源。</p>
+<pre><code class="lang-bash">grep -n &quot;DEFAULT_DISPATCHING_TIMEOUT_MILLIS&quot; \
+  frameworks/base/core/java/android/os/InputConstants.java
+sed -n '24,26p' frameworks/base/core/java/android/os/InputConstants.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 grep 命中 :24–:25 两行（:25 的 AIDL 常量名含该子串），再用 sed 看全 :24–:26 的三段声明：取 AIDL 里的常量再乘 <code>Build.HW_TIMEOUT_MULTIPLIER</code>，Java 侧没有第二份独立数值。</p>
+<pre><code class="lang-bash">grep -n &quot;INSTRUMENTATION_KEY_DISPATCHING_TIMEOUT_MILLIS\|getInputDispatchingTimeoutMillis&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :345 的定义与 :5586/:5590/:5593 的转调，对上「instrumentation 分支另取 60 秒」。</p>
+<pre><code class="lang-bash">grep -n &quot;getInputDispatchingTimeoutMillis\|isUsingWrapper&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/WindowProcessController.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :1487 的返回，显示 instrumentation / wrapper 与默认值两个分支的分界就在这一行。</p>
+<pre><code class="lang-bash">grep -n &quot;forInputDispatchWindowUnresponsive\|forServiceExec\|forBroadcastReceiver&quot; \
+  frameworks/base/core/java/com/android/internal/os/TimeoutRecord.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :149、:155 与 :115/:123/:131，对上「工厂方法即超时种类」的说法。</p>
+<pre><code class="lang-bash">grep -n &quot;DEBUGGERD_SOCKET_PATH\|readExactly&quot; \
+  frameworks/base/services/core/java/com/android/server/am/NativeCrashListener.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :51 的 <code>/data/system/ndebugsocket</code> 与 :183 的 <code>readExactly</code>，对上崩溃回传走 socket 而非文件轮询。</p>
+<pre><code class="lang-bash">grep -n &quot;ptrace_seize_thread\|AndroidRemoteUnwinder\|dump_backtrace&quot; \
+  system/core/debuggerd/crash_dump.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :111、:826、:836，对上「先 seize 再回溯」的顺序。</p>
+<pre><code class="lang-bash">grep -n &quot;engrave_tombstone_ucontext\|engrave_tombstone\b&quot; \
+  system/core/debuggerd/libdebuggerd/tombstone.cpp</code></pre>
+<p>期望命中 :55 的 <code>engrave_tombstone_ucontext</code> 定义与 :134 的 <code>engrave_tombstone</code> 调用点，提示两者不可混为一谈。</p>
+<pre><code class="lang-bash">grep -n &quot;engrave_tombstone_proto&quot; \
+  system/core/debuggerd/libdebuggerd/tombstone_proto.cpp \
+  system/core/debuggerd/libdebuggerd/include/libdebuggerd/tombstone.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>tombstone_proto.cpp</code> :902 的定义与 <code>tombstone.h</code> :66 的声明，说明 proto 版刻盘不在 <code>tombstone.cpp</code> 里。</p>
+<pre><code class="lang-bash">grep -n &quot;default_measured_event_type\|cpu-cycles&quot; system/extras/simpleperf/cmd_record.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :85 的 <code>cpu-cycles</code> 与 :158 的帮助文本 <code>-e cpu-cycles -f 4000 -o perf.data</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h15-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h16-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：ANR 的 5 秒是全局统一的。</strong> 错。5 秒只对应普通进程的输入分发这一条链路（<code>IInputConstants.aidl</code> :26）。带 instrumentation 或 wrapper 的进程走 <code>ActivityRecord.java</code> :2184 → <code>ActivityTaskManagerService.java</code> :5586/:5593 → <code>WindowProcessController.java</code> :1487，取 <code>INSTRUMENTATION_KEY_DISPATCHING_TIMEOUT_MILLIS</code>（<code>ActivityTaskManagerService.java</code> :345）即 60 秒，且不再由 <code>IInputConstants.aidl</code> 决定。广播前台是 10 秒、后台 60 秒，Service 默认 20 秒、后台放大 10 倍。先看 <code>mReason</code> 再谈时间。</p>
+<p><strong>误区二：ANR 处理在调用方线程同步完成。</strong> 看起来对，其实是错的。<code>AnrHelper</code> 把记录塞进 <code>mAnrRecords</code>（:81），由 <code>AnrConsumerThread</code>（:205）异步消费。所以日志里 dump 的时间点晚于超时时刻是正常的，这个差值不代表系统卡住。</p>
+<p><strong>误区三：tombstone 是崩溃进程自己写的。</strong> 错。崩溃进程已被信号挂起，写盘由 <code>crash_dump</code> 完成：先 <code>ptrace(PTRACE_SEIZE, ...)</code>（:112）接管，回溯用 <code>AndroidRemoteUnwinder</code>（:826），再由 <code>tombstone.cpp</code> 落盘——现场编码由 <code>engrave_tombstone_ucontext</code>（:55 定义）完成，主体在 <code>engrave_tombstone</code>（:134 处被调用），proto 版由 <code>tombstone_proto.cpp</code> :902 的 <code>engrave_tombstone_proto</code> 产出。严格说法是「主链路由 <code>crash_dump</code> 代写」，因为存在一条例外：<code>debuggerd_fallback.cpp</code> :342 在崩溃进程自身内（先 <code>tombstoned_connect(getpid(), …)</code>）直接调用 <code>engrave_tombstone_ucontext</code> 落盘，这是 intercept 或不可 fork 场景下的兜底路径。</p>
+<p><strong>误区四：Java 侧能看到崩溃就一定读了文件。</strong> 错。<code>NativeCrashListener</code> 走的是 <code>DEBUGGERD_SOCKET_PATH</code>（:51）这个 socket，先读 9 字节定长头（:221）。文件与 socket 是两条并行通道。</p>
+<h2 id="h17-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：一份 ANR 文件里时间对不上，先怀疑什么？ <strong>答</strong>：先怀疑 <code>Build.HW_TIMEOUT_MULTIPLIER</code>。多数超时常量都乘了它，实际阈值可能不是字面值；输入分发另要排除 instrumentation / wrapper 分支。 <strong>追问</strong>：哪条没乘？ <strong>答</strong>：短时前台服务的 <code>DEFAULT_SHORT_FGS_TIMEOUT_DURATION</code> 是 <code>3 * 60_000</code>，字面值即 3 分钟；媒体处理与数据同步两类 FGS 均为 <code>6 * 60 * 60_000</code>。</p>
+<p><strong>问</strong>：simpleperf 默认采什么？ <strong>答</strong>：<code>default_measured_event_type = &quot;cpu-cycles&quot;</code>（:85），帮助文本写明默认 <code>-e cpu-cycles -f 4000 -o perf.data</code>（:158）。 <strong>追问</strong>：不设时长会怎样？ <strong>答</strong>：<code>duration_in_sec_</code> 初值 0（:363），非零时才设定时器退出（:782–:784）；为 0 表示一直采到你手动停。</p>
+<p><strong>问</strong>：报告侧默认给完整调用栈吗？ <strong>答</strong>：不给。<code>brief_callgraph_ = !options.PullBoolValue(&quot;--full-callgraph&quot;)</code>（:627），默认是精简栈，要全栈得显式加 <code>--full-callgraph</code>（:575）。</p>
+<h2 id="h18-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知道 ANR 属于哪类</td><td><code>grep -n &quot;forInputDispatch|forBroadcastReceiver|forServiceExec&quot; frameworks/base/core/java/com/android/internal/os/TimeoutRecord.java</code></td><td><code>mReason</code> 对应的工厂方法</td><td>按种类查 §4.2 对应常量表</td></tr><tr><td>判定时间与日志对不上</td><td><code>grep -n &quot;HW_TIMEOUT_MULTIPLIER&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></td><td>常量是否乘了倍数</td><td>用乘积重算阈值；输入分发再查 instrumentation 分支</td></tr><tr><td>有 tombstone 但无 Java 崩溃</td><td><code>grep -n &quot;DEBUGGERD_SOCKET_PATH&quot; frameworks/base/services/core/java/com/android/server/am/NativeCrashListener.java</code></td><td>socket 是否被建出并 chmod</td><td>转看 <code>crash_dump.cpp</code> :111</td></tr><tr><td>采样数据只有热点没有调用栈</td><td><code>grep -n &quot;brief_callgraph_|full-callgraph&quot; system/extras/simpleperf/cmd_report.cpp</code></td><td>:627 的默认值</td><td>重跑 report 加 <code>--full-callgraph</code>（:575）</td></tr><tr><td>归档里查不到记录</td><td><code>grep -n &quot;isTagEnabled&quot; frameworks/base/services/core/java/com/android/server/DropBoxManagerService.java</code></td><td>:544 的提前返回</td><td>确认该 tag 是否启用</td></tr></tbody></table>
+<h1 id="h19-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Binder 线程池耗尽机制见 <code>AND-P2-301</code>；各性能域归因见 <code>AND-P10-201</code>、<code>AND-P10-202</code>；lldb/gdb 交互式调试过程不在本篇。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P10-402</code>。</p>
+<p><strong>本篇后继</strong>：本卷内无后继（403 是工具链主线终点）；跨卷下游为 <code>AND-P2-301</code>（框架并发模型：Binder 线程池 × Handler/Looper）——Binder 线程池耗尽是 ANR 的一种典型根因。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>输入分发超时 5000 毫秒（AIDL 字面值，Java 侧乘 <code>Build.HW_TIMEOUT_MULTIPLIER</code>）；instrumentation / wrapper 场景为 60 秒。口径：源码常量（<code>IInputConstants.aidl</code> :26；<code>InputConstants.java</code> :24-:26；<code>ActivityTaskManagerService.java</code> :345）。</li><li>广播前台 10 秒 / 后台 60 秒。口径：源码常量（<code>ActivityManagerService.java</code> :664/:665）。</li><li>Service 默认 20 秒 / 后台 200 秒；短时前台服务 3 分钟。口径：源码常量（<code>ActivityManagerConstants.java</code> :320/:325/:1064）。</li><li>ContentProvider 发布 10 秒。口径：源码常量（<code>ContentResolver.java</code> :806）。</li><li>simpleperf 默认采样频率 4000。口径：帮助文本（<code>cmd_record.cpp</code> :158）。本机实测采样丢失率暂无实测，列为待补。</li></ul>
+<h1 id="h20-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td><code>AnrHelper</code> 为 336 行，ANR 由 <code>AnrConsumerThread</code>（:205）单线程消费；<code>TimeoutRecord</code> 为 304 行、10 种超时与 12 个工厂方法（<code>forBroadcastReceiver</code> 三重载）</td><td>本篇所有行号与常量以此树为准</td></tr><tr><td>更早版本</td><td>ANR 处理路径与超时记录的组织方式不同，<code>TimeoutRecord</code> 的工厂方法集合与本树不一致</td><td>旧树行号不可直接套用，需按符号 grep 重锚</td></tr></tbody></table>
+<p>关于更早版本的具体行数与差异内容，本篇不断言；引用旧树结论前请以该树的 <code>git log</code> 与符号检索核实。</p>
+<h1 id="h21-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>debuggerd</code>；source.android.com 站内检索 <code>simpleperf</code>；developer.android.com 站内检索 <code>anr</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>AnrHelper</code>、<code>TimeoutRecord</code>、<code>engrave_tombstone</code>。</li><li>本仓关键路径：<code>system/core/debuggerd/</code>；<code>system/extras/simpleperf/</code>；<code>frameworks/base/services/core/java/com/android/server/am/</code>。</li><li>承接篇：<code>AND-P10-402</code>、<code>AND-P2-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-403 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

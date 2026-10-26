@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜像格式与 OTA：payload、fastboot 与增量更新</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>镜像格式与 OTA：payload、fastboot 与增量更新</h1>
+<div class="kv"><span>ID：AND-P11-202</span><span>卷：P11</span><span>章：11.2</span><span>难度：4</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/make/tools/releasetools/ota_from_target_files.py ；build/make/tools/releasetools/add_img_to_target_files.py ；build/make/tools/releasetools/common.py ；system/update_engine/payload_generator/generate_delta_main.cc ；system/update_engine/payload_consumer/delta_performer.cc ；system/update_engine/aosp/update_attempter_android.cc ；system/core/fastboot/fastboot.cpp ；bootable/recovery/install/adb_install.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>target files 是中间产物集合，OTA 包由它二次加工而来。<code>ota_from_target_files.py</code> 读 target files，产出全量包或增量包；包内 payload 由 <code>update_engine</code> 的 payload 生成器写出，<code>update_metadata.proto</code> 定义它的结构。设备侧两条入口：<code>fastboot</code> 直接写分区，sideload 把包交给 recovery 或 update_engine 消费。A/B 设备上，payload 的作用是往非活动槽写入并切槽；消费端落到 <code>delta_performer.cc</code>。本篇不给实测体积与耗时，凡是构建产物量级一律标「未在本树构建验证」。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P11-201</code>。A/B 槽位与动态分区的配置项定义在那一篇，本篇只讲这些配置产生的镜像与更新产物，两篇共用 <code>PRODUCT_USE_DYNAMIC_PARTITIONS</code>、<code>AB_OTA_UPDATER</code> 这组名义。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/make/tools/releasetools/ota_from_target_files.py</code></li><li><code>build/make/tools/releasetools/add_img_to_target_files.py</code></li><li><code>build/make/tools/releasetools/common.py</code></li><li><code>system/update_engine/payload_generator/generate_delta_main.cc</code></li><li><code>system/update_engine/payload_consumer/delta_performer.cc</code></li><li><code>system/update_engine/aosp/update_attempter_android.cc</code></li><li><code>system/core/fastboot/fastboot.cpp</code></li><li><code>bootable/recovery/install/adb_install.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机，验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一次 <code>make dist</code> 之后，<code>out/dist/</code> 下会同时出现 <code>*-img-*.zip</code>、<code>*-target_files-*.zip</code>、<code>*-ota-*.zip</code> 三种文件。它们名字都带设备代号，内容却完全不同：有的能直接 <code>fastboot flash</code>，有的只能交给 recovery，有的必须交给 update_engine。搞错其中任意一步，现象是「刷完起不来」或「OTA 校验失败但看不出错在哪」。要理清这条链路，得先接受一个事实：镜像、target files、OTA 包是三段不同的产物，各有自己的消费方。本篇按这三段的顺序拆。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念构成一条链：<strong>镜像</strong>（分区内容的原始字节）、<strong>target files</strong>（镜像 + 元数据的 zip 中间件）、<strong>payload</strong>（OTA 包内描述「怎么从旧状态变成新状态」的操作流）、<strong>槽位</strong>（A/B 设备上镜像落地的目标位置）。前三段在 host 侧完成，最后一段在设备侧。</p>
+<p>图 1：三段产物的生成与消费链</p>
+<pre><code>  镜像(img)  ──►  target files  ──►  OTA 包(内含 payload)
+   add_img_to_       ota_from_           update_engine
+   target_files.py   target_files.py     或 fastboot/recovery</code></pre>
+<p>关键点：target files 不是终点。<code>add_img_to_target_files.py</code> 把 <code>out/</code> 里的分区镜像重新组装进 target files zip；<code>ota_from_target_files.py</code> 再从 target files 出发，取两份 target files（旧、新）算差分，或只取新的做全量。镜像本身不携带差分信息，差分是 target files 阶段才算出来的。图里这条链是 A/B 路径；非 A/B 的包由 <code>non_ab_ota.py</code> 生成，块差分在 <code>blockimgdiff.py</code>，不产生 payload。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>releasetools 三件套的分工</strong>。本树口径（2026-10-23 实测规模）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>add_img_to_target_files.py</code></td><td>把分区镜像与元数据封进 target files zip</td><td>1283 行；<code>AddSystem</code> :276、<code>AddVendor</code> :327、<code>AddProduct</code> :366、<code>AddSystemExt</code> :385</td></tr><tr><td><code>ota_from_target_files.py</code></td><td>由 target files 生成全量或增量 OTA 包</td><td>1489 行；<code>ParseInfoDict</code> :569、<code>GetTargetFilesZipForPartialUpdates</code> :615、<code>ModifyVABCCompressionParam</code> :403</td></tr><tr><td><code>img_from_target_files.py</code></td><td>由 target files 单独导出镜像集合</td><td>277 行</td></tr></tbody></table>
+<p><code>add_img_to_target_files.py</code> 里 <code>AddSystem</code>、<code>AddVendor</code>、<code>AddProduct</code>、<code>AddSystemExt</code> 对应 system、vendor、product、system_ext 四个主逻辑分区（同文件另有 <code>AddOdm</code>、<code>AddVendorDlkm</code>、<code>AddOdmDlkm</code>、<code>AddSystemDlkm</code> 等入口，<code>^def Add</code> 全量匹配会列出 22 个函数）。<code>ParseAvbFooter</code> :91 解析 AVB 页脚，<code>GetCareMap</code> :98 与 <code>AddCareMapForAbOta</code> :162 生成 care map——它是 dm-verity 的验证范围清单，成员判据是 <code>PARTITIONS_WITH_CARE_MAP</code>（清单定义在 <code>common.py</code> :131；<code>add_img_to_target_files.py</code> :102 的注释、:109 与 :177 的断言都是对它的引用），与 A/B 与否无关——这三个函数就在 <code>add_img_to_target_files.py</code> 内；<code>common.py</code>（4329 行）提供的是 <code>RoundUpTo4K</code> :338、<code>MakeTempFile</code> :2867 一类公共设施。<code>build_super_image.py</code> 共 211 行，负责把逻辑分区拼成 <code>super.img</code>——这是动态分区的前置条件，具体配置归 <code>AND-P11-201</code>。</p>
+<p><strong>payload 的生成侧与消费侧</strong>。生成侧在 <code>system/update_engine/payload_generator/</code>：<code>generate_delta_main.cc</code> 共 832 行是入口，<code>full_update_generator.cc</code> 共 208 行处理全量，<code>ab_generator.cc</code> 共 315 行处理差分（有源镜像）——这里的「AB」指 A-to-B 的镜像差分，不是 A/B 分区设备形态：判据在 <code>delta_diff_generator.cc</code> :220 的 <code>if (!old_part.path.empty())</code>，成立走 <code>ABGenerator</code>（:224，:221 的注释即写 <code>Delta update.</code>）、否则走 <code>FullUpdateGenerator</code>（:228）；<code>ab_generator.h</code> :36-37 直述它用的是 <code>SOURCE_COPY</code> 与 <code>SOURCE_BSDIFF</code> 这两个 A-to-B 操作，文件系统后端包括 <code>erofs_filesystem.cc</code>、<code>ext2_filesystem.cc</code>、<code>mapfile_filesystem.cc</code>、<code>raw_filesystem.cc</code>（<code>boot_img_filesystem.cc</code> 面向 boot 镜像，<code>fake_filesystem.cc</code> 是测试桩）；<code>cow_size_estimator.cc</code> 做 VABC（虚拟 A/B 压缩）的 COW 体积估算。契约文件 <code>update_metadata.proto</code> 在 <code>system/update_engine/</code> 顶层、与 <code>payload_generator/</code> 并列，共 454 行。消费侧在 <code>payload_consumer/</code>：<code>delta_performer.cc</code> 共 1745 行是主循环，<code>install_operation_executor.cc</code> 共 551 行执行单条操作（如 <code>REPLACE</code>、<code>REPLACE_BZ</code>），<code>partition_update_generator_android.cc</code> 共 187 行按分区切分更新序列，<code>filesystem_verifier_action.cc</code> 做校验动作。</p>
+<p>图 2：payload 两侧的文件对应关系</p>
+<pre><code>  payload_generator/            payload_consumer/
+    generate_delta_main.cc  ──►   delta_performer.cc
+    update_metadata.proto   ──►   install_operation_executor.cc
+    ab_generator.cc         ──►   partition_update_generator_android.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>两侧共用同一份 <code>update_metadata.proto</code>，这是契约边界：host 侧写出的操作码，设备侧必须有对应执行器。新增操作码时两侧必须同步，否则失败形态是「install operation 未知」而不是校验和错误。</p>
+<p><strong>设备侧两个入口：fastboot 与 sideload</strong>。<code>system/core/fastboot/fastboot.cpp</code> 共 2684 行。帮助文本里能看到两处与更新链路直接相关的用法：<code>reboot</code> :572、<code>flash:raw PARTITION KERNEL [RAMDISK [SECOND]]</code> :609；A/B 切槽靠 <code>--set-active[=SLOT]</code> :641。<code>--skip-reboot</code> :643 让刷写后停在 bootloader。<code>update ZIP</code> 这条整包刷写路径也在这里：帮助文本 :556、实现 <code>do_update</code> :1949、命令分发 :2535。<code>reboot_to_userspace_fastboot</code> :1560 是进入 userspace fastboot 的路径，<code>super_flash_helper.cpp</code> 共 125 行专管 <code>super</code> 分区刷写，<code>bootimg_utils.cpp</code> 共 130 行处理 boot 镜像解析。</p>
+<p>sideload 在 recovery 侧。<code>bootable/recovery/recovery.cpp</code> 共 912 行，长选项表里 <code>sideload</code> :632、<code>sideload_auto_reboot</code> :633，<code>bool sideload</code> :652 是开关。真正的实现落在 <code>install/adb_install.cpp</code> 共 395 行，其中 <code>SetUsbConfig(&quot;sideload&quot;)</code> :315 把 USB 配置切到 sideload 模式——这一步切换本身是链路上最容易出问题的点：主机侧 <code>adb sideload</code> 需要设备已进入该 USB 配置，否则命令挂住。</p>
+<p><strong>A/B 槽位契约</strong>。<code>hardware/interfaces/boot/aidl/android/hardware/boot/IBootControl.aidl</code> 定义 HAL：<code>interface IBootControl</code> :22、<code>int getActiveBootSlot()</code> :34、<code>void markBootSuccessful()</code> :108（其文档注释 :95 载明只有当前 slot 可标记成功）。这三者构成槽位状态机的最小接口集，A/B 设备上 OTA 结束后必须调用 <code>markBootSuccessful()</code>，否则回滚到旧槽。</p>
+<p><strong>快照与 VABC</strong>。fs_mgr 已迁至 <code>system/fs/fs_mgr</code>，<code>system/core/fs_mgr</code> 本树未检出。<code>libsnapshot/snapshot.cpp</code> 共 4923 行管理快照，<code>libsnapshot/snapuserd/snapuserd_daemon.cpp</code> 共 329 行是用户态守护进程入口，<code>libsnapshot/snapuserd/user-space-merge/snapuserd_core.cpp</code> 共 481 行处理合并；<code>system/fs/fs_mgr/tools/dmctl.cpp</code> 共 675 行是设备映射控制工具（在 fs_mgr 顶层 tools 目录，不在 snapuserd 下）。VABC 的 COW 体积估算在 host 侧 <code>cow_size_estimator.cc</code>，设备侧合并在 <code>snapuserd</code>——两侧的估算口径必须一致，否则失败形态是「合到一半空间不足」。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设要为一个 A/B 设备做增量 OTA，输入是旧、新两份 target files。按本树源码口径，流程是：</p>
+<ol><li>旧、新两份 target files 各解压一次，元信息读取分两条路：新包走 <code>common.LoadInfoDict</code>（<code>ota_from_target_files.py</code> :1327/:1329），旧包（增量源）才走 <code>ParseInfoDict</code>（:1360），随后 :1359 把新包结果复制成 <code>target_info_dict</code>；A/B 与否看 <code>META/misc_info.txt</code> 里的 <code>ab_update</code> 键（<code>ota_from_target_files.py</code> :1387 取该键判真假，<code>common.py</code> :421 同判据）；非 A/B 时走 <code>non_ab_ota.py</code> 的 <code>GenerateNonAbOtaPackage</code>（:285）与 <code>WriteBlockIncrementalOTAPackage</code>（:541）。</li><li>若是部分更新（partial update），<code>GetTargetFilesZipForPartialUpdates</code> :615 会裁剪 target files 只保留增量需要的部分。</li><li>调 payload 生成器。差分路径（旧镜像存在）由 <code>ab_generator.cc</code> 处理，无源镜像时走 <code>full_update_generator.cc</code>；文件系统后端按分区实际类型选 <code>erofs_filesystem.cc</code> 或 <code>ext2_filesystem.cc</code>。输出的操作流写进 <code>update_metadata.proto</code> 定义的结构。</li><li>若启用了 VABC，<code>ModifyVABCCompressionParam</code> :403 调整压缩参数，<code>cow_size_estimator.cc</code> 给出 COW 体积估算。</li><li>设备侧拿到包，<code>delta_performer.cc</code> 逐条执行；非活动槽由 <code>boot_control_android.cc</code> 共 180 行选出，动态分区由 <code>dynamic_partition_control_android.cc</code> 共 1494 行映射；<code>update_attempter_android.cc</code> 共 1789 行是 Android 侧调度外壳。</li></ol>
+<p>这条链上没有任何一步产出实测数值。包多大、耗时多久、COW 占多少空间，本树不做构建验证（本机 32GB 内存，V4 整包构建不可行），一律标「未在本树构建验证」。<code>scripts/</code> 下的 <code>brillo_update_payload</code> 共 1028 行，是 bash 驱动的增量 payload 脚本（<code>#!/bin/bash</code>；:1004-1008 检查并转调 C++ 的 <code>delta_generator</code> 二进制，:338 的 <code>python -c</code> 只做文件截断）；<code>paycheck.py</code>、<code>payload_info.py</code>、<code>blockdiff.py</code>、<code>cow_converter.py</code> 是检查与转换工具，适合在拿到实际包之后再做量化。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P11-201</code>：讲 A/B 与动态分区的配置项（<code>AB_OTA_UPDATER</code>、<code>PRODUCT_USE_DYNAMIC_PARTITIONS</code>）；本篇讲这些配置产生的镜像与更新产物。配置改错在本篇表现为产物形态不对，例如没开 A/B 却按 A/B 流程做增量。</li><li><code>AND-P11-101</code>、<code>AND-P11-102</code>：讲构建系统本身（Soong 与 <code>Android.bp</code>、Make→Bazel 的演进与选型）；<code>AND-P11-201</code> 讲 product 继承。本篇不重复，只取 <code>out/</code> 之下的产物。</li><li>边界：<code>update_engine</code> 的下载调度策略、重试与流量控制不属于本篇，本篇只讲到与 payload 消费直接相关的接口。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>target files 组装</td><td><code>build/make/tools/releasetools/add_img_to_target_files.py</code></td><td><code>AddSystem</code>/<code>AddVendor</code>/<code>AddProduct</code>/<code>AddSystemExt</code></td><td>四逻辑分区入口，1283 行</td></tr><tr><td>OTA 包生成总控</td><td><code>build/make/tools/releasetools/ota_from_target_files.py</code></td><td><code>ParseInfoDict</code>/<code>GetTargetFilesZipForPartialUpdates</code></td><td>全量与增量同一入口，1489 行</td></tr><tr><td>releasetools 公共设施</td><td><code>build/make/tools/releasetools/common.py</code></td><td><code>RoundUpTo4K</code> :338/<code>MakeTempFile</code> :2867</td><td>4329 行，被上面两者共用</td></tr><tr><td>payload 生成入口</td><td><code>system/update_engine/payload_generator/generate_delta_main.cc</code></td><td>生成主流程</td><td>832 行，调用各文件系统后端</td></tr><tr><td>差分/全量分流</td><td><code>system/update_engine/payload_generator/delta_diff_generator.cc</code></td><td><code>Delta update.</code> :221 与两个生成器的选择（:224 / :228）</td><td>判据是旧镜像路径是否为空（:220）</td></tr><tr><td>host 侧二进制衔接</td><td><code>system/update_engine/Android.bp</code> :975-977</td><td><code>cc_binary_host</code> 名 <code>delta_generator</code>，srcs 含 <code>generate_delta_main.cc</code></td><td>releasetools 侧 <code>ota_utils.py</code> :867 直接调 <code>delta_generator</code></td></tr><tr><td>payload 结构定义</td><td><code>system/update_engine/update_metadata.proto</code></td><td>操作码与元数据</td><td>454 行，两侧契约（顶层文件；<code>update_engine/update_engine/</code> 下那份 24 字节存根内容为 <code>../update_metadata.proto</code>）</td></tr><tr><td>payload 执行主循环</td><td><code>system/update_engine/payload_consumer/delta_performer.cc</code></td><td>逐条执行操作</td><td>1745 行</td></tr><tr><td>设备刷写</td><td><code>system/core/fastboot/fastboot.cpp</code></td><td><code>--set-active</code>/<code>flash:raw</code>/<code>reboot_to_userspace_fastboot</code></td><td>2684 行</td></tr><tr><td>sideload 实现</td><td><code>bootable/recovery/install/adb_install.cpp</code></td><td><code>SetUsbConfig(&quot;sideload&quot;)</code></td><td>395 行，配 <code>recovery.cpp</code> 选项表</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/make:5ce6f787337d</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 树根执行。</p>
+<pre><code class="lang-bash"># 1. 确认 releasetools 三件套规模
+wc -l build/make/tools/releasetools/add_img_to_target_files.py \
+      build/make/tools/releasetools/ota_from_target_files.py \
+      build/make/tools/releasetools/img_from_target_files.py
+# 期望：1283 / 1489 / 277 三行
+
+# 2. 定位四个逻辑分区入口
+grep -n '^def AddSystem(\|^def AddVendor(\|^def AddProduct(\|^def AddSystemExt(' build/make/tools/releasetools/add_img_to_target_files.py
+# 期望：依次命中 :276、:327、:366、:385 四个主逻辑分区入口
+
+# 3. 确认 payload 契约文件规模
+wc -l system/update_engine/update_metadata.proto
+# 期望：454
+
+# 4. 确认 fastboot 的 A/B 切槽选项
+grep -n &quot;set-active&quot; system/core/fastboot/fastboot.cpp
+# 期望：帮助文本与参数解析两处命中
+
+# 5. 确认 sideload 的 USB 配置切换点
+grep -n 'SetUsbConfig(&quot;sideload&quot;)' bootable/recovery/install/adb_install.cpp
+# 期望：命中 :315 一处
+
+# 6. 确认 fs_mgr 新位置
+ls -d system/fs/fs_mgr system/core/fs_mgr 2&gt;&amp;1
+# 期望：前一个存在，后一个报 No such file</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。第 6 条验证的是本树事实：fs_mgr 已迁至 <code>system/fs/fs_mgr</code>，<code>system/core/fs_mgr</code> 未检出。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`fastboot flash` 能刷 OTA 包。</strong> 不能。<code>fastboot</code> 写的是分区镜像，OTA 包是容器格式，内含 payload 和元数据。要在 <code>fastboot</code> 下用 OTA 包，得走 <code>fastboot update</code> 这类专门路径；普通 <code>flash</code> 只认镜像。</p>
+<p><strong>误区二：target files 就是镜像集合。</strong> 它是镜像加元数据的 zip。<code>ota_from_target_files.py</code> 需要从里面读 <code>META/misc_info.txt</code>（<code>ParseInfoDict</code> :569）才能决定怎么生成 payload。只拿镜像文件，增量更新无从算起。</p>
+<p><strong>误区三（看起来对其实是错的）：A/B 设备上 OTA 完成后重启就切换了。</strong> 重启只是让 bootloader 按已设置的槽启动。切槽动作在此之前由 <code>IBootControl</code> 完成，且新槽启动成功后必须调用 <code>markBootSuccessful()</code>（声明在 :108，其文档注释在 :104）；注释明确只有当前 slot 可标记成功。漏掉这一步，下次重启仍可能回到旧槽。</p>
+<p><strong>误区四：增量包的体积只取决于新旧镜像差多少。</strong> VABC 场景下还要算 COW 体积；<code>cow_size_estimator.cc</code> 的存在说明这部分在 host 侧就要估出来，估不准的失败形态是设备侧合并中途空间不足。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：全量包和增量包用的是同一套 payload 工具吗？ <strong>答</strong>：A/B 路径下是。<code>generate_delta_main.cc</code> 是共同入口，全量走 <code>full_update_generator.cc</code>，差分（有源镜像）走 <code>ab_generator.cc</code>，写出的都是 <code>update_metadata.proto</code> 定义的结构。非 A/B 是另一条路：包由 <code>non_ab_ota.py</code> 生成（<code>GenerateNonAbOtaPackage</code> :285、<code>WriteBlockIncrementalOTAPackage</code> :541），块差分算法落在 <code>blockimgdiff.py</code>（1632 行），不走 payload 这套工具。 <strong>追问</strong>：那设备侧要区分吗？ <strong>答</strong>：设备侧不分。<code>delta_performer.cc</code> 只认操作流，不关心它是全量还是差分算出来的。</p>
+<p><strong>问</strong>：sideload 和 recovery 刷包是什么关系？ <strong>答</strong>：sideload 是 recovery 的一种输入通道。<code>recovery.cpp</code> 的选项表里 <code>sideload</code> :632 是个开关，打开后 <code>adb_install.cpp</code> 用 <code>SetUsbConfig(&quot;sideload&quot;)</code> :315 切 USB 配置，主机侧再 <code>adb sideload</code> 推包。 <strong>追问</strong>：切不过去会怎样？ <strong>答</strong>：主机命令会挂住，因为设备 USB 配置没到位。排查看 §7.3 第二行。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>OTA 包生成中断，报缺 misc_info</td><td><code>unzip -l out/dist/*target_files*.zip | grep misc_info</code></td><td>是否有 <code>META/misc_info.txt</code></td><td>该文件由 target files 组装阶段写入（<code>build/make/core/Makefile</code> :6935 的 <code>cp $(INSTALLED_MISC_INFO_TARGET)</code>），<code>add_img_to_target_files.py</code> 只消费不写（<code>common.py</code> :895-897 缺失即 raise）——重跑它必然在同一步再失败，须回到 target files 生成阶段或换一份完好的 zip</td></tr><tr><td><code>adb sideload</code> 推不进包</td><td><code>grep -n 'SetUsbConfig(&quot;sideload&quot;)' bootable/recovery/install/adb_install.cpp</code></td><td>设备是否已切到 sideload USB 配置</td><td>用 <code>adb devices</code> 看设备状态是否为 sideload</td></tr><tr><td>A/B 设备重启回旧槽</td><td><code>grep -n 'markBootSuccessful' hardware/interfaces/boot/aidl/android/hardware/boot/IBootControl.aidl</code></td><td>调用点是否存在、是否在启动成功后</td><td>查新槽启动日志是否报告成功</td></tr><tr><td>增量包算出但设备拒收</td><td><code>grep -n 'ParseInfoDict' build/make/tools/releasetools/ota_from_target_files.py</code></td><td>旧 target files 的 <code>ab_update</code> 键（由 <code>AB_OTA_UPDATER=true</code> 经 <code>build/make/core/Makefile</code> :6249 写入 misc_info）是否与新的一致</td><td>对齐两份 target files 的配置来源</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：A/B 与动态分区的配置项语义，见 <code>AND-P11-201</code>；构建系统本身（Soong、Android.bp、product 继承），见 P11 构建生态各篇；update_engine 的下载调度与重试策略。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P11-201</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P11-402</code>（工程化清单的「更新资产」一行引用本篇的产物形态判据）。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>system/update_engine/update_metadata.proto</code> 454 行，是本树 payload 契约的规模基线（口径：源码常量，2026-10-23 静态核）。</li><li>releasetools 四个脚本合计 4329 + 1283 + 1489 + 277 行，是 host 侧的总量级（口径：源码常量）。</li><li>payload 生成到消费两侧代码量约 832 + 1745 行入口，实际执行分布在各 <code>*_filesystem.cc</code> 与 <code>install_operation_executor.cc</code>（口径：源码文件行数）。</li><li>OTA 包体积、构建耗时、COW 实际占用：未在本树构建验证（本机 32GB 内存，V4 整包构建不可行），暂无实测，列为待补。</li><li>增量包相对全量包的压缩比：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>更早分支（无动态分区的树）</td><td>逻辑分区各占物理分区，无 <code>super.img</code> 映射层</td><td>更新链路少一层；本篇不断言具体引入版本</td></tr><tr><td>更早分支（无 VABC 的树）</td><td>增量更新不经过 COW 快照与 <code>snapuserd</code> 用户态合并</td><td>空间预算少一项；本篇不断言具体引入版本</td></tr><tr><td><code>android17-release</code>（本树实测状态）</td><td>fs_mgr 位于 <code>system/fs/fs_mgr</code>，<code>system/core/fs_mgr</code> 未检出；<code>libsnapshot/snapshot.cpp</code> 4923 行</td><td>按旧路径检索会落空，见 §6 第 6 条</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>ota</code>、<code>update_engine</code>、<code>fastboot</code>、<code>sideload</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>payload_generator</code>、<code>releasetools</code>、<code>snapuserd</code>。</li><li>本仓关键路径：<code>build/make/tools/releasetools/</code>、<code>system/update_engine/payload_generator/</code>、<code>system/update_engine/payload_consumer/</code>。</li><li>承接篇：<code>AND-P11-201</code>（配置侧）、本篇（产物侧）。</li></ul>
+</article>
+<footer>android-100 · AND-P11-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

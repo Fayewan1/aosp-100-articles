@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：听、看与连</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：听、看与连</h1>
+<div class="kv"><span>ID：AND-P7-G01</span><span>卷：P7</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/media/java/android/media/MediaCodec.java ；frameworks/base/media/java/android/media/AudioTrack.java ；frameworks/base/core/java/android/hardware/camera2/CameraManager.java ；frameworks/base/telephony/java/android/telephony/TelephonyManager.java ；packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-本卷的横向骨架">4.1 本卷的横向骨架</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-章节编排逻辑">4.3 章节编排逻辑</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻卷的关系">4.4 与相邻卷的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>本卷讲的是「用户能直接感知到的三类现象」背后的框架链路：声音（音频）、画面（相机/视频）、连接（通话/蓝牙/NFC/USB/投屏）。它们表面上各成体系，底层却共享同一套「客户端 API → 系统服务（独立进程）→ HAL」的跨进程骨架：应用侧只持有 Binder 代理，真正的设备在另一个进程里。本卷 9 篇按 7.1–7.4 四章排布，先讲媒体编解码框架，再拆音频两条线（数据流与策略路由）、相机两条线（框架链路与请求语义），最后讲通讯与外设。读完这篇导读能拿到路线图，不能拿到任何一段的细节。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P3-302</code>（Native Binder 与 IPC 全貌）。媒体/音频/相机服务全部经 Native Binder 被应用调用，不懂「代理在应用、实现在系统服务」这一段，后面 101/201/301 都会悬空。</li><li><strong>涉及源码</strong>（按章抽样，完整路径见各篇 §5）：</li><ul class="nested"><li><code>frameworks/base/media/java/android/media/MediaCodec.java</code></li><li><code>frameworks/base/media/java/android/media/AudioTrack.java</code></li><li><code>frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></li><li><code>frameworks/base/telephony/java/android/telephony/TelephonyManager.java</code></li><li><code>packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本卷结论按 <code>android17-release</code> 核实，各仓 HEAD 见各篇 §6）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本卷验证方式以静态源码分析为主。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>开发者常遇到的困惑是：「为什么我调了 <code>AudioTrack.write</code> 却听不到声音？」「为什么相机 <code>openCamera</code> 偶尔返回忙？」「为什么蓝牙扫描要在前台服务里？」这些问题的答案都不在单个 API 文档里，而在「API 只是门面、设备在远端进程、HAL 才是契约」这条横切链路上。本卷把这条链路拆成四章，分别讲清每一族的门面、服务与设备契约，让「现象 → 该翻哪篇」有确定答案。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-本卷的横向骨架">4.1 本卷的横向骨架</h2>
+<p>四章共享同一张骨架图：应用侧只持有入口门面，真正的协议栈与设备枚举在远端服务/进程里，最终经 HAL 触达硬件。差异只在「服务是谁、HAL 是什么」。</p>
+<p>注意骨架图的粒度：它是<strong>架构级方向示意</strong>，不是进程拓扑图。真实落点分两种：系统服务可能住在 <code>system_server</code> 里（如 <code>TelephonyRegistry</code>，<code>ITelephonyRegistry.Stub</code> 的实现，<code>frameworks/base/services/core/java/com/android/server/TelephonyRegistry.java:152</code>），也可能是一个自己的独立进程（如 <code>cameraserver</code>、<code>audioserver</code>、承载 Codec2 组件的 <code>media.swcodec</code>）。用到具体进程名时，各篇 §4/§5 会给源码锚点。</p>
+<p>图 1：本卷四类链路的统一骨架（架构级，非进程拓扑）</p>
+<pre><code>App(门面/代理) --Binder--&gt; 系统服务(system_server 或独立进程) --HAL--&gt; 硬件
+  媒体        media.codec / media.swcodec      Codec2 组件
+  音频        AudioFlinger(audioserver)        audio HAL
+  相机        CameraService(cameraserver)      camera HAL
+  通讯         telephony / ims                 radio / ril HAL</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇分工如下。编号规则是 <code>AND-P{卷}-{序号}</code>，<code>G</code> 表示卷导读。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P7-G01</code></td><td>卷导读：听、看与连</td><td>卷内导航（A 档）；依赖 <code>AND-P3-302</code>，串起 7.1–7.4 四章</td></tr><tr><td><code>AND-P7-101</code></td><td>媒体框架总览与 MediaCodec：编解码的框架侧链路</td><td>7.1 章，A 档，<strong>锚点篇</strong>；编解码链路的框架侧中枢，录像编码与播放解码都经它</td></tr><tr><td><code>AND-P7-102</code></td><td>媒体会话与播放器：MediaSession、ExoPlayer 与音频焦点</td><td>7.1 章，B 档；会话与音频焦点，依赖 101</td></tr><tr><td><code>AND-P7-201</code></td><td>音频框架：AudioTrack/AudioRecord 到 AudioFlinger</td><td>7.2 章，A 档；音频数据流主干，依赖 <code>AND-P4-301</code>（音频 HAL）</td></tr><tr><td><code>AND-P7-202</code></td><td>音频策略与通路：AudioPolicy、A2DP/USB/HDMI 路由</td><td>7.2 章，A 档；路由与策略，依赖 201</td></tr><tr><td><code>AND-P7-301</code></td><td>相机框架：Camera2 API 到 HAL 的完整链路</td><td>7.3 章，A 档；相机数据流主干，依赖 <code>AND-P4-401</code>（相机 HAL）</td></tr><tr><td><code>AND-P7-302</code></td><td>相机元数据与流式配置：CaptureRequest 的语义</td><td>7.3 章，B 档；请求语义与键空间，依赖 301</td></tr><tr><td><code>AND-P7-401</code></td><td>通话与 IMS：电信侧的框架链路</td><td>7.4 章，A 档；通话与 IMS，依赖 <code>AND-P2-401</code>（进程模型：Zygote、fork、COW 与进程优先级 adj，<code>_volumes/P2-framework.md:20</code>）</td></tr><tr><td><code>AND-P7-402</code></td><td>蓝牙、NFC、USB 外设与投屏虚拟设备</td><td>7.4 章，B 档；无线/外设/虚拟显示，依赖 G01</td></tr></tbody></table>
+<p>卷内依赖链：<code>G01 → 101 → 102 →（201 → 202｜301 → 302｜401）→ 402</code>。其中 <code>AND-P7-101</code> 是锚点篇（编解码链路被录像与播放共用，是链路收敛点）；<code>201/301/401</code> 三条主干各自独立成线，可在读完 G01 后分头阅读；<code>102/202/302/402</code> 为 B 档支线，分别挂在对应主干之后，不必按编号严格串行。</p>
+<h2 id="h7-4-3-章节编排逻辑">4.3 章节编排逻辑</h2>
+<ul><li><strong>7.1 媒体编解码</strong>：从 <code>MediaCodec</code> 这一个被全卷共用的枢纽讲起（101），再补会话与焦点（102）。</li><li><strong>7.2 音频</strong>：先讲数据流 <code>AudioTrack</code>/<code>AudioRecord</code> → <code>AudioFlinger</code>（201），再讲决定「声音去哪」的 <code>AudioPolicy</code> 路由（202）。</li><li><strong>7.3 相机</strong>：先讲 <code>Camera2</code> API → <code>cameraserver</code> → HAL 的完整链路（301），再讲 <code>CaptureRequest</code> 的键空间语义（302）。</li><li><strong>7.4 通讯与外设</strong>：先讲通话与 IMS 的电信侧链路（401），再讲蓝牙/NFC/USB/投屏这些「连」的入口（402）。</li></ul>
+<h2 id="h8-4-4-与相邻卷的关系">4.4 与相邻卷的关系</h2>
+<ul><li>入卷衔接：<code>AND-P4-301</code>（音频 HAL）、<code>AND-P4-401</code>（相机 HAL）是 201/301 的前置——HAL 篇讲契约侧，本卷讲框架侧到 HAL 的贯通；<code>AND-P3-302</code> 是 G01 前置（媒体服务经 Native Binder 被调用）；<code>AND-P2-401</code> 是 401 前置（进程模型：Zygote、fork、COW 与进程优先级 adj，<code>_volumes/P2-framework.md:20</code>）。</li><li>出卷衔接：101/301 的预览流消费侧在 <code>AND-P6-102</code>（Surface/BufferQueue）；201/202 的音频通路功耗上游在 <code>AND-P10-301</code>（功耗与热管理）；402 的虚拟显示在 <code>AND-P6-401</code>（多屏/外接显示）互引。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>媒体编解码门面</td><td><code>frameworks/base/media/java/android/media/MediaCodec.java</code></td><td><code>createByCodecName</code>、<code>queueInputBuffer</code></td><td>101 的主角</td></tr><tr><td>音频播放/录制门面</td><td><code>frameworks/base/media/java/android/media/AudioTrack.java</code></td><td><code>AudioTrack</code>、<code>write</code></td><td>201 的主角</td></tr><tr><td>相机门面</td><td><code>frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></td><td><code>getCameraIdList</code>、<code>openCamera</code></td><td>301 的入口</td></tr><tr><td>通讯门面</td><td><code>frameworks/base/telephony/java/android/telephony/TelephonyManager.java</code></td><td><code>getCallState</code>、<code>listen</code></td><td>401 的入口</td></tr><tr><td>无线外设入口</td><td><code>packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</code></td><td><code>getDefaultAdapter</code>、<code>startDiscovery</code></td><td>402 的入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望输出 <code>94b4c163b7df</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/media/java/android/media/MediaCodec.java \
+      frameworks/base/media/java/android/media/AudioTrack.java \
+      frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次约 6444、4971、3648——对应媒体、音频、相机三条主干门面文件的体量。</p>
+<pre><code class="lang-bash">wc -l packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java \
+      frameworks/base/telephony/java/android/telephony/TelephonyManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望约 5461、20215——蓝牙适配层与通讯门面规模差异显著。</p>
+<p>行号与行数是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「媒体/音频/相机是应用进程内部的事」。它们都在远端系统服务进程里，应用只持 Binder 代理；服务挂了应用侧拿不到任何数据。</li><li>「API 文档里的类就是全部实现」。类只是门面，真正的设备操作在 HAL 与内核驱动，框架层只负责排队与转发。</li><li>「看起来对其实是错的」：以为 <code>MediaCodec</code>/<code>AudioTrack</code> 直接操作硬件。实际是 <code>MediaCodec</code> 经 <code>media.codec</code>/<code>media.swcodec</code> 进程承载 Codec2 组件完成编解码，<code>AudioTrack</code>/<code>AudioRecord</code> 经 <code>audioserver</code> 里的 <code>AudioFlinger</code> 落到 audio HAL——门面在应用进程，执行体在远端服务进程。</li><li>「蓝牙/NFC 和媒体无关」。投屏（VirtualDisplay）与媒体录制共用 <code>Surface</code>，蓝牙 A2DP 与音频路由同走 <code>AudioPolicy</code>。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：只想快速判断问题在哪一段，读哪篇？ <strong>答</strong>：先读 101 拿媒体全景，再按现象选 201/202（声音）、301/302（画面）、401/402（连接）。 <strong>追问</strong>：能不能跳过 G01？ <strong>答</strong>：能，但 G01 是唯一一次把四族摆在一起讲的地方，跳过容易把因果搞反。</p>
+<p><strong>问</strong>：为什么锚点篇是 101 而不是 201？ <strong>答</strong>：录像编码与播放解码都经 <code>MediaCodec</code>，它是编解码链路的收敛点；201 只是音频一族的主干。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑编解码框架</td><td><code>wc -l frameworks/base/media/java/android/media/MediaCodec.java</code></td><td>是否约 6444 行，确认树版本</td><td>版本不同按符号重锚，转 101</td></tr><tr><td>怀疑音频无声</td><td><code>wc -l frameworks/base/media/java/android/media/AudioTrack.java</code></td><td>是否约 4971 行</td><td>转 201/202</td></tr><tr><td>怀疑相机打不开</td><td><code>wc -l frameworks/base/core/java/android/hardware/camera2/CameraManager.java</code></td><td>是否约 3648 行</td><td>转 301</td></tr><tr><td>怀疑蓝牙异常</td><td><code>wc -l packages/modules/Bluetooth/framework/java/android/bluetooth/BluetoothAdapter.java</code></td><td>是否约 5461 行</td><td>转 402</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：四类链路各自的实现细节（101/201/301/401）、策略与路由（202）、请求语义（302）、外设协议（402）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P3-302</code>、<code>AND-P4-301</code>、<code>AND-P4-401</code>、<code>AND-P2-401</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-101</code> 起至 <code>AND-P7-402</code> 共 8 篇；跨卷见 <code>AND-P6-102</code>、<code>AND-P6-401</code>、<code>P10-402</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>本卷篇数 9 篇，章节编号 7.1–7.4（口径：本卷编排）。</li><li><code>MediaCodec.java</code> 约 6444 行、<code>AudioTrack.java</code> 约 4971 行、<code>CameraManager.java</code> 约 3648 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li><code>TelephonyManager.java</code> 约 20215 行、<code>BluetoothAdapter.java</code> 约 5461 行（同上口径）。</li><li><code>MediaCodecList.java</code> 仅约 270 行，是编解码器枚举的薄封装（口径：同上）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td>各门面文件行数为上述基准；<code>libaudioclient</code> 已移至 <code>frameworks/av/media/libaudioclient</code></td><td>本卷所有行号与行数的基准</td></tr><tr><td>较早版本</td><td>音频客户端库路径、蓝牙/NFC 包位置不同（<code>packages/modules/*</code> 为较新拆分）</td><td>按符号 grep 重锚，路径不可跨版本沿用</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>media codec</code>、<code>audio</code>、<code>camera2</code>、<code>bluetooth</code>；developer.android.com 站内检索对应 API 指南。</li><li>Gerrit：android-review.googlesource.com 搜 <code>MediaCodec</code>、<code>AudioFlinger</code>、<code>CameraService</code>、<code>AudioPolicyManager</code>。</li><li>承接篇：<code>AND-P7-101</code>、<code>AND-P7-201</code>、<code>AND-P7-301</code>、<code>AND-P7-401</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P7-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

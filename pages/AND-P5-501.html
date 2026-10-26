@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安全模块：SELinux、seccomp 与 IMA</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>安全模块：SELinux、seccomp 与 IMA</h1>
+<div class="kv"><span>ID：AND-P5-501</span><span>卷：P5</span><span>章：5.5</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：external/selinux/libselinux/include/selinux/selinux.h ；external/selinux/libselinux/src/android/android.c ；external/selinux/libselinux/src/android/android_seapp.c ；bionic/libc/kernel/uapi/linux/seccomp.h ；system/sepolicy/Android.bp ；system/sepolicy/private/seapp_contexts ；external/minijail/syscall_filter.c ；external/minijail/libminijail.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>三套机制回答的是三个不同的问题：SELinux 判「这个域能不能对这个类型做这个操作」；seccomp 判「这个进程能不能发这个系统调用」；IMA 判「这个文件的内容和度量值对不对得上」。</p>
+<p>拒绝发生时，<code>avc: denied</code> 一类审计来自 SELinux，进程被 <code>SIGSYS</code> 打死多半是 seccomp 过滤器命中 <code>SECCOMP_RET_KILL_PROCESS</code>，度量不匹配则会在打开或执行时失败，这三条线索互相不通约。</p>
+<p>用户态的接口面都很薄：SELinux 侧是 <code>libselinux</code> 的 <code>getcon()</code>/<code>setcon()</code>/<code>getfilecon()</code> 与 Android 专用策略句柄入口；seccomp 侧是 <code>linux/seccomp.h</code> 的 <code>SECCOMP_MODE_FILTER</code> 与 BPF 动作位。</p>
+<p>策略来源则是分层的：SELinux 的域映射解析 <code>seapp_contexts</code> 的五组候选路径；seccomp 的过滤器可以用 <code>libminijail</code> 编译并安装。</p>
+<p>本篇只讲内核接口面与策略来源，不推断内核驱动的内部实现。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P5-G01</code>，P5 卷导读给了本卷各篇的分工地图，本篇在其中的位置是「内核安全三件套的接口面」。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>external/selinux/libselinux/include/selinux/selinux.h</code></li><li><code>external/selinux/libselinux/src/android/android.c</code></li><li><code>system/sepolicy/Android.bp</code></li><li><code>system/sepolicy/private/seapp_contexts</code></li><li><code>external/minijail/syscall_filter.c</code></li><li><code>external/minijail/libminijail.h</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一条 <code>open()</code> 返回 <code>EACCES</code>，日志里躺着 <code>avc: denied</code>，但把这个文件在 shell 里 <code>cat</code> 一下又是通的——因为 shell 的域和应用的域不同。</p>
+<p>另一条路径上，某个 native 进程刚启动就收到 <code>SIGSYS</code>，没有任何 Java 异常，tombstone 里只有一个信号和一条系统调用号，查半天不知道是谁拦的。</p>
+<p>还有第三种：同样一份配置文件，改了内容之后进程起不来，报的是完整性错误而不是权限错误。</p>
+<p>这三类现象被统称为「权限问题」，其实分属三套机制，排查手段完全不一样。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念要放在一起看：<strong>安全上下文（security context）</strong> 是 SELinux 的标签串，形如用户:角色:类型:级别；<strong>域（domain）</strong> 是进程安全上下文里的类型字段；<strong>策略（policy）</strong> 是「域 × 类型 × 权限」的判定表；<strong>系统调用过滤器</strong> 与 <strong>完整性度量</strong> 是另外两套独立的判定层，不读写 SELinux 的策略库。</p>
+<p>图 1：三套判定的先后与各自独立</p>
+<pre><code>进程发起一次操作
+   ├─ seccomp 过滤器：系统调用号 + 参数 → 拦 / 放
+   ├─ SELinux：域 + 目标类型 + 权限 → 拦 / 放
+   └─ IMA：文件内容度量 / 签名 → 拦 / 放</code></pre>
+<p>三者可以任意一个先拒绝，拒绝的形态不同，所以第一步先认形态，而不是先翻策略。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>libselinux</code> 的对外 API 集中在 <code>selinux.h</code>（761 行）里，分成两类：进程自身上下文的查询与设置、文件上下文的查询与设置。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>is_selinux_enabled()</code></td><td>SELinux 是否启用</td><td><code>selinux.h</code>:12</td></tr><tr><td><code>is_selinux_mls_enabled()</code></td><td>是否启用 MLS 级别</td><td><code>selinux.h</code>:14</td></tr><tr><td><code>freecon()</code></td><td>释放上下文串</td><td><code>selinux.h</code>:24</td></tr><tr><td><code>getcon()</code></td><td>取本进程上下文</td><td><code>selinux.h</code>:33</td></tr><tr><td><code>setcon()</code></td><td>设本进程上下文</td><td><code>selinux.h</code>:44</td></tr><tr><td><code>getpidcon()</code></td><td>取指定 pid 的上下文</td><td><code>selinux.h</code>:49</td></tr><tr><td><code>getexeccon()</code></td><td>取执行时目标上下文</td><td><code>selinux.h</code>:65</td></tr><tr><td><code>setexeccon()</code></td><td>设执行时目标上下文</td><td><code>selinux.h</code>:70</td></tr><tr><td><code>getfilecon()</code></td><td>取文件上下文</td><td><code>selinux.h</code>:110</td></tr><tr><td><code>setfilecon()</code></td><td>设文件上下文</td><td><code>selinux.h</code>:118</td></tr></tbody></table>
+<p>注意 <code>security_context_t</code> 在头文件里被显式标注为 deprecated（<code>typedef char *security_context_t</code>，带 <code>__attribute__((deprecated))</code>），只为兼容旧调用方保留。新代码按裸 <code>char *</code> 写，别被老教程带回旧类型。</p>
+<p>Android 特有的入口在 <code>android.c</code>（461 行），按服务类别给了不同的策略句柄：<code>selinux_android_service_context_handle()</code>（:191）、<code>selinux_android_hw_service_context_handle()</code>（:196）、<code>selinux_android_vendor_service_context_handle()</code>（:201）、<code>selinux_android_keystore2_key_context_handle()</code>（:206）、<code>selinux_android_tee_service_context_handle()</code>（:211）。辅助解析函数 <code>extract_userid()</code>（:277）、<code>extract_pkgname_and_userid()</code>（:298），日志走 <code>selinux_log_callback()</code>（:445）与 <code>selinux_vendor_log_callback()</code>（:454）。</p>
+<p>域映射的策略来源是 <code>seapp_contexts</code>。解析与匹配在 <code>android_seapp.c</code>（982 行）：<code>struct seapp_context</code>（:137）是每条规则的内存表示，<code>seapp_contexts</code>（:263）为规则数组，<code>nspec</code>（:265）为条数。</p>
+<p>候选路径表 <code>seapp_context_paths</code>（<code>android_seapp.c</code>:56-77）列出五组共 10 条：<code>/system/etc/selinux/plat_seapp_contexts</code> 与 <code>/plat_seapp_contexts</code>；<code>/system_ext/etc/selinux/system_ext_seapp_contexts</code> 与 <code>/system_ext_seapp_contexts</code>；<code>/product/etc/selinux/product_seapp_contexts</code> 与 <code>/product_seapp_contexts</code>；<code>/vendor/etc/selinux/vendor_seapp_contexts</code> 与 <code>/vendor_seapp_contexts</code>；<code>/odm/etc/selinux/odm_seapp_contexts</code> 与 <code>/odm_seapp_contexts</code>。分组意味着分区可以各带一份，按分区顺序叠加。</p>
+<p>规则的选择器全集写在 <code>system/sepolicy/private/seapp_contexts</code> 头部注释里：<code>isSystemServer</code>、<code>isEphemeralApp</code>、<code>user</code>、<code>seinfo</code>、<code>name</code>、<code>isPrivApp</code>、<code>minTargetSdkVersion</code>、<code>fromRunAs</code>、<code>isIsolatedComputeApp</code>、<code>isSdkSandboxNext</code>、<code>isSdkSandboxAudit</code>。注释原句是 &quot;All specified input selectors in an entry must match (i.e. logical AND)&quot;——一条规则里写了几个选择器，就得全部命中。<code>user</code> 选择器取值有四个：<code>_app</code>（普通应用进程）、<code>_isolated</code>（隔离服务进程）、<code>_sdksandbox</code>（SDK 沙箱进程）、<code>_pcc_component</code>（PCC 组件进程）。</p>
+<p>seccomp 的 UAPI 面在 <code>bionic/libc/kernel/uapi/linux/seccomp.h</code>，模式与操作：</p>
+<table><thead><tr><th>名称</th><th>值</th><th>出处</th></tr></thead><tbody><tr><td><code>SECCOMP_MODE_DISABLED</code></td><td><code>0</code></td><td><code>seccomp.h</code>:11</td></tr><tr><td><code>SECCOMP_MODE_STRICT</code></td><td><code>1</code></td><td><code>seccomp.h</code>:12</td></tr><tr><td><code>SECCOMP_MODE_FILTER</code></td><td><code>2</code></td><td><code>seccomp.h</code>:13</td></tr><tr><td><code>SECCOMP_SET_MODE_STRICT</code></td><td><code>0</code></td><td><code>seccomp.h</code>:14</td></tr><tr><td><code>SECCOMP_SET_MODE_FILTER</code></td><td><code>1</code></td><td><code>seccomp.h</code>:15</td></tr></tbody></table>
+<p>返回值动作位决定「拦住之后怎么死」：</p>
+<table><thead><tr><th>名称</th><th>值</th><th>出处</th></tr></thead><tbody><tr><td><code>SECCOMP_RET_KILL_PROCESS</code></td><td><code>0x80000000U</code></td><td><code>seccomp.h</code>:24</td></tr><tr><td><code>SECCOMP_RET_KILL_THREAD</code></td><td><code>0x00000000U</code></td><td><code>seccomp.h</code>:25</td></tr><tr><td><code>SECCOMP_RET_KILL</code></td><td>等同 KILL_THREAD</td><td><code>seccomp.h</code>:26</td></tr><tr><td><code>SECCOMP_RET_TRAP</code></td><td><code>0x00030000U</code></td><td><code>seccomp.h</code>:27</td></tr><tr><td><code>SECCOMP_RET_ERRNO</code></td><td><code>0x00050000U</code></td><td><code>seccomp.h</code>:28</td></tr><tr><td><code>SECCOMP_RET_USER_NOTIF</code></td><td><code>0x7fc00000U</code></td><td><code>seccomp.h</code>:29</td></tr><tr><td><code>SECCOMP_RET_TRACE</code></td><td><code>0x7ff00000U</code></td><td><code>seccomp.h</code>:30</td></tr><tr><td><code>SECCOMP_RET_LOG</code></td><td><code>0x7ffc0000U</code></td><td><code>seccomp.h</code>:31</td></tr><tr><td><code>SECCOMP_RET_ALLOW</code></td><td><code>0x7fff0000U</code></td><td><code>seccomp.h</code>:32</td></tr><tr><td><code>SECCOMP_RET_ACTION_FULL</code></td><td><code>0xffff0000U</code></td><td><code>seccomp.h</code>:33</td></tr></tbody></table>
+<p>表末还有一条容易漏的：<code>SECCOMP_RET_ACTION</code>（<code>seccomp.h:34</code>）与 <code>SECCOMP_RET_ALLOW</code> <strong>取值相同</strong>（都是 <code>0x7fff0000U</code>），它是「取 action 字段」的掩码式常量，不是另一种动作。读者若把上表与头文件 1:1 比对，会多出这一行，属正常。</p>
+<p>过滤器怎么装进去，看 <code>libminijail</code>。<code>external/minijail/syscall_filter.c</code> 里，编译顺序是先做架构校验 <code>bpf_validate_arch(valid_arch)</code>（:785-787），再加载系统调用号 <code>bpf_load_syscall_nr(load_nr)</code>（:791-794）；<code>struct sock_filter</code> 缓冲由 <code>new_instr_buf()</code>（:58）分配。架构校验在前很关键：同一份过滤器跨 32/64 位混用会误判号段。</p>
+<p>对外 API 在 <code>libminijail.h</code>：<code>minijail_use_seccomp()</code>（:122）、<code>minijail_use_seccomp_filter()</code>（:124）、<code>minijail_set_seccomp_filter_tsync()</code>（:126）、<code>minijail_set_seccomp_filter_allow_speculation()</code>（:160）、<code>minijail_set_seccomp_filters()</code>（:163）、<code>minijail_parse_seccomp_filters()</code>（:166）。</p>
+<p>其中 <code>minijail_set_seccomp_filter_allow_speculation()</code> 的注释给了安全警告：启用后可能对推测执行攻击（Branch Target Injection、Speculative Store Bypass）失去防护，仅对不执行不可信代码的进程安全。这句话要连注释一起读，别只看函数名的「allow」。</p>
+<p>规则的匹配语义只有一条，但它是理解「为什么我的进程落在了这个域」的关键：</p>
+<p>图 2：seapp_contexts 一条规则内的选择器是 AND</p>
+<pre><code>  候选路径五组，按分区顺序叠加：
+    /system/etc/selinux/plat_seapp_contexts
+    /system_ext/etc/selinux/system_ext_seapp_contexts
+    /product/etc/selinux/product_seapp_contexts
+    /vendor/etc/selinux/vendor_seapp_contexts
+    /odm/etc/selinux/odm_seapp_contexts
+            |
+            v
+  逐条规则比对：写了的选择器必须全部命中
+
+    user=_app  AND  isPrivApp  AND  seinfo  AND  minTargetSdkVersion
+            |                                          |
+            +-- 任一不符 -&gt; 跳过该条                   +-- 全中 -&gt; 取该条 domain</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一个普通应用进程 fork 出来，要做域映射。<code>libselinux</code> 读 <code>seapp_contexts</code> 的五组候选路径，把每条规则解析成 <code>struct seapp_context</code>（:137），存进 <code>seapp_contexts</code>（:263）数组，<code>nspec</code>（:265）记条数。</p>
+<p>匹配时逐个比选择器：进程是普通应用，<code>user</code> 命中 <code>_app</code>；再看 <code>isPrivApp</code>、<code>seinfo</code>、<code>minTargetSdkVersion</code> 等，一条规则里写了的都得对上——这是 AND 语义，任一不符就跳过。命中的那条给出该进程的域。</p>
+<p>之后该进程发起 <code>getfilecon()</code>（:110）读目标文件的上下文，判定交给域对类型的权限表。若被拒，日志里是 <code>avc: denied</code>，而不是 <code>SIGSYS</code>。同一个进程如果另外装了 seccomp 过滤器，一个被禁的系统调用会在到达 SELinux 判定之前就被拦掉——两套机制的判定顺序由内核约定，用户态看到的只是「被拦了」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>上游：<code>AND-P5-G01</code> 给出本卷的整体分工，本篇是其中「安全」这一格的展开。</p>
+<p>应用沙箱与 SELinux 域的映射细节归 <code>AND-P9-202</code>，本篇只到「域从哪条规则来」为止，不展开每个域的身份。</p>
+<p>权限模型与签名机制归 <code>AND-P9</code> 系列，那是应用层授权，不是内核强制访问控制，两者不要混谈。</p>
+<p>启动链上完整性校验的位置归 <code>AND-P8</code>，本篇只说 IMA 是独立的一层判定，不追 boot 各阶段的先后。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>API 声明面</td><td><code>external/selinux/libselinux/include/selinux/selinux.h</code></td><td><code>getcon()</code>、<code>setcon()</code>、<code>getfilecon()</code></td><td>761 行，对外契约</td></tr><tr><td>Android 策略入口</td><td><code>external/selinux/libselinux/src/android/android.c</code></td><td>五类句柄函数、<code>extract_userid()</code></td><td>461 行</td></tr><tr><td>域映射解析</td><td><code>external/selinux/libselinux/src/android/android_seapp.c</code></td><td><code>struct seapp_context</code>、<code>seapp_contexts</code></td><td>982 行</td></tr><tr><td>规则选择器说明</td><td><code>system/sepolicy/private/seapp_contexts</code></td><td>十一个选择器、AND 语义注释</td><td>策略侧口径</td></tr><tr><td>策略构建</td><td><code>system/sepolicy/Android.bp</code></td><td>分区策略的编译与拼装</td><td>策略来源的构建面</td></tr><tr><td>seccomp UAPI</td><td><code>bionic/libc/kernel/uapi/linux/seccomp.h</code></td><td><code>SECCOMP_MODE_FILTER</code>、<code>SECCOMP_RET_*</code></td><td>模式与动作位</td></tr><tr><td>过滤器编译</td><td><code>external/minijail/syscall_filter.c</code></td><td><code>bpf_validate_arch()</code>、<code>new_instr_buf()</code></td><td>架构校验优先</td></tr><tr><td>过滤器 API</td><td><code>external/minijail/libminijail.h</code></td><td><code>minijail_use_seccomp_filter()</code> 等</td><td>对调用方的契约</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：external/selinux:a8c5e74f85f8</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C external/selinux rev-parse HEAD</code></pre>
+<p>期望输出 <code>a8c5e74f85f8</code> 开头的提交号，对上本节锚点。</p>
+<pre><code class="lang-bash">wc -l external/selinux/libselinux/include/selinux/selinux.h \
+      external/selinux/libselinux/src/android/android.c \
+      external/selinux/libselinux/src/android/android_seapp.c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次为 761、461、982，对上事实 1/3/5 的行数口径。</p>
+<pre><code class="lang-bash">grep -n 'is_selinux_enabled\|is_selinux_mls_enabled\|freecon\|getcon\|setcon\|getpidcon\|getexeccon\|setexeccon\|getfilecon\|setfilecon' \
+  external/selinux/libselinux/include/selinux/selinux.h | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:12</code>、<code>:14</code>、<code>:24</code>、<code>:33</code>、<code>:44</code>、<code>:49</code>、<code>:65</code>、<code>:70</code>、<code>:110</code>、<code>:118</code> 十个行号，对上 §4.2 第一张表。</p>
+<pre><code class="lang-bash">grep -n 'deprecated' external/selinux/libselinux/include/selinux/selinux.h | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>security_context_t</code> 的类型声明带 <code>__attribute__((deprecated))</code>，对上事实 2。</p>
+<pre><code class="lang-bash">sed -n '56,77p' external/selinux/libselinux/src/android/android_seapp.c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到五组共 10 条候选路径，以 <code>/plat_seapp_contexts</code>、<code>/vendor_seapp_contexts</code> 等结尾，对上事实 6。</p>
+<pre><code class="lang-bash">grep -n 'isSystemServer\|isEphemeralApp\|minTargetSdkVersion\|fromRunAs\|isSdkSandboxAudit\|logical AND' \
+  system/sepolicy/private/seapp_contexts | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中选择器全集与 &quot;All specified input selectors in an entry must match (i.e. logical AND)&quot; 原句，对上事实 7。</p>
+<pre><code class="lang-bash">grep -n 'SECCOMP_MODE_\|SECCOMP_SET_MODE_' bionic/libc/kernel/uapi/linux/seccomp.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>SECCOMP_MODE_DISABLED 0</code>（:11）到 <code>SECCOMP_SET_MODE_FILTER 1</code>（:15）五条，对上事实 9。</p>
+<pre><code class="lang-bash">grep -n 'SECCOMP_RET_' bionic/libc/kernel/uapi/linux/seccomp.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到从 <code>SECCOMP_RET_KILL_PROCESS 0x80000000U</code>（:24）到 <code>SECCOMP_RET_ACTION_FULL 0xffff0000U</code>（:33）的动作位，对上事实 10。</p>
+<pre><code class="lang-bash">sed -n '780,800p' external/minijail/syscall_filter.c</code></pre>
+<p>期望看到 <code>bpf_validate_arch(valid_arch)</code> 先于 <code>bpf_load_syscall_nr(load_nr)</code>，对上事实 11。</p>
+<pre><code class="lang-bash">grep -n 'minijail_use_seccomp\|minijail_set_seccomp\|minijail_parse_seccomp' external/minijail/libminijail.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:122</code>、<code>:124</code>、<code>:126</code>、<code>:160</code>、<code>:163</code>、<code>:166</code> 六个声明，对上事实 12。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：所有权限拒绝都是 SELinux 干的。</strong> 错。seccomp 命中的表现是系统调用返回错误号（<code>SECCOMP_RET_ERRNO</code>）或进程直接死（<code>SECCOMP_RET_KILL_PROCESS</code>），根本不产生 <code>avc: denied</code>。先看有没有审计串，再决定翻哪套机制。</p>
+<p><strong>误区二：`seapp_contexts` 里某条规则只要有一个选择器对上就能命中。</strong> 恰好相反：一条规则里写的所有输入选择器都必须匹配，是逻辑与。少写一个选择器只是少一个约束，并非任选其一。</p>
+<p><strong>误区三：`security_context_t` 是推荐的写法。</strong> 它在头文件里已被显式标注 deprecated，带 <code>__attribute__((deprecated))</code>，只为兼容旧调用方保留。新代码用裸 <code>char *</code>。</p>
+<p><strong>误区四：`minijail_set_seccomp_filter_allow_speculation()` 名字里有 allow，就是放宽性能。</strong> 注释给的警告是：启用后可能对分支目标注入（Branch Target Injection）、推测存储绕过（Speculative Store Bypass）失去防护，只对不执行不可信代码的进程安全。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：进程被 <code>SIGSYS</code> 打死，怎么确认是 seccomp 而不是别的？ <strong>答</strong>：<code>SIGSYS</code> 与过滤器命中 <code>SECCOMP_RET_KILL_PROCESS</code> 或 <code>SECCOMP_RET_TRAP</code> 的形态一致，同时不会有 <code>avc: denied</code>。确认过滤器来源要看该进程的启动方——它是否经 <code>libminijail</code> 加载了过滤器、策略文件里禁了哪些调用。 <strong>追问</strong>：那 <code>SECCOMP_RET_ERRNO</code> 呢？ <strong>答</strong>：那种情况进程活着，只是某个系统调用返回特定错误号，容易被误读成普通权限失败，要看返回的错误号是否成规律地集中在少数几个调用上。</p>
+<p><strong>问</strong>：<code>seapp_contexts</code> 有 10 条候选路径，哪条生效？ <strong>答</strong>：五组路径按分区分布，解析时把命中的规则汇成一张表，<code>nspec</code> 记下总条数，匹配时逐条按选择器与 AND 语义比较。分区各带一份的设计是为了让各分区独立演进，不代表只有一份被读。 <strong>追问</strong>：那多个分区都写规则会不会冲突？ <strong>答</strong>：判定顺序由 <code>android_seapp.c</code> 的匹配过程决定，本篇不断言具体优先级；冲突排查时以实际命中的 <code>struct seapp_context</code> 为准，而不是猜想哪份文件赢。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td><code>open()</code> 返回 <code>EACCES</code>，日志有 <code>avc: denied</code></td><td><code>adb logcat -b all | grep -m 5 'avc: denied'</code></td><td>域、目标类型、被拒的权限名</td><td>拿域与类型去 <code>seapp_contexts</code> 对规则</td></tr><tr><td>进程启动即死，只有 <code>SIGSYS</code></td><td><code>adb shell dmesg | grep -m 5 -i seccomp</code></td><td>是否有过滤器命中的记录</td><td>查该进程启动方是否装了过滤器</td></tr><tr><td>系统调用返回错误但进程正常</td><td><code>adb shell strace -f -e trace=openat,ioctl &lt;pid&gt;</code></td><td>错误号是否集中在一两个调用上</td><td>对照 <code>SECCOMP_RET_ERRNO</code> 的动作位形态</td></tr><tr><td>改文件内容后进程起不来</td><td><code>adb logcat -b all | grep -m 5 -i 'ima|integrity'</code></td><td>是否有度量或签名不匹配的串</td><td>区分是内容变了还是标签变了</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：应用沙箱与 SELinux 域的逐域映射归 <code>AND-P9-202</code>；权限模型与签名机制归 <code>AND-P9</code> 系列；启动链上的完整性校验位置归 <code>AND-P8</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P9-202</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>selinux.h</code> 761 行、<code>android.c</code> 461 行、<code>android_seapp.c</code> 982 行——口径为源码文件行数，来源源码（<code>wc -l</code> 实测）。</li><li><code>seapp_contexts</code> 候选路径 10 条、分五组——口径为 <code>android_seapp.c</code>:56-77 的表定义，来源源码。</li><li><code>seapp_contexts</code> 输入选择器 11 个、<code>user</code> 取值 4 个——口径为策略注释，来源源码。</li><li><code>SECCOMP_RET_*</code> 动作位 10 个，取值均为 <code>0x</code> 常量——口径为 UAPI 头文件，来源源码。</li><li>三套机制在一次操作中的实际判定先后顺序，暂无实测，列为待补；驱动实现不在本树核验范围。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树实测）</td><td><code>selinux.h</code> 761 行；<code>security_context_t</code> 已标 deprecated；<code>seapp_contexts</code> 选择器含 <code>isSdkSandboxNext</code>、<code>isSdkSandboxAudit</code>、<code>isIsolatedComputeApp</code>；<code>seccomp.h</code> 含 <code>SECCOMP_RET_USER_NOTIF</code></td><td>本篇全部结论以此为准</td></tr><tr><td>更早版本（本篇不断言具体版本号）</td><td>选择器集与 UAPI 动作位是否齐全，未在本树核验</td><td>跨版本比对时按符号 grep 重锚，不按行号</td></tr></tbody></table>
+<p>版本史只写清本树实测状态与本篇不断言的部分，其余不做推断。</p>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>SELinux</code>、<code>seccomp filter</code>、<code>IMA</code>；kernel.org 站内检索 <code>seccomp</code> 与 <code>IMA</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>seapp_contexts</code>、<code>libminijail seccomp</code>、<code>libselinux deprecated</code>。</li><li>本仓关键路径：<code>external/selinux/libselinux/src/android/android_seapp.c</code>、<code>bionic/libc/kernel/uapi/linux/seccomp.h</code>、<code>external/minijail/syscall_filter.c</code>。</li><li>承接篇：<code>AND-P5-G01</code>、<code>AND-P9-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P5-501 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

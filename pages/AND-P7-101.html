@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>媒体框架总览与 MediaCodec：编解码的框架侧链路</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>媒体框架总览与 MediaCodec：编解码的框架侧链路</h1>
+<div class="kv"><span>ID：AND-P7-101</span><span>卷：P7</span><span>章：7.1</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/media/java/android/media/MediaCodec.java ；frameworks/base/media/java/android/media/MediaCodecList.java ；frameworks/av/media/libstagefright/MediaCodec.cpp ；frameworks/av/media/codec2/components/avc/C2SoftAvcDec.h ；frameworks/av/media/codec2/components/aac/C2SoftAacDec.h ；frameworks/base/media/jni/android_media_MediaCodec.cpp ；frameworks/av/services/mediacodec/main_swcodecservice.cpp ；frameworks/av/media/module/codecserviceregistrant/CodecServiceRegistrant.cpp ；frameworks/av/media/mediaserver/main_mediaserver.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>MediaCodec</code> 是 Android 媒体框架的编解码中枢：它给应用一套「塞入压缩数据、取出解码结果」的同步/异步 API。<strong>跨进程边界不在 `MediaCodec` 这一层</strong>——Java 门面经 JNI（<code>android_media_MediaCodec.cpp:271/:276</code> 调 <code>MediaCodec::CreateByType</code>/<code>CreateByComponentName</code>）落到 <code>libstagefright</code> 的 native <code>MediaCodec</code>，而后者<strong>就在应用进程里</strong>：它是个库，不是服务。真正的「出口」在更下游：<code>MediaCodec::GetCodecBase</code>（<code>MediaCodec.cpp:2565</code>）按名字前缀与 owner 决定后端——<code>c2.</code> 走 <code>CreateCCodec()</code>（Codec2），<code>omx.</code> 走 <code>new ACodec</code>（OMX）；这一步之后才跨界。组件的落脚进程分三种：平台软编随 <code>com.android.media.swcodec</code> APEX 跑在 <strong>`media.swcodec`</strong> 进程（<code>main_swcodecservice.cpp</code> 把 <code>argv[0]</code> 写成 <code>media.swcodec</code>，并把这批组件注册成名为 <code>software</code> 的 component store，见 <code>CodecServiceRegistrant.cpp:827</code>），遗留 OMX 主机在 <strong>`media.codec`</strong> 进程（<code>main_codecservice.cpp</code>），硬编则由厂商 HAL 服务承载。应用侧持有的是状态机与 buffer 槽位，设备与耗时全在 codec 服务那一侧。理解这条链路，相机预览、录音、视频播放三类场景都共用同一套心智模型。</p>
+<p>顺带清一个常见误会：<code>mediaserver</code> 跟 <code>MediaCodec</code> 没关系——<code>main_mediaserver.cpp:49-50</code> 只 <code>instantiate()</code> 了 <code>MediaPlayerService</code> 与 <code>ResourceManagerService</code>。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P7-G01</code>（本卷导航）、<code>AND-P3-302</code>（Native Binder 全貌，理解 <code>MediaCodec</code> 的后端如何经 Binder/HwBinder 走到 codec 服务进程）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/media/java/android/media/MediaCodec.java</code>（门面，约 6444 行）</li><li><code>frameworks/base/media/java/android/media/MediaCodecList.java</code>（编解码器枚举，约 270 行）</li><li><code>frameworks/av/media/libstagefright/MediaCodec.cpp</code>（native 实现，约 8234 行）</li><li><code>frameworks/av/media/codec2/components/avc/C2SoftAvcDec.h</code>（Codec2 软解组件示例）</li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>开发者常把卡顿、花屏、首帧慢归咎于「解码太慢」，但定位时往往发现：应用侧的 <code>dequeueOutputBuffer</code> 只是从 native 层的 BufferChannel 取结果，真正的耗时发生在<strong>另一个进程</strong>——平台软解在 <code>media.swcodec</code>，硬解在厂商 HAL 服务——的组件里。如果不先建立「JNI → 进程内 native 调度 → 进程外组件」的分层心智，就会在错误的地方加日志、在错误的进程里抓 trace。本文的目标，就是把这条链路在代码层面钉死。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p><code>MediaCodec</code> 在 Java 侧是一个状态机门面，核心字段是 <code>mCodecInfo</code>（来自 <code>MediaCodecList</code> 的编解码器描述）与一组 buffer 槽位索引。契约里的生命周期是<strong>三大状态 + 子状态</strong>（<code>MediaCodec.java:289-292</code>）：<code>Stopped</code>（含 <code>Uninitialized</code>/<code>Configured</code>/<code>Error</code>）、<code>Executing</code>（含 <code>Flushed</code>/<code>Running</code>/<code>End-of-Stream</code>）、<code>Released</code>。<code>configure</code> 把它从 <code>Uninitialized</code> 带到 <code>Configured</code>；<code>start</code> 带到 <code>Executing</code>——落点是 <code>Executing</code> 的第一个子状态 <strong>`Flushed`</strong>（<code>:304-306</code>，此时 buffer 全在框架手里），一旦<strong>第一个输入 buffer 被取出</strong>就迁入 <code>Running</code>（大多数人认知里的「运行中」其实是这一子状态）；队列里收到带 <code>BUFFER_FLAG_END_OF_STREAM</code> 标记的输入 buffer 后迁到 <code>End-of-Stream</code>，此时不再收输入但仍吐输出。把 <code>Running</code> 与 <code>Configured</code> 并列成「四态」等于把子状态抬成顶层态，写状态判断时最容易漏掉的是独立旁支 <code>Error</code>。配置阶段通过 <code>MediaFormat</code> 约定输入/输出格式（如 <code>KEY_MIME</code>、<code>KEY_WIDTH</code>）。</p>
+<p>图 1：MediaCodec 的三态生命周期与子状态（顶层 Stopped/Executing/Released）</p>
+<pre><code>Stopped ── Uninitialized --configure--&gt; Configured
+        └─ (任意状态出错) --------------&gt; Error
+
+Configured --start--&gt; Executing ── Flushed(持有全部 buffer)
+                                      │ 取出第一个输入 buffer
+                                      ↓
+                                   Running(生命周期的主体)
+                                      │ 送入带 EOS 标记的输入 buffer
+                                      ↓
+                                 End-of-Stream(不再收输入,仍吐输出)
+
+Stopped / Executing --release--&gt; Released（终态）</code></pre>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>同步模式下，应用主动轮询 buffer；异步模式由回调驱动。两条路径殊途同归，都经过「取空输入槽 → 填数据 → 提交 → 等输出 → 取结果」五步。失败路径主要有三类：配置阶段格式不被支持（<code>configure</code> 抛 <code>IllegalArgumentException</code>/<code>MediaCodec.CodecException</code>）、运行中组件死亡（Binder/HwBinder 断连或 codec 服务进程崩溃），以及资源侧问题——后者要分两层看：<code>init</code> 阶段与 <code>ResourceManagerService</code> 建链失败（调用方权限被拒或服务不可达）时，<code>MediaCodec::init</code> 直接把 <code>mCodec</code> 置空并返回错误；而多客户端争用发生在运行期，组件分配完成后在 <code>kWhatComponentAllocated</code> 分支（<code>MediaCodec.cpp:4826</code>）里经 <code>addResource(MediaResource::CodecResource(...))</code>（<code>:4878</code>）向 <code>ResourceManagerService</code> 登记编解码器资源，争用时由服务端 reclaim、客户端按回调释放——这与 init 失败不是同一处因果，排查时要先分清楚卡在哪一层。注意别把 <code>:2377</code>/<code>:2455</code> 两处 <code>addResource(MediaResource::VideoBatteryResource(...))</code> 当成资源登记入口：那两处挂在 <code>mBatteryChecker-&gt;onCodecActivity</code> 回调里，登记的是电池耗电资源，与编解码器名额无关。</p>
+<p>图 2：同步模式 buffer 往返</p>
+<pre><code>app --queueInputBuffer(idx)--&gt; MediaCodec(填输入槽)
+app &lt;--dequeueOutputBuffer-- MediaCodec(取输出槽)
+app --releaseOutputBuffer---&gt; 归还给框架</code></pre>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p>门面的入口是 <code>createByCodecName</code>（<code>MediaCodec.java:2133</code>），它按名字（如 <code>&quot;c2.android.avc.decoder&quot;</code>）向 <code>MediaCodecList</code> 解析出编解码器信息并构造实例。配置由两个公开重载完成：<code>configure</code> 在 <code>:2411</code> 与 <code>:2441</code>，内部收敛到私有 <code>configure</code>（<code>MediaCodec.java:2453</code>）——这两个重载的声明是 <code>public void configure(</code>，<strong>没有 `final`</strong>；而 <code>start</code>（<code>:2769</code>）、<code>stop</code>（<code>:2781</code>）、<code>flush</code>（<code>:2825</code>）、<code>release</code>（<code>:2223</code>）与后面几个 buffer 方法都是 <code>public final</code>。写 grep 核对时别漏掉这一处差异。</p>
+<p>buffer 提交与回收是高频路径：<code>queueInputBuffer</code>（<code>:3143</code>）把输入槽交还框架，<code>dequeueInputBuffer</code>（<code>:3582</code>）申请一个空输入槽，<code>dequeueOutputBuffer</code>（<code>:4265</code>）取解码结果，<code>releaseOutputBuffer</code>（<code>:4310</code>）归还输出槽。</p>
+<p>native 侧 <code>MediaCodec.cpp</code> 是真正的调度员，而它<strong>运行在调用方进程里</strong>：<code>libstagefright</code> 是被链接进来的库，JNI（<code>frameworks/base/media/jni/android_media_MediaCodec.cpp:271/:276</code>）直接在本地 <code>new</code> 出这个对象。<code>MediaCodec::configure</code> 有两组定义（<code>:2923</code>、<code>:2997</code>，分别对应不同重载/路径），<code>start</code>（<code>:3683</code>）拉起组件，<code>queueInputBuffer</code>（<code>:3831</code>）与 <code>dequeueInputBuffer</code>（<code>:4065</code>）在 native 队列上移动 buffer，<code>flush</code>（<code>:4335</code>）清空缓冲队列。异步路径通过 <code>BufferCallback::onInputBufferAvailable</code>（<code>:1063</code>）与 <code>BufferCallback::onOutputBufferAvailable</code>（<code>:1072</code>）把槽位可用性回推到应用。</p>
+<p><strong>跨进程发生在选后端这一步</strong>（<code>MediaCodec::GetCodecBase</code>，<code>MediaCodec.cpp:2565</code>）：owner 为 <code>default</code> 或名字以 <code>omx.</code> 开头 ⇒ <code>new ACodec</code>；owner 以 <code>codec2</code> 开头或名字以 <code>c2.</code> 开头 ⇒ <code>CreateCCodec()</code>。选完之后，跨进程通信由 <code>ACodec</code>/<code>CCodec</code> 承担 —— 它们才是站在进程边界另一侧的那一半。</p>
+<p>Codec2 组件是编解码的最终执行体。<code>frameworks/av/media/codec2/components/</code> 下按格式分目录存放 Codec2 组件——软编与软解都有，解码实现如 <code>avc/C2SoftAvcDec.h</code>、<code>aac/C2SoftAacDec.h</code>；这批组件由 <code>media.swcodec</code> 进程注册成一个名为 <code>software</code> 的 component store（<code>main_swcodecservice.cpp:41</code> 设进程名，<code>CodecServiceRegistrant.cpp:827</code> 完成注册；该进程的服务入口位于 <code>com.android.media.swcodec</code> APEX 内，见 <code>main_swcodecservice.cpp</code> 中 <code>/apex/com.android.media.swcodec/...</code> 的 seccomp 策略路径），框架侧经 Codec2 接口与它通信；硬件路径则同样表示为另一个 component store，落在厂商 HAL 服务里。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li>与 <code>MediaCodecList</code>（<code>MediaCodecList.java:225</code> 的 <code>findDecoderForFormat</code>、<code>:249</code> 的 <code>findEncoderForFormat</code>）的关系：<code>MediaCodec</code> 不负责「选哪个编解码器」，那一步由 <code>MediaCodecList</code> 完成。</li><li>与相机/录音的关系：相机预览流、录音流都复用 <code>MediaCodec</code> 完成编码（如视频录制），因此本篇是 301/201 的上游。</li><li>与图形卷的关系：解码产出的 <code>Surface</code> 直接交给 <code>BufferQueue</code>（见 <code>AND-P6-102</code>），消费侧在图形卷。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>Java 门面</td><td><code>frameworks/base/media/java/android/media/MediaCodec.java</code></td><td><code>createByCodecName</code>、<code>configure</code>、<code>queueInputBuffer</code></td><td>应用直接调用</td></tr><tr><td>编解码器枚举</td><td><code>frameworks/base/media/java/android/media/MediaCodecList.java</code></td><td><code>findDecoderForFormat</code>、<code>findEncoderForFormat</code></td><td>选型薄封装</td></tr><tr><td>native 调度</td><td><code>frameworks/av/media/libstagefright/MediaCodec.cpp</code></td><td><code>MediaCodec::configure</code>、<code>start</code>、<code>queueInputBuffer</code></td><td>在应用进程内；<code>GetCodecBase</code>（<code>:2565</code>）选后端</td></tr><tr><td>Codec2 组件</td><td><code>frameworks/av/media/codec2/components/avc/C2SoftAvcDec.h</code></td><td>软解 AVC 组件</td><td>编解码执行体</td></tr><tr><td>Codec2 组件</td><td><code>frameworks/av/media/codec2/components/aac/C2SoftAacDec.h</code></td><td>软解 AAC 组件</td><td>音频编解码示例</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df 锚点：frameworks/av:475269ec44ac</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD
+git -C frameworks/av rev-parse HEAD</code></pre>
+<p>期望分别得到 <code>94b4c163b7df</code>、<code>475269ec44ac</code> 开头，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;createByCodecName\|public void configure\|public final void start\|public final void flush\|public final int dequeueInputBuffer\|public final int dequeueOutputBuffer\|public final void queueInputBuffer&quot; \
+  frameworks/base/media/java/android/media/MediaCodec.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>:2133</code>、<code>configure</code> 的两个公开重载在 <code>:2411</code>/<code>:2441</code>、<code>start</code> 在 <code>:2769</code>、<code>flush</code> 在 <code>:2825</code>、<code>dequeueInputBuffer</code> 在 <code>:3582</code>、<code>dequeueOutputBuffer</code> 在 <code>:4265</code>、<code>queueInputBuffer</code> 在 <code>:3143</code>。注意 <code>configure</code> 的匹配串是 <code>public void configure</code>——它是本篇唯一一处 <strong>不带 `final`</strong> 的公开 API（<code>public void</code>，非 <code>public final void</code>），按 <code>public final void configure</code> 去 grep 会一条都命中不了。</p>
+<pre><code class="lang-bash">grep -n &quot;MediaCodec::GetCodecBase&quot; frameworks/av/media/libstagefright/MediaCodec.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:2565</code>。这个函数体按 <code>owner</code> 与名字前缀在 <code>new ACodec</code>（OMX）与 <code>CreateCCodec()</code>（Codec2）之间选后端，是本篇「进程边界在哪里」最重要的一处实证。</p>
+<pre><code class="lang-bash">grep -rn &quot;strcpy(argv\[0\]&quot; frameworks/av/services/mediacodec/main_swcodecservice.cpp frameworks/av/services/mediacodec/main_codecservice.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到进程名分别被写成 <code>media.swcodec</code> 与 <code>media.codec</code>——据此确认软编/软解与 OMX 组件各自的承载进程，而不是想当然的 <code>mediaserver</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;MediaCodec::configure\|MediaCodec::start\|MediaCodec::queueInputBuffer\|MediaCodec::dequeueInputBuffer\|MediaCodec::flush&quot; \
+  frameworks/av/media/libstagefright/MediaCodec.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：两个 <code>configure</code> 在 <code>:2923</code>/<code>:2997</code>、<code>start</code> 在 <code>:3683</code>、<code>queueInputBuffer</code> 在 <code>:3831</code>、<code>dequeueInputBuffer</code> 在 <code>:4065</code>、<code>flush</code> 在 <code>:4335</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;kWhatComponentAllocated\|MediaResource::CodecResource\|VideoBatteryResource&quot; \
+  frameworks/av/media/libstagefright/MediaCodec.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中：<code>kWhatComponentAllocated</code> 在 <code>:922</code>（常量）、<code>:1164</code>（发送）、<code>:4826</code>（case 分支）；<code>MediaResource::CodecResource</code> 共四处——<code>:2719</code>/<code>:3056</code>/<code>:3691</code> 是构造后先 <code>push_back</code> 进 <code>resources</code> 向量待登记（分别在 init/configure 与 start 路径），<code>:4878</code> 是组件分配完成（<code>kWhatComponentAllocated</code>）后的那次登记。另有两处 <code>VideoBatteryResource</code> 在 <code>:2377</code>/<code>:2455</code>——那是电池耗电资源，不是编解码器名额，别引错。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/media/java/android/media/MediaCodec.java \
+      frameworks/av/media/libstagefright/MediaCodec.cpp \
+      frameworks/base/media/java/android/media/MediaCodecList.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望约 6444、8234、270——门面、native 调度、枚举三者的体量差。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li>「<code>MediaCodec</code> 在应用进程里解码」。这只对了一半：调度确实在应用进程（JNI 直接 <code>new</code> 出 native <code>MediaCodec</code> 对象），真正干活的是<strong>进程外的组件</strong>——平台软解跑在 <code>media.swcodec</code>，硬解由厂商 HAL 服务承担。应用进程只持状态机与 buffer 槽。</li><li>「<code>dequeueOutputBuffer</code> 卡住就是解码慢」。它可能只是在等 codec 服务进程投递输出；耗时既可能在远端组件，也可能只是本地队列空转，两端要分开看。</li><li>「看起来对其实是错的」：以为 <code>configure</code> 抛异常一定是参数写错。也可能是该编解码器在当前设备不被 <code>MediaCodecList</code> 选到（能力不匹配），属于选型失败而非格式错误。</li><li>「同步比异步更可靠」。两者底层走同一套 native 队列，差异只在谁来轮询；异步只是把轮询交给回调线程。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：首帧慢该往哪看？ <strong>答</strong>：先看 <code>configure</code>/<code>start</code> 是否完成，再看 codec 服务进程那侧的组件初始化耗时（平台软解在 <code>media.swcodec</code>、硬解在厂商 HAL 服务），最后才是 buffer 链路；应用侧 <code>dequeueOutputBuffer</code> 只是末端。 <strong>追问</strong>：怎么确认问题在远端？ <strong>答</strong>：<code>dumpsys media.codec</code> 是观察这条链路的入口（输出内容随实现与版本变化，本树静态不可核验，请以实机输出为准），用它区分本地轮询与远端组件。</p>
+<p><strong>问</strong>：为什么同一段代码在 A 设备快、B 设备慢？ <strong>答</strong>：<code>MediaCodecList</code> 在两设备选到的编解码器不同（软解 vs 硬解），硬解能力由厂商 HAL 决定，框架层不可控。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>配置抛异常</td><td><code>dumpsys media.codec</code></td><td>编解码器列表与状态</td><td>确认 <code>MediaCodecList</code> 选型，转 §4.3</td></tr><tr><td>输出迟迟不来</td><td><code>dumpsys media.codec</code></td><td>buffer 占用与组件状态</td><td>区分本地轮询与远端，转 §4.2</td></tr><tr><td>怀疑组件崩溃</td><td><code>ps -A | grep -E &quot;media.swcodec|media.codec&quot;</code></td><td>codec 服务进程是否存活</td><td>查对应进程日志，转 §4.3</td></tr><tr><td>确认源码版本</td><td><code>git -C frameworks/av rev-parse HEAD</code></td><td>是否 <code>475269ec44ac</code></td><td>版本不同按符号重锚</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：相机预览流如何喂给 <code>MediaCodec</code>（301）、音频录制编码（201）、解码结果如何上屏（<code>AND-P6-102</code>）、ExoPlayer 等上层播放器（102）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P7-G01</code>、<code>AND-P3-302</code>。</li><li><strong>本篇后继</strong>：<code>AND-P7-102</code>（会话与焦点）、<code>AND-P7-301</code>（相机）、<code>AND-P7-201</code>（音频录制）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>MediaCodec.java</code> 约 6444 行、<code>MediaCodec.cpp</code> 约 8234 行、<code>MediaCodecList.java</code> 约 270 行（口径：2026-10-18 于 <code>android17-release</code> 实测 <code>wc -l</code>）。</li><li>进程落点（口径：源码实证）：native <code>MediaCodec</code> 由 JNI 在<strong>应用进程</strong>内创建（<code>android_media_MediaCodec.cpp:271/:276</code> 调 <code>MediaCodec::CreateByType</code>/<code>CreateByComponentName</code>，JNI 模块依赖 <code>libstagefright</code>）；跨进程边界在 <code>GetCodecBase</code>（<code>MediaCodec.cpp:2565</code> 选完后端之后——平台软编与软解组件落在 <code>media.swcodec</code> 进程（<code>main_swcodecservice.cpp</code> 设 <code>argv[0] = &quot;media.swcodec&quot;</code>，组件注册为名为 <code>software</code> 的 store，见 <code>CodecServiceRegistrant.cpp:827</code>），遗留 OMX 主机在 <code>media.codec</code> 进程（<code>main_codecservice.cpp</code>），硬编由厂商 HAL 服务承载；<code>mediaserver</code> 进程只承载 <code>MediaPlayerService</code> 与 <code>ResourceManagerService</code>（<code>main_mediaserver.cpp:49-50</code>），与本篇链路无关。</li><li>Codec2 组件按格式分目录，软解实现数十个（口径：<code>frameworks/av/media/codec2/components/</code> 目录枚举）。</li><li>单帧解码耗时依赖设备硬解能力与分辨率，暂无统一实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>MediaCodec.cpp</code> 约 8234 行；Codec2 组件路径 <code>frameworks/av/media/codec2/components/*</code></td><td>本篇行号基准</td></tr><tr><td>旧版本（ACodec 时代）</td><td>曾用 <code>OMX</code>/<code>ACodec</code> 而非 Codec2</td><td>组件接口与路径不同，按符号重锚</td></tr><tr><td>API 21+</td><td><code>MediaCodec</code> 异步回调（<code>setCallback</code>）稳定可用</td><td>应用可选异步路径，底层队列一致</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：developer.android.com 站内检索 <code>MediaCodec</code>、<code>MediaCodecList</code>；source.android.com 站内检索 <code>codec2</code>、<code>stagefright</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>MediaCodec.cpp</code>、<code>C2SoftAvcDec</code>。</li><li>承接篇：<code>AND-P7-301</code>（相机数据流）、<code>AND-P7-201</code>（音频录制）、<code>AND-P6-102</code>（Surface 消费）。</li></ul>
+</article>
+<footer>android-100 · AND-P7-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

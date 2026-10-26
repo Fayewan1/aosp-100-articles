@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>传感器 HAL 与 Context Hub：Sensors HAL 2.x 之后</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>传感器 HAL 与 Context Hub：Sensors HAL 2.x 之后</h1>
+<div class="kv"><span>ID：AND-P4-302</span><span>卷：P4</span><span>章：4.3</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl ；frameworks/native/services/sensorservice/SensorDevice.cpp ；frameworks/native/services/sensorservice/AidlSensorHalWrapper.cpp ；hardware/interfaces/contexthub/aidl/android/hardware/contexthub/IContextHub.aidl ；system/chre/README.md</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Sensors HAL 2.x 之后，事件不再靠 <code>poll()</code> 拉取，而是 HAL 单向写入 Event Fast Message Queue（FMQ），再用 EventFlag 把读端叫醒。另一条 Wake Lock FMQ 方向相反：框架把已处理的唤醒事件数写进去，HAL 读。<code>hardware/interfaces/sensors/</code> 下 <code>1.0</code>、<code>2.0</code>、<code>2.1</code> 三个 HIDL 目录与 <code>aidl</code> 目录并存，AIDL 侧 <code>ISensors</code> 里根本没有 <code>poll()</code>。框架侧由 <code>AidlSensorHalWrapper</code> 与 <code>HidlSensorHalWrapper</code> 两条实现撑起统一接口 <code>ISensorHalWrapper.h</code>，<code>SensorDevice</code> 只认包装层。Context Hub 是另一组接口（<code>IContextHub</code>），它解决的是「低功耗协处理器上的感知」，与传感器事件搬运不是同一条队列。判断一件事能不能通过 HAL 做到，先看它落在 Event FMQ 这条单向契约里，还是落在 <code>sendMessageToHub</code> 这条消息通道里。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§4.2/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P4-101，通用 HAL 契约形态（版本目录并存、包装层、接口面收敛）在那一篇已经成型，本篇只填传感器这一格。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl</code></li><li><code>hardware/interfaces/contexthub/aidl/android/hardware/contexthub/IContextHub.aidl</code></li><li><code>frameworks/native/services/sensorservice/SensorDevice.cpp</code></li><li><code>frameworks/native/services/sensorservice/AidlSensorHalWrapper.cpp</code></li><li><code>frameworks/native/services/sensorservice/HidlSensorHalWrapper.cpp</code></li><li><code>frameworks/native/services/sensorservice/ISensorHalWrapper.h</code></li><li><code>system/chre/README.md</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>、<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在写一个计步或抬腕唤醒类的功能，采样率很低，要求熄屏也不断。翻 AOSP 时发现传感器服务里没有「读一次」这种调用：HAL 不给你数据，是 HAL 把数据塞进一个队列，再拍一下你的门。继续翻，<code>hardware/interfaces/sensors/</code> 底下同时躺着 <code>1.0</code>、<code>2.0</code>、<code>2.1</code> 和 <code>aidl</code> 四个目录，不知道设备上到底走哪条。再往低功耗方向找，又冒出 <code>IContextHub</code> 和 <code>system/chre/</code>，看起来也是「传感器」，但接口完全不一样。三个问题叠在一起：事件谁在搬、版本怎么选、协处理器算不算传感器 HAL。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：接口版本目录（HIDL 的 <code>1.0</code>/<code>2.0</code>/<code>2.1</code> 与 <code>aidl</code>，是同一能力的多份契约）、HAL 包装层（<code>ISensorHalWrapper.h</code> 下的两套实现，把版本差异吸收掉）、Event FMQ（事件唯一出口，HAL 只写不读）、Context Hub（独立接口面，管的是 hub 上的消息与 app，不管 Event FMQ）。</p>
+<p>图 1：事件从 HAL 到 SensorService 的搬运路径</p>
+<pre><code>  HAL 进程                     SensorService
+  ----------                   --------------
+  Event FMQ  --写--&gt;  [队列]  --读--&gt;  mEventQueue
+       |                                    ^
+       +-- EventFlag 唤醒 -----------------+</code></pre>
+<p>这四者的关系是：版本目录决定「用哪份接口」，包装层决定「代码里怎么写一份」，Event FMQ 决定「数据怎么流动」，Context Hub 是并列的另一条线，不进这张图。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>AIDL 接口面</strong>。<code>interface ISensors</code>（<code>ISensors.aidl:27</code>）只暴露少量方法：<code>activate(sensorHandle, enabled)</code>（:41）、<code>getSensorsList()</code>（:110）、<code>initialize(MQDescriptor&lt;Event&gt;, MQDescriptor&lt;int&gt;, ISensorsCallback)</code>（:193-195）。没有 <code>poll()</code>。这一点是 HIDL 1.0 与之后版本的分水岭：老的 <code>poll()</code> 是拉模型，新的是推模型。</p>
+<p><strong>两条队列，方向相反</strong>。<code>initialize</code> 的两个 <code>MQDescriptor</code> 参数分别对应 Event FMQ 与 Wake Lock FMQ（<code>ISensors.aidl:113-153</code>）。Event FMQ 是 HAL 写、框架读，装传感器事件；Wake Lock FMQ 反过来，框架把「已处理的 WAKE_UP 事件数」写进去、HAL 读出来，据此判断唤醒锁能不能释放（<code>:138-149</code>）。两者共同点是没有请求-应答语义，不同点是数据流方向。</p>
+<p><strong>写侧纪律</strong>。HAL 只能写 Event FMQ、不能读；写完调 EventFlag 唤醒读端（<code>ISensors.aidl:119-128</code>）。这条单向约束决定了 HAL 不可能「等框架来取」，也决定了背压只能在队列满时表现为丢事件，而不是阻塞 HAL。</p>
+<p><strong>读侧实现</strong>。框架侧持有 <code>mEventQueue</code>（<code>AidlSensorHalWrapper.cpp:131</code>），用 <code>EventFlag::createEventFlag</code>（:143）建标志，<code>initialize(dupeDesc, dupeDesc, callback)</code>（:153）把描述符交进去，循环里靠 <code>availableToRead()</code>（:174）判断有没有新事件。</p>
+<p><strong>包装层双轨</strong>。<code>AidlSensorHalWrapper.cpp</code> 与 <code>HidlSensorHalWrapper.cpp</code> 并存，统一接口在 <code>ISensorHalWrapper.h</code>（均在 <code>frameworks/native/services/sensorservice/</code>）。上层调用点只认 <code>ISensorHalWrapper</code>，因此一台设备走 AIDL 还是 HIDL，对上层的形状是一样的。</p>
+<p>图 2：版本差异在三层被吸收</p>
+<pre><code>hardware/interfaces/sensors/   1.0 / 2.0 / 2.1 / aidl
+              |
+      ISensorHalWrapper.h（统一接口）
+         |                    |
+HidlSensorHalWrapper   AidlSensorHalWrapper
+         \                  /
+            SensorDevice（只认包装层）</code></pre>
+<p><strong>列表初始化</strong>。<code>SensorDevice::initializeSensorList</code>（<code>SensorDevice.cpp:82</code>）先调 <code>mHalWrapper-&gt;getSensorsList()</code>（:87）。逐项 <code>activate(handle, 0)</code>（:135）确实存在，但被条件门住：只有 <code>if (!mHalWrapper-&gt;supportsMessageQueues())</code> 成立才走（<code>:132-136</code> 的注释写明「HAL 1.0 才需要逐个关断，2.0 在 initialize 里自己处理」）。AIDL 侧 <code>supportsMessageQueues()</code> 返回真，这一步跳过；2.x 与 AIDL 的清理由 <code>initialize</code> 契约承担（<code>ISensors.aidl:166-178</code>：调用 initialize 时所有已激活请求与直连通道必须关闭并清理）。</p>
+<p><strong>Context Hub 侧</strong>。<code>interface IContextHub</code>（<code>IContextHub.aidl:34</code>）的关键方法是 <code>sendMessageToHub(contextHubId, message)</code>（:179）与 <code>getHubs()</code>（:265）；目录同样 <code>1.0</code>/<code>1.1</code>/<code>1.2</code> ＋ <code>aidl</code> 并存。运行时实现树在 <code>system/chre/</code>（<code>api_parser</code>、<code>apps</code>、<code>chpp</code> 等子目录）。</p>
+<p>同族方法集中对照：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>activate</code></td><td>使能/关闭某个 sensorHandle</td><td><code>ISensors.aidl:41</code></td></tr><tr><td><code>getSensorsList</code></td><td>取本次启动可见的传感器清单</td><td><code>ISensors.aidl:110</code></td></tr><tr><td><code>initialize</code></td><td>交付 Event FMQ 与 Wake Lock FMQ 描述符并注册回调</td><td><code>ISensors.aidl:193-195</code></td></tr><tr><td><code>sendMessageToHub</code></td><td>向指定 hub 投递一条消息</td><td><code>IContextHub.aidl:179</code></td></tr><tr><td><code>getHubs</code></td><td>列出可用 hub</td><td><code>IContextHub.aidl:265</code></td></tr></tbody></table>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以抬腕唤醒为例，走一遍 AIDL 路径。<code>SensorDevice</code> 构造时先 <code>connectHalService()</code>（<code>SensorDevice.cpp:73</code>），<code>AidlSensorHalWrapper::connect()</code> 里依次建 <code>mEventQueue</code>（<code>AidlSensorHalWrapper.cpp:131</code>）、<code>EventFlag::createEventFlag</code>（:143）、调 <code>mSensors-&gt;initialize(mEventQueue-&gt;dupeDesc(), mWakeLockQueue-&gt;dupeDesc(), mCallback)</code>（:153），把两条队列与回调交下去。这一步在取清单之前——先有队列，才有地方收事件。构造完成后才调 <code>initializeSensorList()</code>（<code>SensorDevice.cpp:77</code>），里面取 <code>getSensorsList()</code>（:87）；因为 <code>supportsMessageQueues()</code> 为真（<code>AidlSensorHalWrapper.cpp:101</code>），逐项 <code>activate(handle, 0)</code> 被跳过。</p>
+<p>HAL 侧从此按 <code>ISensors.aidl:119-131</code> 的约定干活：有事件就写 Event FMQ，写完拍 EventFlag。框架侧在循环里判 <code>availableToRead()</code>（<code>AidlSensorHalWrapper.cpp:174</code>），有数据就读出来分发；处理完再把「已处理的 WAKE_UP 数」写进 Wake Lock FMQ（<code>writeWakeLockHandled</code>，<code>:347-350</code>）。应用真正打开抬腕唤醒时，走的是 <code>activate(sensorHandle, enabled)</code>（<code>ISensors.aidl:41</code>），<code>enabled</code> 置 1。整条路上没有一次 <code>poll()</code>。</p>
+<p>如果这个唤醒判断要在 hub 上做，那是另一条路：走 <code>sendMessageToHub(contextHubId, message)</code>（<code>IContextHub.aidl:179</code>），消息进 hub，<code>system/chre/</code> 里的运行时负责在协处理器上跑逻辑。能力边界不同，不是同一个队列的两种用法。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>本篇只讲事件搬运的契约：接口面、两条队列、写侧纪律、包装层。传感器融合算法与功耗策略归 P10，本篇不碰。器件驱动归 P5，Event FMQ 上游怎么采到数据不在本篇范围。这类「多版本目录并存 + 包装层吸收差异」的通用形态，P4-101 已经讲过，本篇是它在传感器域的具体样本。P4-402 提供小 HAL 的另一组样本，可作对照。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>AIDL 接口面</td><td><code>hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl</code></td><td><code>ISensors</code>、<code>activate</code>、<code>getSensorsList</code>、<code>initialize</code></td><td>无 <code>poll()</code>；两个 <code>MQDescriptor</code> 参数</td></tr><tr><td>列表初始化</td><td><code>frameworks/native/services/sensorservice/SensorDevice.cpp</code></td><td><code>initializeSensorList</code>、<code>getSensorsList</code>、<code>activate</code></td><td>逐项 <code>activate(handle, 0)</code> 落在 <code>supportsMessageQueues()</code> 为假的分支里（HAL 1.0），AIDL 侧跳过</td></tr><tr><td>读侧实现</td><td><code>frameworks/native/services/sensorservice/AidlSensorHalWrapper.cpp</code></td><td><code>mEventQueue</code>、<code>EventFlag::createEventFlag</code>、<code>availableToRead</code></td><td>唤醒 + 判可读的循环骨架</td></tr><tr><td>Context Hub 接口</td><td><code>hardware/interfaces/contexthub/aidl/android/hardware/contexthub/IContextHub.aidl</code></td><td><code>IContextHub</code>、<code>sendMessageToHub</code>、<code>getHubs</code></td><td>与传感器事件队列无交集</td></tr><tr><td>CHRE 实现树</td><td><code>system/chre/README.md</code></td><td><code>api_parser</code>、<code>apps</code>、<code>chpp</code></td><td>协处理器运行时的落地位置</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/sensors/</code></pre>
+<p>期望输出含 <code>1.0</code>、<code>2.0</code>、<code>2.1</code>、<code>aidl</code> 四个条目，对应事实 1 的目录并存。</p>
+<pre><code class="lang-bash">grep -n &quot;poll&quot; hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望无输出，说明 AIDL 接口面里没有 <code>poll()</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;MQDescriptor\|activate\|getSensorsList&quot; hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>activate</code>、<code>getSensorsList</code>、<code>initialize</code> 三处的声明行，即 :41、:110、:193-195。</p>
+<pre><code class="lang-bash">ls frameworks/native/services/sensorservice/ | grep -i &quot;HalWrapper\|ISensorHalWrapper&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>AidlSensorHalWrapper.cpp</code>、<code>HidlSensorHalWrapper.cpp</code>、<code>ISensorHalWrapper.h</code> 三个文件，对应包装层双轨。</p>
+<pre><code class="lang-bash">sed -n '80,140p' frameworks/native/services/sensorservice/SensorDevice.cpp | grep -n &quot;getSensorsList\|activate&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>getSensorsList</code> 与 <code>activate(handle, 0)</code> 两处调用；后者落在 <code>if (!mHalWrapper-&gt;supportsMessageQueues())</code> 分支内，只对 HAL 1.0 生效。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/contexthub/aidl/android/hardware/contexthub/ &amp;&amp; ls system/chre/ | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前者有 <code>IContextHub.aidl</code>，后者列出 <code>api_parser</code>、<code>apps</code>、<code>chpp</code> 一类子目录。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：Sensors HAL 2.x 是「更快的 poll」。</strong> 不是。AIDL 的 <code>ISensors</code> 里没有 <code>poll()</code>，事件全部走 Event FMQ ＋ 回调（<code>ISensors.aidl:113-128</code>）。这不是同一模型调参，是换模型。</p>
+<p><strong>误区二：`initialize` 的两个 `MQDescriptor` 一个是请求、一个是应答。</strong> 不是。它们分别对应 Event FMQ 与 Wake Lock FMQ，方向相反：Event FMQ 是 HAL 写、框架读；Wake Lock FMQ 是框架写、HAL 读（<code>ISensors.aidl:138-149</code>）。两条都没有请求-应答语义，但也不是同向的两条。</p>
+<p><strong>误区三：HAL 写完队列可以顺便读一下做自检。</strong> 看起来合理，实际违反契约。约定是 HAL 只能写 Event FMQ、不能读，写完调 EventFlag 唤醒读端（<code>ISensors.aidl:119-128</code>）。读端只有一个。</p>
+<p><strong>误区四：Context Hub 就是低功耗版传感器 HAL。</strong> 不是同一层。<code>IContextHub</code> 的接口面是 <code>sendMessageToHub</code> 与 <code>getHubs</code>，处理的是 hub 上的消息与 app；传感器事件走 Event FMQ，两条路互不替代。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：一台设备上四个版本目录都在，实际用哪个？ <strong>答</strong>：由设备侧声明的接口版本决定，运行时选定后由包装层落到 <code>AidlSensorHalWrapper</code> 或 <code>HidlSensorHalWrapper</code> 之一。目录并存本身不代表同时启用。 <strong>追问</strong>：那写代码时要两套都写吗？ <strong>答</strong>：不需要。上层对着 <code>ISensorHalWrapper.h</code> 写，版本差异在包装层内部消化。</p>
+<p><strong>问</strong>：初始化时为什么要对每个传感器 <code>activate(handle, 0)</code>？ <strong>答</strong>：那句话只对 HAL 1.0 成立。<code>SensorDevice::initializeSensorList</code>（<code>SensorDevice.cpp:82</code>）在取完 <code>getSensorsList()</code>（:87）之后确实有这个循环，但它在 <code>if (!mHalWrapper-&gt;supportsMessageQueues())</code> 里（<code>:132-136</code>），只有拉模型路径才执行；2.x 与 AIDL 的清理由 <code>initialize</code> 的契约负责。 <strong>追问</strong>：那 AIDL 路径下谁来保证没有残留使能状态？ <strong>答</strong>：HAL 自己。<code>ISensors.aidl:166-178</code> 规定 initialize 被调用时，所有已激活请求与直连通道都必须关闭并清理，这是交付队列描述符的附带义务。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑设备走的是 HIDL 而非 AIDL</td><td><code>grep -rn &quot;HidlSensorHalWrapper|AidlSensorHalWrapper&quot; frameworks/native/services/sensorservice/</code></td><td>两个包装类的引用点</td><td>顺着引用点看哪条被实例化</td></tr><tr><td>事件收不到</td><td><code>grep -n &quot;availableToRead|createEventFlag&quot; frameworks/native/services/sensorservice/AidlSensorHalWrapper.cpp</code></td><td>判可读与建标志的位置</td><td>核对该路径是否被走到</td></tr><tr><td>怀疑接口面还有 <code>poll()</code></td><td><code>grep -n &quot;poll&quot; hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl</code></td><td>有无命中</td><td>该文件无命中即确认接口面无 <code>poll()</code>；<code>SensorInfo.aidl</code> 注释与 vts 测试里的 <code>poll</code> 不算接口声明</td></tr><tr><td>搞混 Context Hub 与传感器 HAL</td><td><code>grep -n &quot;sendMessageToHub|getHubs&quot; hardware/interfaces/contexthub/aidl/android/hardware/contexthub/IContextHub.aidl</code></td><td>接口方法名</td><td>确认这条线管的是 hub 消息</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：传感器融合算法与功耗策略（P10）；器件驱动与采样链路（P5）；HAL 契约的通用形态（P4-101，本篇仅作引用）。</p>
+<p><strong>本篇前置依赖</strong>：AND-P4-101。</p>
+<p><strong>本篇后继</strong>：P10（融合与功耗）；P4-402（另一组小 HAL 样本）。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>接口版本目录数：<code>hardware/interfaces/sensors/</code> 下 <code>1.0</code>、<code>2.0</code>、<code>2.1</code> 与 <code>aidl</code> 四者并存，口径为 2026-10-17 于 <code>android17-release</code> 实测（目录列举）。</li><li><code>ISensors</code> 关键方法数：本篇涉及 <code>activate</code>、<code>getSensorsList</code>、<code>initialize</code> 三个，口径为同一棵树的 <code>ISensors.aidl</code> 静态阅读。</li><li><code>initialize</code> 的队列描述符个数：2 个（Event FMQ 与 Wake Lock FMQ），口径为 <code>ISensors.aidl:113-128</code>。</li><li>Event FMQ 的深度、单事件字节数：本篇不断言，暂无实测，列为待补。</li><li>Context Hub 支持的 hub 数量上限：本篇不断言，暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL 1.0（<code>hardware/interfaces/sensors/1.0</code>）</td><td>拉模型，存在 <code>poll()</code> 式取事件</td><td>仅作对照，本篇不作主路径</td></tr><tr><td>HIDL <code>2.0</code>/<code>2.1</code> 与 <code>aidl</code> 并存</td><td>事件改走 FMQ，接口面提供 <code>initialize</code> 交付队列描述符</td><td>包装层需要两份实现</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>1.0</code>、<code>2.0</code>、<code>2.1</code>、<code>aidl</code> 四目录并存；AIDL 侧无 <code>poll()</code>；<code>AidlSensorHalWrapper.cpp</code> 与 <code>HidlSensorHalWrapper.cpp</code> 双轨</td><td>上层统一走 <code>ISensorHalWrapper.h</code></td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>sensors hal 2.0 fmq</code>；source.android.com 站内检索 <code>contexthub chre</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ISensors aidl initialize MQDescriptor</code>、<code>AidlSensorHalWrapper</code>。</li><li>本仓关键路径：<code>hardware/interfaces/sensors/aidl/android/hardware/sensors/ISensors.aidl</code>、<code>frameworks/native/services/sensorservice/AidlSensorHalWrapper.cpp</code>、<code>system/chre/README.md</code>。</li><li>承接篇：AND-P4-101、P4-402。</li></ul>
+</article>
+<footer>android-100 · AND-P4-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

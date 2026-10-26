@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WMS 与窗口层级：从 Token 到 Surface 分配</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>WMS 与窗口层级：从 Token 到 Surface 分配</h1>
+<div class="kv"><span>ID：AND-P2-202</span><span>卷：P2</span><span>章：2.2</span><span>难度：4</span><span>核验：2026-10-15</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java ；frameworks/base/core/java/android/view/WindowManagerGlobal.java ；frameworks/base/core/java/android/view/ViewRootImpl.java ；frameworks/base/services/core/java/com/android/server/wm/WindowToken.java ；frameworks/base/core/java/android/view/WindowManager.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>窗口能不能进入系统层级，第一关是 <code>WindowManagerService.addWindow</code> 里 <code>mPolicy.checkAddPermission</code> 的返回值，非 <code>ADD_OKAY</code> 直接被拒。进层级后，服务端用 <code>WindowToken</code> 持有窗口，并在同一处为窗口创建输入通道，一端留服务侧分发、一端经 Binder 回传客户端。Surface 不在 addWindow 阶段产生，而是在 <code>relayoutWindow</code> 里由 WMS 侧创建 <code>SurfaceControl</code> 再回传。整条链路是：客户端 <code>addToDisplayAsUser</code> → 服务端权限检查 → Token/InputChannel → relayout 拿 Surface。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P1-202。客户端 <code>WindowManagerImpl.addView</code> 与 Token 取得在该篇，本篇从 <code>addToDisplayAsUser</code> 进 WMS 开始，不重复客户端入口。</li><li><strong>涉及源码</strong>（相对 AOSP 根，不给行号）：</li><ul class="nested"><li><code>frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code></li><li><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/WindowToken.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManager.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>应用调用 <code>addView</code> 之后，<code>ViewRootImpl</code> 发出的请求到了系统侧，窗口却被挡在层级之外，日志里只有一行权限失败。另一种情况相反：窗口加进去了，<code>onCreate</code> 也跑完了，但界面上什么都没有，输入也点不动。这两类现象的根因不在同一层：前者卡在 <code>addWindow</code> 的权限检查，后者多半卡在 relayout 阶段 Surface 还没回来。把服务侧这几步拆开看，窗口「为什么被拒」「什么时候拿到 Surface」「输入从哪儿来」就有确定答案。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个关键对象：</p>
+<ul><li><code>WindowToken</code>：窗口在服务侧的持有者，<code>extends WindowContainer&lt;WindowState&gt;</code>，窗口按令牌归组。</li><li>输入通道（InputChannel）：服务侧创建、成对存在的通道，一端给服务侧分发，一端回传客户端。</li><li><code>SurfaceControl</code>：WMS 侧创建的 Surface 句柄，经 Binder 回传客户端持有。</li></ul>
+<p>图 1：客户端请求进入 WMS 的三段链路</p>
+<pre><code>客户端                     WMS 服务侧
+ViewRootImpl
+  | addToDisplayAsUser
+  +----------------------&gt; addWindow ---- checkAddPermission
+                              |            (非 ADD_OKAY 返回)
+                              +---- openInputChannels -&gt; 回传 InputChannel
+   ...relayout...
+  | relayoutWindow
+  +----------------------&gt; relayoutWindow - createSurfaceControl
+                              |            -&gt; 回传 SurfaceControl
+  &lt;----------------------- outSurfaceControl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>第一关：权限检查。</strong> <code>addWindow</code>（WindowManagerService.java:1672）最先做的事之一是 <code>mPolicy.checkAddPermission(attrs.type, isRoundedCornerOverlay, attrs.packageName, appOp, displayId)</code>（1681）。返回值不是 <code>ADD_OKAY</code> 就直接返回，窗口不进层级。窗口类型决定权限判定路径，类型区间见下表。</p>
+<p><strong>窗口类型区间。</strong> 下表常量定义在客户端窗口参数类 <code>LayoutParams</code> 中，源码文件是 <code>core/java/android/view/WindowManager.java</code>（注意：这是客户端接口类，不是服务侧 WMS）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>FIRST_APPLICATION_WINDOW</code></td><td>应用窗口区间下界，值 1</td><td>WindowManager.java:2322</td></tr><tr><td><code>TYPE_BASE_APPLICATION</code></td><td>应用基础窗口，值 1</td><td>WindowManager.java:2330</td></tr><tr><td><code>LAST_APPLICATION_WINDOW</code></td><td>应用窗口区间上界，值 99</td><td>WindowManager.java:2358</td></tr><tr><td><code>FIRST_SUB_WINDOW</code></td><td>子窗口区间下界，值 1000</td><td>WindowManager.java:2366</td></tr><tr><td><code>LAST_SUB_WINDOW</code></td><td>子窗口区间上界，值 1999</td><td>WindowManager.java:2420</td></tr><tr><td><code>TYPE_APPLICATION_OVERLAY</code></td><td>悬浮窗类型，<code>FIRST_SYSTEM_WINDOW + 38</code></td><td>WindowManager.java:2716</td></tr></tbody></table>
+<p><code>TYPE_APPLICATION_OVERLAY</code> 是常量表达式，本篇不写死十进制值；用类型区间判断窗口属于应用、子窗口还是系统窗口，比记单个数值更稳。</p>
+<p><strong>服务侧令牌。</strong> <code>WindowToken</code>（WindowToken.java:63）<code>extends WindowContainer&lt;WindowState&gt;</code>，构造在 172/178。它是窗口在服务侧的持有者，同一令牌下的窗口共享层级归属。</p>
+<p><strong>输入通道。</strong> <code>addWindow</code> 内 <code>openInputChannels</code>（WMS 1907–1913）→ <code>WindowState.openInputChannel()</code>（WindowState.java:2680）→ <code>channel.copyTo(outInputChannel)</code>。通道在服务侧创建，一端服务侧分发，另一端经 addWindow 的 out 参数回传客户端。</p>
+<p><strong>Surface 分配。</strong> <code>relayoutWindow</code>（WMS 2548）内 <code>win.setClientSurface(outSurfaceControl)</code>（2767–2768）与 <code>createSurfaceControl(outSurfaceControl, result, win, winAnimator)</code>（2796；私有方法定义 3058）。<code>SurfaceControl</code> 由 WMS 侧创建后经 Binder 回传客户端；客户端 <code>ViewRootImpl.mSurfaceControl</code>（902）在 <code>performTraversals</code> 的 <code>relayoutWindow</code> 调用（4241）之后持有。</p>
+<p><strong>乱序防护。</strong> <code>relayoutWindow</code> 内比较 <code>win.mRelayoutSeq</code> 与入参 <code>seq</code>，旧 seq 直接返回 0（2584–2587）。迟到的 relayout 请求不会覆盖新结果。</p>
+<p><strong>回传标志位。</strong> 下表的同族常量定义在 <code>WindowManagerGlobal.java</code>：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>RELAYOUT_RES_FIRST_TIME</code></td><td>首次 relayout</td><td>WindowManagerGlobal.java:93–108</td></tr><tr><td><code>RELAYOUT_RES_SURFACE_CHANGED</code></td><td>Surface 已改变，值 <code>1 &lt;&lt; 1</code></td><td>WindowManagerGlobal.java:93–108</td></tr><tr><td><code>RELAYOUT_RES_SURFACE_RESIZED</code></td><td>Surface 尺寸变化，值 <code>1 &lt;&lt; 2</code></td><td>WindowManagerGlobal.java:93–108</td></tr><tr><td><code>RELAYOUT_RES_CANCEL_AND_REDRAW</code></td><td>取消并重绘，值 <code>1 &lt;&lt; 3</code></td><td>WindowManagerGlobal.java:93–108</td></tr></tbody></table>
+<p><strong>启动依赖。</strong> SystemServer 里 <code>InputManagerService</code> 先起（SystemServer.java:1739–1741），<code>WindowManagerService.main(context, inputManager, ...)</code> 后起（1756）。WMS 构造需要 inputManager 实参，所以输入服务必须先就绪。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>取一个普通应用主窗口，走一遍真实数据。</p>
+<p>客户端 <code>WindowManagerGlobal.addView</code>（WindowManagerGlobal.java:409）创建 <code>ViewRootImpl</code>；<code>ViewRootImpl.setView</code>（ViewRootImpl.java:1642）内经 <code>mWindowSession.addToDisplayAsUser</code>（1784）跨进程进入 WMS。该会话是 IWindowSession，走 Binder。</p>
+<p>服务侧 <code>addWindow</code>（WindowManagerService.java:1672）先过 <code>mPolicy.checkAddPermission(...)</code>（1681）。该窗口类型落在 <code>FIRST_APPLICATION_WINDOW = 1</code>（2322）到 <code>LAST_APPLICATION_WINDOW = 99</code>（2358）区间内，检查通过后建立 <code>WindowToken</code>（WindowToken.java:63），并执行 <code>openInputChannels</code>（WMS 1907–1913）。</p>
+<p><code>WindowState.openInputChannel()</code>（WindowState.java:2680）里 <code>channel.copyTo(outInputChannel)</code>，把通道客户端那一端写进 addWindow 的 out 参数，随 Binder 回复回到客户端。</p>
+<p>之后 <code>performTraversals</code> 调 <code>relayoutWindow</code>（ViewRootImpl.java:4241），服务侧 <code>relayoutWindow</code>（WMS 2548）先比对 <code>win.mRelayoutSeq</code> 与入参 <code>seq</code>（2584–2587），通过后走 <code>createSurfaceControl</code>（2796，定义 3058）与 <code>win.setClientSurface(outSurfaceControl)</code>（2767–2768），把 <code>SurfaceControl</code> 回传。客户端 <code>ViewRootImpl.mSurfaceControl</code>（902）在此之后持有它。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>AND-P1-202：讲客户端 <code>WindowManagerImpl.addView</code> 与 Token 取得。本篇从 <code>addToDisplayAsUser</code> 进 WMS 讲起，客户端入口不重复。</li><li>AND-P2-201：本篇依赖的前置篇，服务侧大图与系统服务启动顺序。</li><li>P6：BufferQueue 与合成归该卷，本篇只到 <code>SurfaceControl</code> 回传为止。</li><li>P6-302：窗口动画归该卷，本篇不涉及动画曲线与转场。</li><li>AND-P2-203：横切 PMS/InputManager 等其余系统服务的启动，本篇只借 SystemServer 的编排次序做依赖论证。</li><li>层级排序与焦点窗口属于 WMS 内部机制，本篇不展开，只到 Surface 分配为止。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>WMS 入口与权限</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td><code>addWindow</code>、<code>checkAddPermission</code>、<code>openInputChannels</code>、<code>relayoutWindow</code>、<code>createSurfaceControl</code></td><td>服务侧主流程所在</td></tr><tr><td>客户端 addView</td><td><code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code></td><td><code>addView</code>、relayout 结果标志常量</td><td>创建 <code>ViewRootImpl</code>、承接回传标志</td></tr><tr><td>客户端会话与 Surface 持有</td><td><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td><code>setView</code>、<code>addToDisplayAsUser</code>、<code>mSurfaceControl</code>、<code>performTraversals</code></td><td>跨进程入口与 Surface 落地</td></tr><tr><td>服务侧令牌</td><td><code>frameworks/base/services/core/java/com/android/server/wm/WindowToken.java</code></td><td><code>WindowToken</code>、构造</td><td>窗口在服务侧的持有者</td></tr><tr><td>窗口类型</td><td><code>frameworks/base/core/java/android/view/WindowManager.java</code></td><td><code>LayoutParams</code> 类型区间常量</td><td>权限判定与层级归属依据</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash"># 1) 确认服务端第一关是权限检查
+grep -n &quot;checkAddPermission&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>addWindow</code> 附近出现 <code>mPolicy.checkAddPermission(...)</code>，对应事实 2 的 1681。</p>
+<pre><code class="lang-bash"># 2) 确认窗口类型区间常量
+grep -n &quot;FIRST_APPLICATION_WINDOW\|LAST_APPLICATION_WINDOW\|FIRST_SUB_WINDOW\|LAST_SUB_WINDOW&quot; \
+  frameworks/base/core/java/android/view/WindowManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：区间上下界常量各一行，对应事实 3。</p>
+<pre><code class="lang-bash"># 3) 确认服务侧令牌定义与继承
+sed -n '63p;172p;178p' frameworks/base/services/core/java/com/android/server/wm/WindowToken.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：类声明 <code>extends WindowContainer&lt;WindowState&gt;</code>，以及两处构造行，对应事实 4。</p>
+<pre><code class="lang-bash"># 4) 确认输入通道在服务侧创建并回传
+grep -n &quot;openInputChannels\|copyTo&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java \
+  frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>openInputChannels</code> 调用点与 <code>copyTo</code> 调用点各一行，对应事实 5。</p>
+<pre><code class="lang-bash"># 5) 确认 SurfaceControl 在 relayout 阶段回传
+grep -n &quot;setClientSurface\|createSurfaceControl&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>setClientSurface</code> 调用点、<code>createSurfaceControl</code> 调用点与私有方法定义，对应事实 6。</p>
+<pre><code class="lang-bash"># 6) 确认乱序防护比较 relayout seq
+grep -n &quot;mRelayoutSeq&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：与入参 <code>seq</code> 比较的分支，对应事实 7。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li><strong>误区：窗口一定是在 `addWindow` 时拿到 Surface。</strong> 纠正：<code>addWindow</code> 阶段建的是 Token 与 InputChannel，<code>SurfaceControl</code> 在 <code>relayoutWindow</code>（WMS 2548）里才由 <code>createSurfaceControl</code>（2796）创建并回传。</li><li><strong>误区：权限检查失败也会建 Token。</strong> 纠正：<code>checkAddPermission</code>（1681）非 <code>ADD_OKAY</code> 直接返回，窗口根本进不了层级，也就没有后续 Token 与通道。</li><li><strong>误区：relayout 慢一点没关系，晚到结果照样生效。</strong> 纠正：<code>relayoutWindow</code> 会比对 <code>win.mRelayoutSeq</code> 与入参 <code>seq</code>，旧 seq 直接返回 0（2584–2587），迟到的请求被丢弃。</li><li><strong>误区：输入通道由客户端创建后交给服务端。</strong> 纠正：通道对在服务端创建——<code>WindowState.openInputChannel()</code>（WindowState.java:2680）内经 <code>mInputManager.createInputChannel</code>（WindowState.java:2685）建出 <code>InputChannel</code>；客户端 <code>ViewRootImpl</code> 只是先 <code>new InputChannel()</code> 占位（ViewRootImpl.java:1748），再把这个空对象经 <code>addToDisplayAsUser</code> 的 out 参数传下去（1785–1786），由服务侧 <code>channel.copyTo(outInputChannel)</code> 填充。创建方是服务端，流向是服务端→客户端，与误区所述正相反。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：窗口加不进去，先看哪里？ <strong>答</strong>：先确认不是 <code>checkAddPermission</code> 的返回值问题——它是 <code>addWindow</code> 的第一道关卡，非 <code>ADD_OKAY</code> 直接返回。 <strong>追问</strong>：怎么判断是权限还是别的原因？ <strong>答</strong>：若窗口从未出现在层级里，通常是权限；若已进层级但界面空白，转去查 relayout 与 <code>SurfaceControl</code> 是否回传。</p>
+<p><strong>问</strong>：为什么 <code>InputManagerService</code> 要先于 WMS 启动？ <strong>答</strong>：SystemServer 里 <code>InputManagerService</code> 先起（SystemServer.java:1739–1741），<code>WindowManagerService.main(context, inputManager, ...)</code> 后起（1756），WMS 构造需要 inputManager 实参。 <strong>追问</strong>：顺序反了会怎样？ <strong>答</strong>：本篇不断言运行期后果，只说构造签名上 WMS 依赖该实参先就绪。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>窗口根本没进层级</td><td><code>grep -n &quot;checkAddPermission&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td>检查返回值判定分支</td><td>核对窗口类型与权限</td></tr><tr><td>界面空白、无绘制</td><td><code>grep -n &quot;createSurfaceControl|setClientSurface&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td>调用点是否在 relayout 路径上</td><td>检查 relayout 是否被旧 seq 拦截</td></tr><tr><td>输入点不动</td><td><code>grep -n &quot;copyTo&quot; frameworks/base/services/core/java/com/android/server/wm/WindowState.java</code></td><td>通道回传调用点</td><td>确认 addWindow out 参数回传链路</td></tr><tr><td>relayout 结果被丢弃</td><td><code>grep -n &quot;mRelayoutSeq&quot; frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code></td><td>seq 比较分支</td><td>检查客户端 seq 是否过期</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：客户端 <code>setContentView</code>（AND-P1-202）；BufferQueue 与合成（P6）；窗口动画（P6-302）。</li><li><strong>本篇前置依赖</strong>：AND-P2-201、AND-P1-202。</li><li><strong>本篇后继</strong>：P6 合成相关篇、P6-302。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>应用窗口区间 [1, 99]，来源 <code>WindowManager.java</code> 常量。</li><li>子窗口区间 [1000, 1999]，来源 <code>WindowManager.java</code> 常量。</li><li><code>TYPE_APPLICATION_OVERLAY</code> 为 <code>FIRST_SYSTEM_WINDOW + 38</code>，来源 <code>WindowManager.java</code> 常量表达式。</li><li>relayout 结果标志位占 4 位，来源 <code>WindowManagerGlobal.java</code> 常量。</li><li>本篇不给出层级最大窗口数的确切值，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td><code>checkAddPermission</code> 作为 <code>addWindow</code> 首关；<code>relayoutWindow</code> 内创建并回传 <code>SurfaceControl</code>；relayout seq 防护在位</td><td>本篇所述流程即按此核实</td></tr><tr><td>早期版本</td><td><code>WindowToken</code> 与 <code>WindowState</code> 层级关系、relayout 回传字段历经调整</td><td>按符号 grep 重锚，勿硬套行号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>window manager</code>、<code>input</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>WindowManagerService addWindow</code>、<code>relayoutWindow SurfaceControl</code>。</li><li>本仓关键路径：<code>frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java</code>、<code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code>、<code>frameworks/base/services/core/java/com/android/server/wm/WindowToken.java</code>。</li><li>承接篇：AND-P1-202、P6。</li></ul>
+</article>
+<footer>android-100 · AND-P2-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

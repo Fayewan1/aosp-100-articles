@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google Play 服务与 GMS 依赖边界</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Google Play 服务与 GMS 依赖边界</h1>
+<div class="kv"><span>ID：AND-P11-301</span><span>卷：P11</span><span>章：11.3</span><span>难度：3</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/content/Intent.java ；frameworks/base/core/java/android/os/StrictMode.java ；frameworks/base/core/java/com/android/internal/app/BlockedAppStreamingActivity.java ；build/release/gms_mainline/optional/flag_values ；cts/tests</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>GMS 不在 AOSP 树内：<code>packages/apps/</code> 有 <code>Launcher3</code>、<code>Dialer</code>、<code>Camera2</code>、<code>Browser2</code> 等 AOSP 应用，本树未收录 Play 商店与 Play 服务。框架侧对 GMS 的引用是零散且条件性的，<code>com.google.android.gms</code> 命中 19 个文件、多数是测试与文档，<code>com.android.vending</code> 命中 9 个文件、非测试的只有几处判定。这些引用不是结构性依赖，删掉不影响框架构建。真正成体系的边界痕迹不在 <code>build/release/gms_mainline/</code>——那里是通用的 <code>RELEASE_APEX_CONTRIBUTIONS_*</code> 开关集合，本树内不含任何 GMS 语义（<code>gmscore</code> 在该目录下命中 0 个文件）；GMS 相关的同名配置寄存在 <code>vendor/google_shared</code>（本树 <code>vendor/</code> 未收录）。成体系的痕迹在 <code>system/sepolicy/</code>：<code>gmscore_app</code> 域有完整定义（两处 <code>.te</code> 加 <code>seapp_contexts</code> 的四条映射，引用面 102 个文件），且它是随镜像发布的策略。所以「没有 GMS 时缺什么」的答案不是某个接口缺失，而是商业组件整块缺席，AOSP 侧只留下识别点与预留位。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P11-G01</code>（本卷导读），本篇的「构建产物—刷入—更新」主线位置在导读里定过。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/android/content/Intent.java</code></li><li><code>frameworks/base/core/java/android/os/StrictMode.java</code></li><li><code>frameworks/base/core/java/com/android/internal/app/BlockedAppStreamingActivity.java</code></li><li><code>build/release/gms_mainline/optional/flag_values</code></li><li><code>cts/tests</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>常见困惑是：拿掉 GMS 之后，设备起来发现定位、推送、商店全无，于是去框架里找「GMS 接口在哪」。翻遍 <code>frameworks/base</code> 也只找到几处零散字符串，既没有统一的服务接口，也没有开关。另一类困惑来自构建侧：<code>build/release/gms_mainline/</code> 明明有目录，是不是意味着 AOSP 会构建 GMS？这两类困惑指向同一个问题：边界画在哪一层。本篇只回答边界，不回答 GMS 内部如何实现。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：AOSP（开源基线树）、GMS（未随 AOSP 发布的商业组件，本树未收录）、框架侧识别点（对包名的字符串级判定，条件性生效）、发布配置预留位（<code>flag_values</code> 下的 flag 条目，用于 GMS mainline APEX 贡献）。关系是：AOSP 只在两处「伸手」——代码里认包名、配置里留 flag 位；GMS 本体在树外，通过包名被认出来，通过 APEX 贡献被并入发布。</p>
+<p>图 1：AOSP 树内与树外的边界</p>
+<pre><code>  AOSP 树（可核）                树外（本树未收录）
+  ------------------            ------------------
+  frameworks/base  ── 认包名 ──▶  GMS 应用 / Play 服务
+  system/sepolicy   ── 划域 ──▶ GMS 应用的 SELinux 域（gmscore_app）
+  cts/tests         ── 定义兼容 ─▶ GMS 许可前提</code></pre>
+<p>三列之内，箭头方向即依赖方向：树内不反向依赖树外，只做识别与预留。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>边界可以拆成三条可核证据。</p>
+<p>第一条是「应用层完全缺席」。本树 <code>packages/apps/</code> 下有 <code>Launcher3</code>、<code>Dialer</code>、<code>Camera2</code>、<code>Browser2</code> 等 AOSP 应用，没有 Play 商店、没有 Play 服务；manifest 里也没有任何 GMS 项目。这是最干脆的一层边界：不是接口被替换，而是整块代码不在。</p>
+<p>第二条是「框架侧只有识别点」。在 <code>frameworks/base</code> 的 HEAD 上 <code>git grep com.google.android.gms</code>，共 19 个文件，绝大多数是测试与文档。<code>Intent.java</code> 第 6198 行是注释里的举例（attribution tag 可以是 <code>location_provider</code>、<code>com.google.android.gms.*</code> 之类），另有 <code>AppOps.md</code>、<code>location/java/android/location/package.html</code>、<code>cmds/incident_helper/src/parsers/CpuInfoParser.cpp</code>、<code>core/tests/coretests/.../PackageInfoParcelSizeTest.java</code> 等。</p>
+<p><code>git grep com.android.vending</code> 共 9 个文件，非测试的几处才是真正的判定点。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>com.google.android.gms</code></td><td>GMS 包名前缀，仅作注释/文档举例与测试数据</td><td><code>Intent.java</code> :6198 等，共 19 文件</td></tr><tr><td><code>com.android.vending</code></td><td>Play 商店包名，被框架在若干分支中按名判定</td><td>共 9 文件</td></tr><tr><td><code>BLOCKED_COMPONENT_PLAYSTORE</code></td><td>应用流式播放拦截使用的商店组件名常量</td><td><code>BlockedAppStreamingActivity.java</code> :39</td></tr><tr><td><code>RELEASE_APEX_CONTRIBUTIONS_*</code></td><td>发布配置中为 APEX 贡献预留的 flag 文件名前缀</td><td><code>build/release/gms_mainline/</code></td></tr></tbody></table>
+<p>第三条是「发布配置留位」。<code>build/release/gms_mainline/</code> 下有 <code>optional</code>、<code>required</code>、<code>rkpd</code>、<code>uwb</code> 四个子目录，各有 <code>flag_values/&lt;release&gt;/RELEASE_APEX_CONTRIBUTIONS_*.textproto</code>，例如 <code>RELEASE_APEX_CONTRIBUTIONS_BLUETOOTH</code>、<code>_NFC</code>、<code>_UWB</code>、<code>_CRASHRECOVERY</code>、<code>_PROFILING</code>、<code>_UPROBESTATS</code>、<code>_REMOTEKEYPROVISIONING</code>。但发布参数位不是最成体系的那一处：<code>system/sepolicy/</code> 里有一套完整的 <code>gmscore_app</code> 域——<code>public/gmscore_app.te</code> :5 声明 <code>type gmscore_app, domain;</code>，<code>private/gmscore_app.te</code> :5-7 调 <code>app_domain(gmscore_app)</code>，<code>private/seapp_contexts</code> :205-208 把 <code>com.google.android.gms</code>、<code>com.google.android.gms.*</code>、<code>com.google.android.gms:*</code> 与 <code>com.google.android.gsf</code> 四条映射进该域，<code>apex/com.google.android.gmssystem-file_contexts</code> 另有一份；<code>system/sepolicy/</code> 内引用 <code>gmscore</code> 的文件共 102 个。这是策略层为 GMS 预留的位置，与代码里的字符串判定不同——它真的编进随镜像发布的策略。回到发布参数位：这是 AOSP 侧成体系地为 APEX 贡献预留的位置，不是代码钩子，是发布参数位——而且不止一棵树，<code>build/release/gms_mainline_go/</code> 与它平级同构（同为 <code>optional</code>/<code>required</code>/<code>rkpd</code>/<code>uwb</code> 四个子目录，面向 Go 设备）。这些 flag 有具体取值，形如 <code>&lt;module&gt;.google.contributions.prebuilt</code>（如 <code>rkpd.go.google.contributions.prebuilt</code>），是 Mainline APEX 是否采用 Google 预构建贡献的开关；覆盖对象既包括树内开源的 Mainline 模块（<code>art</code>、<code>packages/modules/Wifi</code>、<code>system/timezone</code> 等），也包括 Google-only 组件，所以不能整体归为「为 GMS 商业组件预留」。同名 flag 的声明另在 <code>build/release/flag_declarations/</code>。</p>
+<p>把三条并排看，框架侧对 GMS/vending 的引用形状是零散的、条件性的——一个注释举例（<code>Intent.java</code> :6198）、一个 StrictMode 非随包应用判定（<code>StrictMode.java</code> :1566）、一个拦截组件名（<code>BlockedAppStreamingActivity.java</code> :39）、两个按包名的分支判定（<code>core/proto/android/service/package.proto</code> :189 的注释口径、<code>packages/PrintSpooler/src/com/android/printspooler/ui/AddPrinterActivity.java</code> :101 的 <code>PKG_NAME_VENDING</code>）。不是结构性依赖。删掉这些引用不影响框架构建。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 <code>StrictMode.java</code> 的 <code>isBundledSystemApp()</code>（:1560）为例走一遍。:1566 的 <code>ai.packageName.equals(&quot;com.android.vending&quot;)</code> 与紧随的 <code>com.android.chrome</code> 分支返回 false——:1564 的注释把这类应用称作「住在错误命名空间的非随包应用」：它们是系统应用，但不随 OS 发布，因此不启用会阻塞 OS 发布流程的那类 StrictMode 检查。形状要点有三：一是字符串字面量嵌在判定里，没有抽象出接口；二是判定只在特定分支上被求值，包未安装时该分支自然不成立；三是判定失败没有回退路径，代码继续走通用逻辑，不需要「GMS 缺失」的错误处理。</p>
+<p>这正是整条边界的典型形态：树内代码认得这个名字，但不依赖它存在。设备上没有 Play 商店时，这一步只是判定为否，框架其他部分照常工作。同理，<code>BlockedAppStreamingActivity.java</code> :39 的 <code>BLOCKED_COMPONENT_PLAYSTORE = &quot;com.android.vending&quot;</code> 是一个用于拦截应用流式播放的组件名常量，它描述的是「如果这个组件出现要拦」，而不是「必须有这个组件」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>与 <code>AND-P9-301</code>（签名与密钥体系）的分工：那篇讲 GMS 的 APK 签名 v2/v3/v4、密钥轮转与 APEX 信任链，是「GMS 凭什么被信任」；本篇讲「AOSP 在哪里碰到 GMS」，是位置问题，不展开签名机制。与 <code>AND-P11-G01</code> 的关系是导读与展开。本卷后续涉及构建入口与产物组织的篇目承接本篇的 <code>flag_values</code> 结构，涉及更新链的篇目承接 APEX 贡献如何进入发布。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>注释级举例</td><td><code>frameworks/base/core/java/android/content/Intent.java</code></td><td>第 6198 行注释中的 <code>com.google.android.gms.*</code></td><td>说明 gms 命中多为文档性质</td></tr><tr><td>条件判定</td><td><code>frameworks/base/core/java/android/os/StrictMode.java</code></td><td><code>isBundledSystemApp()</code> :1560；:1566 判 <code>com.android.vending</code>（与 <code>com.android.chrome</code> 并列）</td><td>非随包系统应用识别，按包名</td></tr><tr><td>组件名常量</td><td><code>frameworks/base/core/java/com/android/internal/app/BlockedAppStreamingActivity.java</code></td><td>第 39 行 <code>BLOCKED_COMPONENT_PLAYSTORE</code></td><td>拦截应用流式播放用</td></tr><tr><td>发布预留位</td><td><code>build/release/gms_mainline/optional/flag_values</code>（另有平级的 <code>gms_mainline_go/</code>）</td><td><code>RELEASE_APEX_CONTRIBUTIONS_*.textproto</code>，取值形如 <code>&lt;module&gt;.google.contributions.prebuilt</code></td><td>两棵树各四个子目录，各有对应 flag</td></tr><tr><td>兼容性定义</td><td><code>cts/tests</code></td><td>13 个目录之一</td><td>CTS 不含 GMS，是许可前提</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base grep -l &quot;com.google.android.gms&quot; | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 <code>19</code>，对应 §4.2 的 gms 命中文件数。</p>
+<pre><code class="lang-bash">git -C frameworks/base grep -l &quot;com.android.vending&quot; | wc -l</code></pre>
+<p>期望输出 <code>9</code>，对应 §4.2 的 vending 命中文件数。</p>
+<pre><code class="lang-bash">git -C frameworks/base grep -n &quot;com.android.vending&quot; -- core/java/android/os/StrictMode.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在第 1566 行附近看到 <code>equals(&quot;com.android.vending&quot;)</code>，对应 §4.3 的判定点。</p>
+<pre><code class="lang-bash">git -C frameworks/base grep -n &quot;BLOCKED_COMPONENT_PLAYSTORE&quot; -- core/java/com/android/internal/app/BlockedAppStreamingActivity.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在第 39 行看到常量定义。</p>
+<pre><code class="lang-bash">ls build/release/gms_mainline/
+ls build/release/gms_mainline_go/</code></pre>
+<p>期望输出四个子目录 <code>optional</code>、<code>required</code>、<code>rkpd</code>、<code>uwb</code>。</p>
+<pre><code class="lang-bash">find build/release/gms_mainline -name 'RELEASE_APEX_CONTRIBUTIONS_*.textproto' | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出若干 <code>RELEASE_APEX_CONTRIBUTIONS_*</code> 文件，对应 §4.2 的预留位。</p>
+<pre><code class="lang-bash">find cts -mindepth 1 -maxdepth 1 -type d | wc -l</code></pre>
+<p>期望输出 <code>13</code>，对应 §4.2 的 CTS 目录数口径（<code>find</code> 口径，含 <code>.prebuilt_info</code>）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：既然 `build/release/gms_mainline/` 存在，AOSP 就会构建 GMS。</strong> 错。四个子目录各由 <code>Android.bp</code>、<code>release_configs/&lt;release&gt;.textproto</code>、<code>release_config_map.textproto</code> 与 <code>flag_values/</code> 组成，是 release config 贡献与 flag 位定义，不含 GMS 源码。AOSP 侧提供的是「位置」，填内容的是树外流程。</p>
+<p><strong>误区二：框架里 grep 不到 GMS 接口，说明 AOSP 没有考虑 GMS。</strong> 错。正好相反：19 个 gms 命中加 9 个 vending 命中说明 AOSP 在若干具体场景认得出这些包名，只是不依赖它们存在。看起来对其实是错的正是这一条——「无接口」被误读为「无感知」。</p>
+<p><strong>误区三：删掉框架里的 vending 判定会导致构建失败。</strong> 错。这些是条件性字符串判定，不是结构性依赖，删掉这些引用不影响框架构建，只是改变对应分支的行为。</p>
+<p><strong>误区四：CTS 通过等于 GMS 可用。</strong> 错。CTS 是 AOSP 侧对兼容性的可核定义，不含 GMS；GMS 许可条件以 CTS/VTS 通过为前提，前提不是等价物。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：设备上没装 Play 服务，框架会不会报错或降级？<strong>答</strong>：按本树看，框架对这些包名的引用是条件判定，包未安装时判定为否，走通用分支，没有专门的降级路径。<strong>追问</strong>：那功能上缺什么？<strong>答</strong>：缺的是 GMS 本体提供的服务整块，AOSP 侧不提供替代实现；具体缺哪些能力属于树外组件的范围，本篇不断言。</p>
+<p><strong>问</strong>：<code>RELEASE_APEX_CONTRIBUTIONS_*</code> 这些 flag 位和构建产物的体积有关吗？<strong>答</strong>：本篇只核到它们是发布配置中的 flag 文件名前缀，与产物体积的量化关系暂无实测，列为待补。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑框架里 GMS 引用比预期多</td><td><code>git -C frameworks/base grep -l &quot;com.google.android.gms&quot; | wc -l</code></td><td>计数是否为 19</td><td>多出则逐文件确认是否为测试或文档</td></tr><tr><td>定位某个 vending 判定的位置</td><td><code>git -C frameworks/base grep -rn &quot;com.android.vending&quot;</code></td><td>非测试文件列表</td><td>按文件进入 §4.2 表格对账</td></tr><tr><td>确认发布预留位是否齐全</td><td><code>find build/release/gms_mainline -name '*.textproto'</code></td><td>前缀是否为 <code>RELEASE_APEX_CONTRIBUTIONS_</code></td><td>缺则核对 release 名层级</td></tr><tr><td>确认 CTS 目录规模</td><td><code>find cts -mindepth 1 -maxdepth 1 -type d | wc -l</code></td><td>是否 13 个目录</td><td>差异时核对树版本</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：GMS 签名与 APEX 信任链见 <code>AND-P9-301</code>；分区与镜像组织见本卷动态分区相关篇目。</li><li><strong>本篇前置依赖</strong>：<code>AND-P11-G01</code>。</li><li><strong>本篇后继</strong>：本卷涉及发布配置与更新链的篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>gms 命中文件数 19（口径：2026-10-23 于 <code>frameworks/base</code> HEAD 静态 <code>git grep</code>）。</li><li>vending 命中文件数 9（同上口径）。</li><li><code>gms_mainline</code> 与 <code>gms_mainline_go</code> 各 4 个子目录（<code>optional</code>、<code>required</code>、<code>rkpd</code>、<code>uwb</code>，源码常量）；<code>gms_mainline</code> 内 <code>gmscore</code> 命中 0 个文件。</li><li><code>cts/</code> 下 13 个目录（<code>find</code> 口径，含 <code>.prebuilt_info</code>；静态计数）。</li><li>GMS 本体规模、APEX 贡献实际体积：暂无实测，列为待补；本树未构建验证。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>历史版本</td><td><code>build/release/gms_mainline/</code> 的目录构成与 flag 文件名清单未在本树核对</td><td>跨版本引用该结构时需重新核目录名与文件名</td></tr><tr><td><code>android17-release</code>（本树）</td><td><code>gms_mainline</code> 与同构的 <code>gms_mainline_go</code> 各四个子目录，各含 <code>flag_values/&lt;release&gt;/RELEASE_APEX_CONTRIBUTIONS_*.textproto</code>；gms 19 文件、vending 9 文件</td><td>本篇全部计数与结构以本树为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>gms</code>、<code>apex</code>、<code>cts</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>gms_mainline</code>、<code>RELEASE_APEX_CONTRIBUTIONS</code>。</li><li>本仓关键路径：<code>build/release/gms_mainline/</code>、<code>frameworks/base/core/java/android/os/StrictMode.java</code>、<code>cts/</code>。</li><li>承接篇：<code>AND-P9-301</code>、<code>AND-P11-G01</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

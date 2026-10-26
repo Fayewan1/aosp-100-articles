@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>权限校验框架：checkPermission 的所有路径</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>权限校验框架：checkPermission 的所有路径</h1>
+<div class="kv"><span>ID：AND-P2-302</span><span>卷：P2</span><span>章：2.3</span><span>难度：3</span><span>核验：2026-10-15</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java ；frameworks/base/core/java/android/app/ActivityManager.java ；frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java ；frameworks/base/services/core/java/com/android/server/am/ActiveServices.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一次 <code>checkPermission</code> 从不直接等于一次权限查询。它在 uid 级短路、<code>pid == MY_PID</code> 直通、<code>deniedPermissions</code> 缓存、<code>exported</code> 与 <code>owningUid</code> 比较这些闸口上层层收敛，只有漏过所有闸口才落到 <code>PermissionManagerService.checkUidPermission</code>。判定结果只有两个取值：<code>PERMISSION_GRANTED = 0</code>、<code>PERMISSION_DENIED = -1</code>。系统服务内部预检走 <code>AMS.checkPermission</code>，服务端自保走 <code>checkCallingPermission</code>/<code>enforceCallingPermission</code>，组件访问走 <code>checkComponentPermission</code>，客户端自问走 <code>ContextImpl.checkPermission</code>，四条入口最终归到同一条 uid 级判定链。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P2-101。它讲清 Binder 调用如何带上 pid/uid，本篇所有入口都靠这两个值做判定。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></li><li><code>frameworks/base/core/java/android/app/ActivityManager.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ActiveServices.java</code></li><li><code>frameworks/base/core/java/android/app/ContextImpl.java</code></li><li><code>frameworks/base/core/java/android/content/pm/PackageManager.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>应用里抛出一句 <code>SecurityException: Permission Denial: ... requires android.permission.XXX</code>，栈里只看到一个服务方法。你会以为调用方没有这个权限。可当你去 <code>dumpsys package</code> 查，权限明明授予了。</p>
+<p>换个场景：同一个进程先查 <code>checkPermission</code> 返回 0，随后真正调用服务却抛异常。两次结果不同，因为你查的是 <code>pid/uid</code> 组合，服务用的是 Binder 上报的 <code>callingPid/callingUid</code>，中间可能还夹着 <code>pid == MY_PID</code> 的直通分支。</p>
+<p>要把这些现象讲清，得先知道一次检查到底在哪几个位置可能提前返回。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个关键概念：系统服务内部预检入口（<code>AMS.checkPermission</code>）、服务端自保入口（<code>checkCallingPermission</code>/<code>enforceCallingPermission</code>）、组件访问入口（<code>AMS.checkComponentPermission</code>）、客户端自问入口（<code>ContextImpl.checkPermission</code>）。前三个在系统服务进程内，第四个从应用进程发起。系统侧的三条入口最终收敛到 <code>PermissionManagerService.checkUidPermission</code> 的 uid 级判定；客户端自问那条经 <code>permission_checker</code> 服务，落到同一个 uid 级判定上。</p>
+<p>图 1：四条入口向 uid 级判定收敛</p>
+<pre><code>调用方
+  |-- AMS.checkPermission ----------+
+  |-- checkCallingPermission -------+--&gt; 组件/uid 短路级联
+  |-- checkComponentPermission -----+        |
+  |-- ContextImpl.checkPermission --+        v
+                                     PermissionManagerService
+                                       checkUidPermission</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>先看判定的两个取值，来自 <code>PackageManager.java:1520/1526</code>：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>PERMISSION_GRANTED = 0</code></td><td>判定通过</td><td><code>PackageManager.java:1520</code></td></tr><tr><td><code>PERMISSION_DENIED = -1</code></td><td>判定拒绝</td><td><code>PackageManager.java:1526</code></td></tr></tbody></table>
+<p>系统服务内部入口是 <code>ActivityManagerService.checkPermission(String permission, int pid, int uid)</code>（<code>ActivityManagerService.java:6946</code>），它转到 <code>checkPermissionForDevice</code>（6962）。这里第一道闸口：<code>permission == null</code> 直接返回 <code>PERMISSION_DENIED</code>（6964–6966）。</p>
+<p>服务端自保用另一个口子。<code>checkCallingPermission</code>（6976）自己取 <code>Binder.getCallingPid()/getCallingUid()</code> 再走上面的路径。<code>enforceCallingPermission</code>（6986）不返码，直接抛 <code>SecurityException</code>，消息形如 <code>&quot;Permission Denial: &lt;func&gt; from pid=…, uid=… requires &lt;permission&gt;&quot;</code>。组件场景用 <code>AMS.checkComponentPermission</code>（6885）：<code>pid == MY_PID</code> 直通（6900，位于 6 参重载 6898 内）；命中 <code>deniedPermissions</code> 缓存直拒（6909–6915）。</p>
+<p>uid 级短路在 <code>ActivityManager.checkComponentPermission</code>（<code>ActivityManager.java:5500</code>）展开，按顺序：</p>
+<table><thead><tr><th>条件</th><th>结果</th><th>行号</th></tr></thead><tbody><tr><td><code>canAccessUnexportedComponents(uid)</code>（appId 为 <code>Process.ROOT_UID</code> 或 <code>Process.SYSTEM_UID</code>）</td><td>直通</td><td>5503</td></tr><tr><td><code>UserHandle.isIsolated(uid)</code></td><td>直拒</td><td>5507</td></tr><tr><td><code>owningUid &gt;= 0 &amp;&amp; UserHandle.isSameApp(uid, owningUid)</code></td><td>直通</td><td>5513</td></tr><tr><td>PCC uid 互转后再判 <code>isSameApp</code>（<code>enablePccFrameworkSupport()</code> 开门）</td><td>直通</td><td>5517–5543</td></tr><tr><td><code>!exported</code></td><td>直拒</td><td>5546</td></tr><tr><td><code>permission == null</code></td><td>直通</td><td>5554</td></tr></tbody></table>
+<p>六条全部漏过才落点：<code>AppGlobals.getPermissionManager().checkUidPermission(uid, permission, deviceId)</code>（5558）→ <code>PermissionManagerService.checkUidPermission</code>（<code>PermissionManagerService.java:247</code>）。这里 <code>permissionName == null</code> 直拒（249–251）；<code>CheckPermissionDelegate</code> 非空时走旁路（257–264）。</p>
+<p>客户端自问走另一条：<code>ContextImpl.checkPermission</code>（<code>ContextImpl.java:2498</code>）→ <code>android.permission.PermissionManager.checkPermission</code>（<code>PermissionManager.java:1889</code>，仅做 ROOT/SYSTEM 直通与本地 cache 短路）→ 跨进程路径经 <code>checkPackageNamePermissionUncached</code>（<code>PermissionManager.java:2002</code>）调 <code>ActivityThread.getPermissionManager().checkPermission(...)</code> → 服务侧 <code>PermissionCheckerService</code>，即 <code>IPermissionChecker.Stub</code>（<code>PermissionManagerService.java:1001</code>）。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设 uid 是普通应用 uid，<code>permission</code> 非 null，组件 <code>exported=true</code>，<code>owningUid &lt; 0</code>，且不在 <code>deniedPermissions</code> 缓存里。路径这样走：</p>
+<p><code>AMS.checkPermission</code>（6946）只做转发 → <code>checkPermissionForDevice</code>（6962）先确认 <code>permission != null</code>（6964–6966，null 直接 <code>PERMISSION_DENIED</code>）→ 进入 <code>checkComponentPermission</code>（6898），在那里确认 caller 的 pid 不是 <code>MY_PID</code>（6900）→ 进入 <code>ActivityManager.checkComponentPermission</code>（5500）。<code>canAccessUnexportedComponents</code> 为假，<code>isIsolated</code> 为假，<code>owningUid &gt;= 0</code> 不成立，<code>exported=true</code> 不触发 5546 直拒，<code>permission != null</code> 不触发 5554 直通。</p>
+<p>走到 5558，调 <code>checkUidPermission</code>（247）。<code>permissionName != null</code>，<code>CheckPermissionDelegate</code> 为空，落到真正的 uid 级判定。返回 0 或 -1，一路原样上抛。任何一个前置闸口命中，都到不了这一行。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P2-203 讲服务怎么起；本篇只讲一次 <code>checkPermission</code> 怎么收敛到 uid 级判定，起服务前的 <code>mAm.checkPermission</code>（<code>ActiveServices.java:9676</code>）只作为组件级旁路点名。</p>
+<p>权限模型（定义、授予、吊销、签名级）归 P9-201，本篇不展开。AppOps 细节本篇只点名，不展开。前置 AND-P2-101 讲 pid/uid 的来源。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>判定取值</td><td><code>frameworks/base/core/java/android/content/pm/PackageManager.java</code></td><td><code>PERMISSION_GRANTED</code>、<code>PERMISSION_DENIED</code></td><td>所有入口的返回码来源</td></tr><tr><td>服务内部入口</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td><code>checkPermission</code>、<code>checkPermissionForDevice</code>、<code>checkCallingPermission</code>、<code>enforceCallingPermission</code>、<code>checkComponentPermission</code></td><td>系统服务主入口与自保入口</td></tr><tr><td>uid 级短路</td><td><code>frameworks/base/core/java/android/app/ActivityManager.java</code></td><td><code>checkComponentPermission</code>、<code>checkUidPermission</code> 落点</td><td>exported/owningUid/隔离 uid 判定</td></tr><tr><td>uid 级判定</td><td><code>frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code></td><td><code>checkUidPermission</code>、<code>CheckPermissionDelegate</code>、<code>PermissionCheckerService</code></td><td>最终判定与旁路</td></tr><tr><td>客户端自问</td><td><code>frameworks/base/core/java/android/app/ContextImpl.java</code></td><td><code>checkPermission</code></td><td>应用进程侧入口</td></tr><tr><td>组件级旁路</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActiveServices.java</code></td><td>起服务前 <code>mAm.checkPermission</code></td><td>服务启动检查点</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望输出前缀 <code>94b4c163b7df</code>，对上锚点。</p>
+<pre><code class="lang-bash">grep -n &quot;PERMISSION_GRANTED\|PERMISSION_DENIED&quot; \
+  frameworks/base/core/java/android/content/pm/PackageManager.java | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 1520 行附近 <code>PERMISSION_GRANTED = 0</code>、1526 行附近 <code>PERMISSION_DENIED = -1</code>，对上事实 1。</p>
+<pre><code class="lang-bash">grep -n &quot;checkPermissionForDevice\|checkCallingPermission\|enforceCallingPermission\|checkComponentPermission&quot; \
+  frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 6946、6962、6976、6986、6885 等行，对上事实 2、3、4。</p>
+<pre><code class="lang-bash">grep -n &quot;checkComponentPermission\|checkUidPermission\|canAccessUnexportedComponents&quot; \
+  frameworks/base/core/java/android/app/ActivityManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 5503、5500、5558 等行，对上事实 5。</p>
+<pre><code class="lang-bash">grep -n &quot;checkUidPermission\|CheckPermissionDelegate&quot; \
+  frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 247 与 258–264 附近，对上事实 6。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`checkPermission` 返回 -1 就一定没被授予权限。</strong> 错在只看落点。<code>permission == null</code> 会在 <code>checkPermissionForDevice</code>（6964–6966）直接返 <code>PERMISSION_DENIED</code>，此时根本没查过权限库。</p>
+<p><strong>误区二：`exported=false` 一定拒绝。</strong> 看起来对，其实要先看短路顺序。<code>canAccessUnexportedComponents</code>、<code>isSameApp</code> 在 5546 之前，<code>pid == MY_PID</code> 又在 <code>AMS.checkComponentPermission</code>（6900）更早生效，这些都会让 <code>!exported</code> 分支走不到。</p>
+<p><strong>误区三：客户端查的结果和服务端一致。</strong> 不一致。<code>ContextImpl.checkPermission</code> 走 <code>PermissionCheckerService</code>（1001），与 uid 级落点是两条路径，<code>CheckPermissionDelegate</code> 只影响后者。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>checkCallingPermission</code> 和 <code>checkPermission</code> 有什么区别？ <strong>答</strong>：前者自己取 <code>Binder.getCallingPid()/getCallingUid()</code>（6976），后者由调用方传入 pid/uid（6946）。 <strong>追问</strong>：那 <code>enforceCallingPermission</code> 呢？ <strong>答</strong>：它复用调用检查但不返码，直接抛 <code>SecurityException</code>（6986）。</p>
+<p><strong>问</strong>：为什么我传的 <code>permission</code> 是 null 却成功？ <strong>答</strong>：<code>ActivityManager.checkComponentPermission</code> 在 5554 对 <code>permission == null</code> 直通。 <strong>追问</strong>：那 <code>AMS.checkPermission</code> 里 null 为什么拒绝？ <strong>答</strong>：那条路径在 6964–6966 先拒绝，入口不同，行为不同。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>抛 <code>Permission Denial: &lt;func&gt; ...</code></td><td><code>grep -n &quot;Permission Denial&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td>消息拼接处</td><td>核对 <code>&lt;func&gt;</code> 与 pid/uid</td></tr><tr><td>查权限返回 0 但调用被拒</td><td><code>grep -n &quot;MY_PID&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td>6900 直通分支</td><td>确认是否同进程调用</td></tr><tr><td>同 uid 组件仍被拒</td><td><code>grep -n &quot;isSameApp|isIsolated&quot; frameworks/base/core/java/android/app/ActivityManager.java</code></td><td>短路顺序</td><td>核对 <code>owningUid</code> 取值</td></tr><tr><td>命中 <code>deniedPermissions</code> 被直拒</td><td><code>grep -n &quot;deniedPermissions&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td>6909–6915 缓存分支</td><td>检查缓存写入来源</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：服务启动与绑定流程 → AND-P2-203。权限定义、授予、吊销、签名级模型 → P9-201。AppOps 细节本篇只点名，不展开。</p>
+<p><strong>本篇前置依赖</strong>：AND-P2-101。</p>
+<p><strong>本篇后继</strong>：AND-P2-203。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>判定取值基数：2 个（<code>PERMISSION_GRANTED</code>、<code>PERMISSION_DENIED</code>），来源源码常量。</li><li><code>checkComponentPermission</code> 短路条件数：6 条（含 PCC uid 互转分支），来源源码（<code>ActivityManager.java:5500–5558</code>）。</li><li><code>AMS.checkPermission</code> 入口方法数：3 个（<code>checkPermission</code>、<code>checkCallingPermission</code>、<code>enforceCallingPermission</code>），来源源码。</li><li>各闸口命中率：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td>实测：<code>checkPermissionForDevice</code> 在 <code>AMS</code> 6946→6962，落点 <code>checkUidPermission</code> 247</td><td>本篇所有行号口径</td></tr><tr><td>更早版本（推断，未附提交出处）</td><td><code>checkPermission</code> 的 <code>deviceId</code> 参数与 <code>CheckPermissionDelegate</code> 未必存在</td><td>老树 grep 可能找不到同名符号</td></tr><tr><td>更晚版本</td><td>暂无实测</td><td>按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>permission enforcement</code>、<code>checkComponentPermission</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>checkUidPermission</code>、<code>CheckPermissionDelegate</code>、<code>checkComponentPermission</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/app/ActivityManager.java</code>、<code>frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code>。</li><li>承接篇：AND-P2-101、AND-P2-203。</li></ul>
+</article>
+<footer>android-100 · AND-P2-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

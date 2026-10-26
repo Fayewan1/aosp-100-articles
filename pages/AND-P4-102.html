@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VINTF：manifest、compatibility matrix 与 framework 校验</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>VINTF：manifest、compatibility matrix 与 framework 校验</h1>
+<div class="kv"><span>ID：AND-P4-102</span><span>卷：P4</span><span>章：4.1</span><span>难度：4</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/libvintf/VintfObject.cpp ；system/libvintf/HalManifest.cpp ；system/libvintf/CompatibilityMatrix.cpp ；system/libvintf/AssembleVintf.cpp ；system/libvintf/check_vintf.cpp ；hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml ；hardware/interfaces/compatibility_matrices/compatibility_matrix.202704.xml ；test/vts-testcase/hal/treble/vintf/DeviceManifestTest.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>VINTF（Vendor Interface）是这套互相声明的总名。manifest 声明「这台设备/这套框架<strong>有什么</strong>」；compatibility matrix（兼容性矩阵，FCM）声明「某个级别<strong>要求什么</strong>」。校验就是拿设备的 target-level 挑出对应 FCM，再用清单与矩阵做双向匹配。四类取数口都挂在 <code>VintfObject</code> 上：设备清单、框架清单、设备矩阵、框架矩阵。设备清单有固定的组装次序与旧路径兜底，框架清单则要聚合多分区并再做一次级别过滤。匹配失败的表现形式是 <code>check_vintf</code> 报缺 HAL、或开机时 vendor 镜像与 system 镜像对不上。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P4-101</code>——先有 HAL 契约的形态（怎么声明、怎么注册），才谈得上契约怎么被校验。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/libvintf/VintfObject.cpp</code></li><li><code>system/libvintf/HalManifest.cpp</code></li><li><code>system/libvintf/CompatibilityMatrix.cpp</code></li><li><code>system/libvintf/AssembleVintf.cpp</code></li><li><code>system/libvintf/check_vintf.cpp</code></li><li><code>hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml</code></li><li><code>hardware/interfaces/compatibility_matrices/compatibility_matrix.202704.xml</code></li><li><code>test/vts-testcase/hal/treble/vintf/DeviceManifestTest.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> 与 <code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>换了一份 vendor 镜像，或者把 system 分区升到一个新版本，开机后 <code>check_vintf</code> 判失败，日志里只说某个 HAL 缺失，或者某个版本区间不被接受。打开 <code>/vendor/etc/vintf/</code> 看到 manifest，再看 <code>hardware/interfaces/compatibility_matrices/</code> 里一堆 <code>compatibility_matrix.*.xml</code>，不知道设备到底该按哪一份对账。</p>
+<p>另一类困惑是方向搞反了：以为框架侧的要求写在设备清单 里，或者以为改 manifest 多加一个 HAL 就能通过。实际是 manifest 与 matrix 分属两侧，各管一件事。本篇把这套关系的语义、加载次序、匹配算法和失败形态讲清。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个对象、两组对账：</p>
+<ul><li><strong>设备清单（device manifest）</strong>：设备侧声明自己提供哪些 HAL、版本区间是多少、target-level 是多少。</li><li><strong>框架清单（framework manifest）</strong>：框架侧声明它提供哪些 HAL，供 vendor 侧取用。</li><li><strong>兼容性矩阵（FCM，compatibility matrix）</strong>：按 <code>level</code> 命名的一族文件，规定该级别下必备的 HAL 与可接受版本区间。</li><li><strong>target-level</strong>：设备清单里的字段，决定这台设备被哪一份 FCM 校验。</li></ul>
+<p>图 1：两端清单与矩阵的对账关系</p>
+<pre><code> device manifest ---&gt; 挑 target-level ---&gt; 对应 FCM
+      |                                      |
+      |  声明提供了什么                        |  要求必须有什么
+      +------------&gt; 匹配 &lt;------------------+
+ framework manifest --过滤--&gt; 与设备级别相符的部分</code></pre>
+<p>框架清单不是原样参与对账：取数后按设备清单 的 target-level 过滤掉级别不相交的 HAL，再进入匹配。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>取数口</strong>。<code>VintfObject</code> 提供四个静态取数口与四个成员版：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>VintfObject::GetDeviceHalManifest</code></td><td>取设备清单</td><td><code>system/libvintf/VintfObject.cpp:124</code></td></tr><tr><td><code>VintfObject::GetFrameworkHalManifest</code></td><td>取框架清单</td><td><code>system/libvintf/VintfObject.cpp:135</code></td></tr><tr><td><code>VintfObject::GetDeviceCompatibilityMatrix</code></td><td>取设备侧矩阵</td><td><code>system/libvintf/VintfObject.cpp:146</code></td></tr><tr><td><code>VintfObject::GetFrameworkCompatibilityMatrix</code></td><td>取框架侧矩阵</td><td><code>system/libvintf/VintfObject.cpp:154</code></td></tr></tbody></table>
+<p>成员版分别在 <code>:128</code>、<code>:139</code>、<code>:150</code>、<code>:158</code>。差别不在「缓存与否」——两者都缓存：静态口先经 <code>GetInstance()</code> 落到全局单例再委托成员版，成员版用 <code>Get()</code> 在实例自己的字段上缓存（<code>:130</code>／<code>:141</code>／<code>:151</code>／<code>:170</code>）。差别是单例与实例。</p>
+<p><strong>设备清单的组装次序</strong>。<code>fetchDeviceHalManifest</code>（<code>VintfObject.cpp:316</code>）按 <code>:308-315</code> 的四级优先组装：① vendor 清单＋vendor 片段＋ODM 清单（可选）＋ODM 片段；② vendor 清单＋vendor 片段；③ ODM 清单（可选）＋ODM 片段；④ <code>/vendor/manifest.xml</code> 兜底（无片段）。vendor 侧先试 <code>/vendor/etc/vintf/manifest_{vendorSku}.xml</code>（<code>vendorSku</code> 取 <code>ro.boot.product.vendor.sku</code>），再试 <code>/vendor/etc/vintf/manifest.xml</code>（注释 <code>:359-363</code>，实现 <code>:364-384</code>）；ODM 侧四级是 <code>/odm/etc/vintf/manifest_{sku}.xml</code> → <code>/odm/etc/vintf/manifest.xml</code> → <code>/odm/etc/manifest_{sku}.xml</code> → <code>/odm/etc/manifest.xml</code>（<code>sku</code> 取 <code>ro.boot.product.hardware.sku</code>，<code>:390-431</code>）。</p>
+<p>两处容易读错。<strong>片段目录不是备选，是必并</strong>：vendor 清单命中后 <code>:325</code> 无条件调 <code>fetchVendorHalFragments</code>，ODM 清单命中后 <code>:346</code> 无条件调 <code>fetchOdmHalFragments</code>，「先命中先返回」只发生在 sku 文件与默认文件之间。<strong>旧路径只在两侧都缺时启用</strong>：<code>:349-356</code> 的分支写明，vendor 与 ODM 都拿不到才退到 <code>/vendor/manifest.xml</code>。</p>
+<p><strong>框架清单聚合</strong>。<code>fetchUnfilteredFrameworkHalManifest</code>（<code>VintfObject.cpp:460</code>）按 <code>:454-459</code> 的次序聚合：<code>/system/etc/vintf/manifest.xml</code> 加 <code>/system/etc/vintf/manifest/*.xml</code> 片段，再并 product 与 system_ext 两个分区的清单与片段（<code>:469-493</code> 的循环）。旧路径 <code>/system/manifest.xml</code> 在 <code>:459</code> 标了 deprecated，但 <code>:501</code> 在 <code>/system/etc/vintf/manifest.xml</code> 缺失时仍以 <code>kSystemLegacyManifest</code>（<code>constants-private.h:64</code>）兜底——是「弃用但保留兜底」，不是「不再读」。这一点与设备侧的 <code>/vendor/manifest.xml</code> 同性质，区别只在优先级靠后。</p>
+<p>图 2：两侧清单的来源与合并方向</p>
+<pre><code>设备侧                              框架侧
+vendor/etc/vintf/manifest_{sku}.xml  system/etc/vintf/manifest.xml
+  |  否则 manifest.xml                 + system/etc/vintf/manifest/*.xml
+  |  + manifest/*.xml（必并）          + product / system_ext 清单与片段
+  |  + odm 清单与片段（可选）
+  v                                   v
+device manifest -- target-level --&gt; 选一份 FCM（按 level 对号）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>按级别过滤</strong>。<code>fetchFrameworkHalManifest</code> 取数后调用 <code>filterHalsByDeviceManifestLevel</code>（调用点在 <code>VintfObject.cpp:513</code>，函数体在 <code>:534</code>）。判定依据是设备清单 的 target-level：框架清单 中 minLevel/maxLevel 与设备级别不相交的 HAL 被剔除，没有标 level 的条目按「无穷旧」处理。所以同一份框架清单，在不同 target-level 的设备上看到的可见 HAL 集合不同。</p>
+<p><strong>合并与冲突判定</strong>。多来源清单并入同一个对象时要判冲突：<code>HalManifest::add(ManifestHal&amp;&amp;, std::string*)</code>（<code>system/libvintf/HalManifest.cpp:219</code>），冲突判定在 <code>shouldAdd</code>（<code>:45</code>）与 <code>addingConflictingMajorVersion</code>（<code>:64</code>）。同一 HAL 同主版本、区间重叠但内容不一致，属于冲突而非合并。</p>
+<p>矩阵侧：<code>CompatibilityMatrix::add</code>（<code>system/libvintf/CompatibilityMatrix.cpp:35</code>）负责并入，<code>fetchAllInformation</code>（<code>:122</code>）负责取数；合并入口在 <code>CompatibilityMatrix::combine</code> 与 <code>combineDeviceMatrices</code>（<code>system/libvintf/AssembleVintf.cpp:745</code>/<code>:706</code>）。</p>
+<p><strong>FCM 实文件</strong>。<code>hardware/interfaces/compatibility_matrices/</code> 下带 <code>level</code> 的矩阵共 6 份，另有 1 份空白模板：</p>
+<table><thead><tr><th>文件</th><th>level</th><th>条目构成（<code>&lt;hal format</code> 计数）</th></tr></thead><tbody><tr><td><code>compatibility_matrix.7.xml</code></td><td><code>7</code></td><td>99 条：<code>format=&quot;hidl&quot;</code> <strong>49</strong> 条、<code>format=&quot;aidl&quot;</code> <strong>50</strong> 条</td></tr><tr><td><code>compatibility_matrix.8.xml</code></td><td><code>8</code></td><td>86 条：<code>format=&quot;hidl&quot;</code> 11 条、<code>format=&quot;aidl&quot;</code> 74 条</td></tr><tr><td><code>compatibility_matrix.202404.xml</code></td><td><code>202404</code></td><td>年度快照，两种格式混存</td></tr><tr><td><code>compatibility_matrix.202504.xml</code></td><td><code>202504</code></td><td>同上</td></tr><tr><td><code>compatibility_matrix.202604.xml</code></td><td><code>202604</code></td><td>同上</td></tr><tr><td><code>compatibility_matrix.202704.xml</code></td><td><code>202704</code></td><td>92 条：<code>format=&quot;hidl&quot;</code> <strong>0</strong> 条、<code>format=&quot;aidl&quot;</code> 91 条（另 1 条带 <code>updatable-via-apex=&quot;true&quot;</code>），出现版本区间 <code>&lt;version&gt;1-4&lt;/version&gt;</code></td></tr></tbody></table>
+<p>表里最该记住的一条：<strong>格式不是按 level 二分的</strong>。level 7 里 AIDL 条目（50）已经多于 HIDL（49），因为低级别设备要兼容存量 HIDL HAL，两种写法都得留；到 202704 才彻底没有 HIDL 条目。所以「老 level 就是 HIDL、新 level 才是 AIDL」这个判断看起来顺，实际是反的。同目录的 <code>compatibility_matrix.empty.xml</code> 与 <code>manifest.empty.xml</code> 是空白模板，没有 <code>level</code> 属性；文件编号与 <code>level</code> 属性一致，这是两者能对上的依据。</p>
+<p><strong>内核条件</strong>。矩阵 schema 允许写内核条件：<code>&lt;xs:element name=&quot;kernel&quot; ... minOccurs=&quot;0&quot; maxOccurs=&quot;unbounded&quot;/&gt;</code>（<code>system/libvintf/xsd/compatibilityMatrix/compatibility_matrix.xsd:25</code>），并有 <code>kernel-sepolicy-version</code>（<code>:87</code>）。解析出的条件序列由 <code>MatrixKernel::conditions()</code> 暴露（<code>system/libvintf/include/vintf/MatrixKernel.h:57</code>）。本树框架 FCM 两份实文件里没有 <code>&lt;kernel&gt;</code> 条目，内核侧的兼容面不属于本篇，见 <code>AND-P5-101</code>。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>设某设备清单为 <code>device/generic/goldfish/manifest.xml</code>，内容只有一行根元素 <code>&lt;manifest version=&quot;1.0&quot; type=&quot;device&quot; target-level=&quot;8&quot;&gt;</code>。target-level 就是设备声明的 FCM 级别。</p>
+<p>对账流程：</p>
+<ol><li><code>GetDeviceHalManifest</code> 命中上面这份，得 target-level 8。</li><li>框架清单经 <code>filterHalsByDeviceManifestLevel</code>，把 minLevel/maxLevel 与 8 不相交的 HAL 去掉。</li><li>级别 8 对应 <code>compatibility_matrix.8.xml</code>，作为要求面。</li><li>清单与矩阵逐 HAL 比对：矩阵要求的存在于清单、版本区间落在矩阵允许范围内，即通过。</li><li>不通过时，<code>check_vintf --check-compat</code>（<code>system/libvintf/check_vintf.cpp:201</code>）输出缺 HAL 提示。</li></ol>
+<p>图 3：一次校验的判定链</p>
+<pre><code>device manifest（target-level=8）
+   |
+   +--&gt; 过滤框架清单（minLevel/maxLevel 与 8 相交才保留）
+   |
+   +--&gt; 按 8 选 FCM：compatibility_matrix.8.xml
+   |
+   +--&gt; 逐 HAL / 接口 / 实例比对
+          |--&gt; 全部命中：判定通过
+          +--&gt; 有缺项：check_vintf --check-compat 报缺，给两条出路</code></pre>
+<p>缺 HAL 的提示文本在 <code>gCheckMissingHalsSuggestion</code>（<code>system/libvintf/check_vintf.cpp:387</code>），给两条出路：新包加入最新 FCM，或 types-only 包加入 <code>libvintf_fcm_exclude</code> 豁免表（目录在 <code>hardware/interfaces/compatibility_matrices/exclude/</code>）。注意「最新 FCM」不是「当前 level 的 FCM」，两者在升版本场景下不是同一个文件。</p>
+<p>同一份 Goldfish 清单若被手工改成 target-level 7，第 2 步过滤结果会变，第 3 步换成 <code>compatibility_matrix.7.xml</code>，要求面从「86 条、11 HIDL＋74 AIDL」变成「99 条、49 HIDL＋50 AIDL」——条目集合与格式配比同时变。同一套 vendor 镜像在两个 target-level 下的判定结论可以完全不同，变的不是「用哪种写法」，而是「要求哪些条目、允许哪些版本」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P4-101</code> 讲 HAL 契约怎么写、怎么注册——manifest 里一条 <code>&lt;hal&gt;</code> 的字段语义归它。本篇讲这条 <code>&lt;hal&gt;</code> 被谁、按什么规则校验。</p>
+<p>内核配置与 GKI 的兼容面归 <code>AND-P5-101</code>；矩阵 schema 里的 <code>&lt;kernel&gt;</code> 条件属于两侧的接缝，本篇只说明它存在于 schema，不展开内核侧。</p>
+<p>构建期 <code>assemble_vintf</code> 只讲调用面（§5 表内的 <code>AssembleVintf.cpp</code>）；构建系统怎么生成产物不在本篇。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>四类取数与搜索次序</td><td><code>system/libvintf/VintfObject.cpp</code></td><td><code>GetDeviceHalManifest</code>、<code>GetFrameworkHalManifest</code>、<code>filterHalsByDeviceManifestLevel</code></td><td>清单取数、聚合并按级别过滤</td></tr><tr><td>清单合并与冲突</td><td><code>system/libvintf/HalManifest.cpp</code></td><td><code>add</code>、<code>shouldAdd</code>、<code>addingConflictingMajorVersion</code></td><td>同主版本区间重叠视为冲突</td></tr><tr><td>矩阵并入与取数</td><td><code>system/libvintf/CompatibilityMatrix.cpp</code></td><td><code>add</code>、<code>fetchAllInformation</code></td><td>矩阵侧对应实现</td></tr><tr><td>构建期组装</td><td><code>system/libvintf/AssembleVintf.cpp</code></td><td><code>CompatibilityMatrix::combine</code>、<code>combineDeviceMatrices</code></td><td>只讲调用面</td></tr><tr><td>内置检查工具</td><td><code>system/libvintf/check_vintf.cpp</code></td><td><code>--check-compat</code>、<code>--check-one</code>、<code>gCheckMissingHalsSuggestion</code></td><td>失败提示与豁免出路</td></tr><tr><td>HIDL 级别矩阵</td><td><code>hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml</code></td><td><code>level=&quot;7&quot;</code>、99 条（HIDL 49／AIDL 50）</td><td>低级别设备的存量兼容面</td></tr><tr><td>AIDL 级别矩阵</td><td><code>hardware/interfaces/compatibility_matrices/compatibility_matrix.202704.xml</code></td><td><code>level=&quot;202704&quot;</code>、92 条（AIDL 91＋1 条 <code>updatable-via-apex</code>）</td><td>出现 <code>&lt;version&gt;1-4&lt;/version&gt;</code></td></tr><tr><td>VTS 强制面</td><td><code>test/vts-testcase/hal/treble/vintf/DeviceManifestTest.cpp</code></td><td><code>ShippingFcmVersion</code></td><td>设备清单必须声明出货级别</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/libvintf:df89ad736e14</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;GetDeviceHalManifest\|GetFrameworkHalManifest\|GetDeviceCompatibilityMatrix\|GetFrameworkCompatibilityMatrix&quot; system/libvintf/VintfObject.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到四个取数口，静态版在 124/135/146/154 附近，成员版紧随其后 128/139/150/158 附近。对应 §4.2 取数口表。</p>
+<pre><code class="lang-bash">sed -n '308,320p' system/libvintf/VintfObject.cpp
+sed -n '359,384p' system/libvintf/VintfObject.cpp</code></pre>
+<p>前一段是 <code>fetchDeviceHalManifest</code> 的四级优先注释与入口，后一段是 vendor 侧 sku → manifest.xml 的二级次序。ODM 侧的四级在 <code>:390-431</code>。对应 §4.2 设备清单组装次序。</p>
+<pre><code class="lang-bash">grep -n &quot;filterHalsByDeviceManifestLevel&quot; system/libvintf/VintfObject.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出两处：调用点（513）与被调函数定义（534）。对应 §4.2 按级别过滤。</p>
+<pre><code class="lang-bash">grep -c &quot;&lt;hal format&quot; hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml
+grep -c 'format=&quot;hidl&quot;' hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml
+grep -c 'format=&quot;aidl&quot;' hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml
+grep -c &quot;&lt;hal &quot; hardware/interfaces/compatibility_matrices/compatibility_matrix.202704.xml
+grep -n 'level=' hardware/interfaces/compatibility_matrices/compatibility_matrix.7.xml hardware/interfaces/compatibility_matrices/compatibility_matrix.202704.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>前三行对 <code>matrix.7.xml</code> 应得 99、49、50；第四行对 <code>matrix.202704.xml</code> 应得 92（其中 <code>format=&quot;aidl&quot;</code> 91 条）；第五行期望 <code>level=&quot;7&quot;</code> 与 <code>level=&quot;202704&quot;</code>。这组数字就是「格式不是按 level 二分」的直接证据。对应 §4.2 FCM 实文件表。</p>
+<pre><code class="lang-bash">grep -n &quot;gCheckMissingHalsSuggestion\|check-compat\|check-one&quot; system/libvintf/check_vintf.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>--check-compat</code> 在 201、<code>--check-one</code> 在 202、提示文本在 387。对应 §4.3 缺 HAL 出路。</p>
+<pre><code class="lang-bash">grep -rn &quot;ShippingFcmVersion&quot; test/vts-testcase/hal/treble/vintf/DeviceManifestTest.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>TEST_F(DeviceManifestTest, ShippingFcmVersion)</code>（126 附近）。对应 §9 强制面。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：改设备清单 多加一条 HAL 就能通过校验。</strong> 方向反了。manifest 声明「有什么」，矩阵声明「要什么」。清单里多一条不满足的 HAL，只会在框架清单匹配、冲突判定里引入新问题；缺 HAL 报错的解要么补实现、要么按 <code>gCheckMissingHalsSuggestion</code> 走 FCM 或豁免表。</p>
+<p><strong>误区二：框架清单就是 `/system/etc/vintf/manifest.xml` 一份文件。</strong> 实际是多源聚合：<code>/system</code> 的清单与片段、product 与 system_ext 的清单与片段一起并；合并时按 <code>shouldAdd</code> 判冲突。只看一份文件会漏掉实际生效的条目。</p>
+<p><strong>误区三：设备上所有 FCM 都会参与校验。</strong> 只有与 target-level 对应的那一份是要求面。<code>compatibility_matrix.7.xml</code> 与 <code>compatibility_matrix.202704.xml</code> 同时在树里，不代表同时生效。</p>
+<p><strong>误区四（看起来对其实是错的）：框架清单 里写了某个 HAL，设备就应该能用。</strong> 中间还有 <code>filterHalsByDeviceManifestLevel</code>。框架清单 里 minLevel/maxLevel 与设备 target-level 不相交的条目会被剔除，声明存在不等于对这台设备可见。</p>
+<p><strong>误区五：`check_vintf` 报缺 HAL 说明代码没编译进去。</strong> 也可能只是清单没声明，或声明了但级别不匹配。三种原因输出相似，不能只看一行报错下结论。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：换 vendor 镜像后 system 侧没变，为什么兼容性会挂？ <strong>答</strong>：vendor 镜像带来的设备清单 决定了 target-level，target-level 一变，框架清单的过滤结果与所对账的 FCM 文件同时变。 <strong>追问</strong>：那 system 侧完全无关吗？ <strong>答</strong>：相关。system 侧的框架清单 与 FCM 是要求面和供给面的另一半，两侧任一侧变都可能让匹配失败。</p>
+<p><strong>问</strong>：<code>--check-compat</code> 和 <code>--check-one</code> 有什么区别？ <strong>答</strong>：前者做清单与矩阵的兼容性对账，后者做单文件检查。日常排「缺 HAL」用 <code>--check-compat</code>。 <strong>追问</strong>：两者都会读设备 FCM 吗？ <strong>答</strong>：<code>--check-compat</code> 会按 target-level 取对应 FCM；单文件检查不建立完整对账关系。</p>
+<p><strong>问</strong>：FCM 文件名里的数字就是 <code>level</code> 吗？ <strong>答</strong>：本树实测一致：文件 <code>compatibility_matrix.7.xml</code> 的 <code>level=&quot;7&quot;</code>，<code>compatibility_matrix.202704.xml</code> 的 <code>level=&quot;202704&quot;</code>。 <strong>追问</strong>：能靠文件名推断校验行为吗？ <strong>答</strong>：能对上是哪一份，但对不上校验细节；条目写法（HIDL 还是 AIDL）、版本区间要不要写，必须看文件内容。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>开机报某 HAL 缺失</td><td><code>grep -rn &quot;gCheckMissingHalsSuggestion&quot; system/libvintf/check_vintf.cpp</code></td><td>提示文本给的两条出路</td><td>按出路选：入最新 FCM 或入豁免表</td></tr><tr><td>不知道设备按哪份矩阵校验</td><td><code>grep -n 'target-level' device/generic/goldfish/manifest.xml</code></td><td><code>target-level</code> 取值</td><td>用该值找同名 <code>compatibility_matrix.*.xml</code> 的 <code>level</code></td></tr><tr><td>设备清单实际取了哪一份</td><td><code>sed -n '308,320p' system/libvintf/VintfObject.cpp</code></td><td>四级优先次序与 vendor/ODM 分支</td><td>逐级检查 <code>/vendor/etc/vintf/</code>、<code>/odm/etc/vintf/</code> 下是否存在更高优先级的文件</td></tr><tr><td>框架侧某 HAL 对 device 不可见</td><td><code>grep -n &quot;filterHalsByDeviceManifestLevel&quot; system/libvintf/VintfObject.cpp</code></td><td>过滤调用点与函数体</td><td>核对该 HAL 的 minLevel/maxLevel 与设备 target-level 是否相交</td></tr><tr><td>怀疑清单合并被冲突丢弃</td><td><code>grep -n &quot;shouldAdd|addingConflictingMajorVersion&quot; system/libvintf/HalManifest.cpp</code></td><td>冲突判定分支</td><td>检查多来源同主版本区间是否重叠且内容不一致</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：HAL 契约的写法与注册（<code>AND-P4-101</code>）；内核配置与 GKI 兼容面（<code>AND-P5-101</code>）；构建系统如何生成 VINTF 产物（只讲 <code>AssembleVintf.cpp</code> 调用面）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P4-101</code>。</p>
+<p><strong>本篇后继</strong>：暂无指定后继篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>compatibility_matrix.7.xml</code> 共 99 个 <code>&lt;hal format</code> 条目，<code>format=&quot;hidl&quot;</code> 49、<code>format=&quot;aidl&quot;</code> 50（口径：逐字符串计数，源码实文件）。</li><li><code>compatibility_matrix.202704.xml</code> 共 92 个条目，<code>format=&quot;hidl&quot;</code> 为 0、<code>format=&quot;aidl&quot;</code> 91，另 1 条带 <code>updatable-via-apex=&quot;true&quot;</code>（同口径）。</li><li>设备清单组装为 4 级优先（口径：<code>VintfObject.cpp:308-315</code> 注释与 <code>:316-357</code> 实现），vendor 侧 sku 次序 2 级（<code>:359-384</code>），ODM 侧 4 级（<code>:390-431</code>）。</li><li>框架清单聚合来源为 3 个分区（system、product、system_ext，口径：<code>VintfObject.cpp:454-493</code>，本篇按分区数计，未按文件数计）。</li><li>矩阵 schema 中 <code>&lt;kernel&gt;</code> 的 <code>maxOccurs</code> 为 <code>unbounded</code>（口径：<code>compatibility_matrix.xsd:25</code>）；本树框架 FCM 实文件中 <code>&lt;kernel&gt;</code> 条目数为 0（口径：本篇实测，未逐个列出）。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>旧路径时代</td><td>设备清单可用 <code>/vendor/manifest.xml</code>，框架清单可用 <code>/system/manifest.xml</code></td><td>旧树里只查这两条的脚本，在新树上会因新路径优先而读不到实际生效的条目</td></tr><tr><td>本树（<code>android17-release</code>）</td><td><code>/vendor/manifest.xml</code> 作兜底（<code>VintfObject.cpp:355</code>）；<code>/system/manifest.xml</code> 标 deprecated（<code>:459</code>），但 <code>:501</code> 仍作缺失兜底</td><td>两侧旧路径都还在，只是优先级靠后；只查新路径的脚本不会漏读，只查旧路径的会</td></tr><tr><td>本树（<code>android17-release</code>）</td><td>框架 FCM 实文件 6 份带 level（<code>7</code>／<code>8</code>／<code>202404</code>／<code>202504</code>／<code>202604</code>／<code>202704</code>）＋<code>empty</code> 模板；<code>7</code> 是 49 HIDL＋50 AIDL，<code>202704</code> 是 92 条全 AIDL</td><td>条目格式随 level 演进，但不是二分：低级别下两种格式共存</td></tr><tr><td>本树（<code>android17-release</code>）</td><td>VTS 侧 <code>VintfNoHidlTest, NoHidl</code>（<code>VtsNoHidl.cpp:52</code>）在 <code>apiLevel == U</code> 时放宽为 <code>kMaxNumberOfHidlHalsU = 100</code>（<code>:30</code>），高于 U 压到 0（<code>:78</code>），低于 U 直接跳过</td><td>高 API 级别设备不能靠 HIDL HAL 充数</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>vintf manifest compatibility matrix</code>；source.android.com 站内检索 <code>check vintf</code>。</li><li>Gerrit：android-review.googlesource.com 搜索 <code>libvintf</code>、<code>compatibility_matrix</code>、<code>check_vintf</code>。</li><li>本仓关键路径：<code>system/libvintf/VintfObject.cpp</code>（取数与过滤）、<code>system/libvintf/HalManifest.cpp</code>（合并与冲突）、<code>system/libvintf/check_vintf.cpp</code>（失败提示）。</li><li>承接篇：<code>AND-P4-101</code>（契约形态）、<code>AND-P5-101</code>（内核与 GKI 兼容面）。</li></ul>
+</article>
+<footer>android-100 · AND-P4-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

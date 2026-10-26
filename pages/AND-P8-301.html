@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zygote 的完整启动：预加载、TraceBegin 与 fork 循环</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Zygote 的完整启动：预加载、TraceBegin 与 fork 循环</h1>
+<div class="kv"><span>ID：AND-P8-301</span><span>卷：P8</span><span>章：8.3</span><span>难度：4</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/core/java/com/android/internal/os/Zygote.java ；frameworks/base/core/java/com/android/internal/os/ZygoteServer.java ；frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java ；frameworks/base/core/jni/com_android_internal_os_Zygote.cpp ；frameworks/base/boot/preloaded-classes ；system/core/rootdir/init.rc ；system/core/rootdir/init.zygote64.rc</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Zygote 的启动分三段：<code>main</code> 里做环境准备并打 BOOT_TIME 埋点，<code>preload</code> 里按六段 trace 预加载类、资源、HAL 与图形驱动，最后 fork 出 system_server 并进入命令循环（<code>ZygoteServer.runSelectLoop</code>）接收 App 请求。</p>
+<p>预加载类来自 <code>/system/etc/preloaded-classes</code>，每读一行就开一个 trace，所以开机 trace 里能看到逐个类名。</p>
+<p>fork system_server 的参数是硬编码的：<code>uid</code> 1000、<code>gid</code> 1000、一组 <code>setgroups</code>、一组 capabilities 和 <code>--nice-name=system_server</code>。</p>
+<p><code>forkSystemServer</code> 之前的父进程动作依次是：<code>Zygote.initNativeState</code>（:905，初始化 native 状态：接管 socket FD、初始化安全属性、按需卸载存储、加载性能 profile）、<code>new ZygoteServer</code>（:909）。fork 之后父进程只剩 <code>ZygoteServer.runSelectLoop</code>（:926）一件事。循环里的 fork 分两类：命令到达时 <code>processCommand</code> 里的 specialize fork，以及 USAP 池回填时 <code>fillUsapPool</code> → <code>Zygote.forkUsap</code> 的 USAP fork（<code>ZygoteServer.java:648</code> 与 <code>:341</code>），后者在常规路径下由池计数阈值与延迟计时器驱动；另有一条命令侧的例外——system_server 通过命令 socket 改 API deny list 状态时，<code>ZygoteConnection.stateChangeWithUsapPoolReset</code>（:370，调用点 <code>:416</code>/<code>:452</code>）会在状态切换后重置并再补一次池。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§4.1｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P8-201</code>（init.rc 语法、触发器与服务分类）——zygote 服务由 <code>init.rc</code> 的 <code>on zygote-start</code> 触发，不先理解 init 的服务模型，会看不清 <code>start zygote</code> 到底谁执行。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java</code></li><li><code>frameworks/base/core/jni/com_android_internal_os_Zygote.cpp</code></li><li><code>frameworks/base/boot/preloaded-classes</code></li><li><code>system/core/rootdir/init.rc</code></li><li><code>system/core/rootdir/init.zygote64.rc</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>抓一段开机 boottrace，会看到几百条 trace 的名字是 Java 类名，一条挨一条，中间夹着 <code>BeginPreload</code>、<code>PreloadClasses</code>、<code>PreloadResources</code>。这些 trace 是谁打的？为什么打在每个类上？</p>
+<p>另一个常见困惑：<code>runSelectLoop</code> 明明是个死循环，fork 到底在循环外还是循环里？system_server 是循环前 fork 的，那循环里又 fork 出什么？</p>
+<p>还有一类现象：改了 <code>preloaded-classes</code> 之后，开机时间变了、内存变了，但 zygote 的代码一行没动。</p>
+<p>这三个问题都指向同一段代码：<code>ZygoteInit.main</code> 从第一行到 <code>runSelectLoop</code> 之间做的事。本篇只走这一段，<code>fork</code> 之后 App 进程怎么长起来不在本篇。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个角色：<strong>Zygote 进程</strong>本身（单一 JVM，后续所有 App 进程的母体）、<strong>预加载清单</strong>（一份类名文本文件，决定 fork 之后子进程省去重复劳动）、<strong>`ZygoteServer`</strong>（封装监听 socket 与 select 循环）、<strong>`ZygoteConnection`</strong>（一条命令连接的处理者，真正执行 fork 的地方）。</p>
+<p>图 1：zygote 启动到命令循环的四段</p>
+<pre><code>init.rc: on zygote-start -&gt; start zygote
+        |
+        v
+  ZygoteInit.main :824
+        |
+        +-- 环境准备 / BOOT_TIME 埋点
+        +-- [非 lazy-preload] preload() :128（六段 trace）
+        |   [lazy-preload]    跳过，改由首次 fork 前 lazyPreload()
+        +-- Zygote.initNativeState :905
+        +-- new ZygoteServer :909
+        +-- [startSystemServer 为真] forkSystemServer :912 ---&gt; system_server
+        |
+        v
+  runSelectLoop :926
+        |
+        +-- 命令到达 -&gt; processCommand -&gt; specialize fork（App 进程）
+        +-- USAP 池回填 -&gt; fillUsapPool :312 -&gt; Zygote.forkUsap :341</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>要点在图的最后两行：<code>forkSystemServer</code> 由 :911 的 <code>if (startSystemServer)</code> 门控，在循环之前只调用一次；进入 <code>runSelectLoop</code> 之后，fork 有两条来源——命令驱动的 specialize fork，与池计数／计时器驱动的 USAP fork。预加载那一行也是条件性的，见本节末尾的 lazy-preload 分支。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>main</code> 的前半段是环境准备，顺序不可交换：</p>
+<ol><li><code>ZygoteHooks.startZygoteNoThreadCreation()</code>：声明本进程不再新建线程，为后面的单线程 fork 铺路。</li><li><code>Os.setpgid(0, 0)</code>：把自己设成进程组组长。</li><li>选 boot 计时标签：<code>Process.is64Bit()</code> 为真用 <code>Zygote64Timing</code>，否则 <code>Zygote32Timing</code>；随后 <code>new TimingsTraceLog(bootTimeTag, Trace.TRACE_TAG_DALVIK)</code>。</li></ol>
+<p>这里有个容易忽略的细节：<code>main</code> 到 <code>runSelectLoop</code> 这段启动路径上的 trace 都挂在 <code>TRACE_TAG_DALVIK</code> 下，而不是某个 zygote 专属 tag——<code>new TimingsTraceLog(bootTimeTag, Trace.TRACE_TAG_DALVIK)</code>（:847）指定了 tag，:142/:145/:338/:381/:389 各处 <code>Trace.traceBegin</code> 走的都是这条静态路径。检索 trace 时按 tag 过滤，会一并捞出全部预加载类名。范围要限定：<code>ZygoteInit.java</code> 内另有 <code>zygoteInit()</code> 的 :989 用 <code>Trace.TRACE_TAG_ACTIVITY_MANAGER</code> 打 <code>&quot;ZygoteInit&quot;</code>，那是 fork 之后的子进程初始化路径，不在本篇范围。</p>
+<p>预加载分六段，每段一个 trace 区间（<code>BeginPreload</code> 是 <code>preload</code> 方法内的首段，与其余五段平级；整个预加载的外层区间另由 <code>ZygotePreload</code> :889-895 圈出），集中列在下面：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BeginPreload</code></td><td><code>preload</code> 方法内的首段 trace 区间（与其余五段平级；预加载总区间的起点在 <code>ZygotePreload</code> :889-895 一侧）</td><td><code>ZygoteInit.java</code> <code>preload</code> :130-132</td></tr><tr><td><code>PreloadClasses</code></td><td>从清单逐个加载类</td><td><code>preloadClasses()</code> :291</td></tr><tr><td><code>CacheNonBootClasspathClassLoaders</code></td><td>缓存非 boot classpath 的 ClassLoader</td><td><code>preload</code></td></tr><tr><td><code>PreloadResources</code></td><td>预加载框架资源</td><td><code>preload</code></td></tr><tr><td><code>PreloadAppProcessHALs</code></td><td>预加载 App 进程会用到的 HAL</td><td>:142</td></tr><tr><td><code>PreloadGraphicsDriver</code></td><td>预加载图形驱动</td><td>:145</td></tr></tbody></table>
+<p>这六段之外还有两个次级区间，不属于上述命名段，抓 trace 时容易漏：<code>warmUpJcaProviders()</code>（:245）在 <code>preload</code> 收尾后由 :172 调用，内部在 :247-248 打 <code>&quot;Starting installation of AndroidKeyStoreProvider&quot;</code>、在 :256-257 打 <code>&quot;Starting warm up of JCA providers&quot;</code>，两段都以 <code>TRACE_TAG_DALVIK</code> 打点。它们的位置在 <code>ZygotePreload</code> 外层区间之内、<code>PreloadGraphicsDriver</code> 之后。</p>
+<p><code>preloadClasses()</code> 的实现值得单独看，因为它解释了「trace 里为什么是类名」：</p>
+<ul><li>清单路径写死在 <code>PRELOADED_CLASSES = &quot;/system/etc/preloaded-classes&quot;</code>（:112）。</li><li>用 <code>FileInputStream</code>（:296）逐行读，跳过空行与 <code>#</code> 注释。</li><li>对每一行类名，先 <code>Trace.traceBegin(Trace.TRACE_TAG_DALVIK, line)</code>（:338），再 <code>Class.forName</code> 触发类加载。</li></ul>
+<p>于是每个类的加载耗时都独立可测。清单本身有两份，规模不同：</p>
+<table><thead><tr><th>文件</th><th>行数</th><th>角色</th></tr></thead><tbody><tr><td><code>frameworks/base/boot/preloaded-classes</code></td><td>15205</td><td>boot classpath 口径的清单</td></tr><tr><td><code>frameworks/base/config/preloaded-classes</code></td><td>18807</td><td>另一份清单；本树内未见运行时消费方，构建归属见 <code>AND-P11</code></td></tr></tbody></table>
+<p>类加载完还有两步收尾：<code>PreloadDexCaches</code>（:381）把已加载类的 dex cache 预热，无条件执行；<code>ResetJitCounters</code>（:389）重置 JIT 计数，避免预加载阶段的编译热度污染后续判断，但它包在 <code>if (shouldProfileBootClasspath())</code>（:388）里，而该方法（:281-282）就是 <code>isExperimentEnabled(&quot;profilebootclasspath&quot;)</code>——默认设备上这段不出现，boottrace 里看不到它不代表流程被跳过。</p>
+<p>埋点贯穿全程，<code>main</code> 里有这几处：</p>
+<ul><li><code>FrameworkStatsLog.write(BOOT_TIME_EVENT_ELAPSED_TIME_REPORTED, BOOT_TIME_EVENT_ELAPSED_TIME__EVENT__ZYGOTE_INIT_START, startTime)</code>（:872-874）。</li><li><code>EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_START, SystemClock.uptimeMillis())</code>（:890）。</li><li><code>EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_END, ...)</code>（:893）。</li></ul>
+<p>两个 EventLog 常量定义在同文件 :100/:101，值分别是 3020 与 3030。这是 <code>logcat -b events</code> 里能直接捞到的字符串 <code>boot_progress_preload_start</code> / <code>boot_progress_preload_end</code> 的来源。</p>
+<p>预加载完成后，<code>main</code> 依次往下走：<code>traceBegin(&quot;PostZygoteInitGC&quot;)</code>（:899）包住 <code>gcAndFinalize()</code>，把预加载产生的垃圾收掉；<code>Zygote.initNativeState(isPrimaryZygote)</code>（:905）；<code>new ZygoteServer(isPrimaryZygote)</code>（:909）；然后 <code>forkSystemServer(abiList, zygoteSocketName, zygoteServer)</code>（:912）；最后 <code>zygoteServer.runSelectLoop(abiList)</code>（:926）。</p>
+<p><code>forkSystemServer</code> 是硬编码参数的典型样本（<code>String[] args = {</code> 在 <code>:729</code>，收尾 <code>};</code> 在 <code>:739</code>）：</p>
+<ul><li><code>--setuid=1000</code>、<code>--setgid=1000</code>。</li><li><code>--setgroups=</code> 后跟一长串 gid（<code>:732-733</code>）：1001 到 1010、1018、1021、1023、1024、1032、1065、3001、3002、3003、3005、3006、3007、3009、3010、3011、3012。</li><li><code>--capabilities=</code> 后跟掩码（表达式在 :702-715），由下列常量按位或成：<code>CAP_IPC_LOCK</code>、<code>CAP_KILL</code>、<code>CAP_NET_ADMIN</code>、<code>CAP_NET_BIND_SERVICE</code>、<code>CAP_NET_BROADCAST</code>、<code>CAP_NET_RAW</code>、<code>CAP_SYS_NICE</code>、<code>CAP_SYS_PTRACE</code>、<code>CAP_SYS_TIME</code>、<code>CAP_SYS_TTY_CONFIG</code>、<code>CAP_WAKE_ALARM</code>、<code>CAP_BLOCK_SUSPEND</code>、<code>CAP_MAC_ADMIN</code>。</li><li><code>--nice-name=system_server</code>、<code>--runtime-args</code>、<code>--target-sdk-version=</code>。</li><li>末尾是入口类名 <code>com.android.server.SystemServer</code>。</li></ul>
+<p>这些参数走的是 zygote 自己解析的 argv，不是 shell 命令行，所以 <code>ps</code> 里看到的 system_server 进程名来自 <code>--nice-name</code> 而不是可执行文件名。这一点与 <code>init.zygote64.rc</code> 里 zygote 自己带的 <code>--start-system-server</code> 形成对照：后者是「要不要 fork」的开关，前者是「fork 出来长什么样」。两处写法不是同一个 token：rc 侧写的是带双横线的 <code>--start-system-server</code>，而 <code>ZygoteInit.java:856</code> 的解析匹配的是不带横线的 <code>&quot;start-system-server&quot;</code>。这不是「剥前缀」那么简单——<code>app_main.cpp:266-281</code> 是逐项识别开关（<code>--zygote</code> :266、<code>--start-system-server</code> :269、<code>--nice-name=</code> :273），遇到首个不以 <code>--</code> 开头的参数就在 <code>:275-277</code> 当作类名并 break，其余带横线的参数在 <code>:278-281</code> 直接 <code>--i; break;</code> 不再消费；进入 zygote 模式后（<code>:305</code> 起），它只把识别结果以 <code>String8(&quot;start-system-server&quot;)</code>（:310，无横线）重新加入传给 <code>AndroidRuntime</code> 的参数表。所以 <code>ZygoteInit</code> 看到的是入口层重新组装的参数，字面自然不同，而 <code>--setuid=1000</code>、<code>--setgroups=...</code>、<code>--capabilities=...</code> 这些 fork 参数是 <code>ZygoteInit</code> 自己造的（<code>:729-738</code>），仍带横线。</p>
+<p>Java 侧只负责声明，真正干活在 JNI：</p>
+<table><thead><tr><th>符号</th><th>位置</th></tr></thead><tbody><tr><td><code>nativeForkAndSpecialize</code> 声明</td><td><code>Zygote.java</code> :407</td></tr><tr><td><code>nativeForkSystemServer</code> 声明</td><td><code>Zygote.java</code> :525</td></tr><tr><td><code>com_android_internal_os_Zygote_nativeForkAndSpecialize</code></td><td>cpp :2608</td></tr><tr><td><code>com_android_internal_os_Zygote_nativeForkSystemServer</code></td><td>cpp :2667</td></tr><tr><td><code>SpecializeCommon</code></td><td>cpp :1913</td></tr></tbody></table>
+<p>cpp 文件共 3216 行，native 方法注册表 <code>gMethods[]</code> 在 :3141-3193；两个 fork 入口的注册项分别收在 :3142-3145（<code>nativeForkAndSpecialize</code>）与 :3146-3147（<code>nativeForkSystemServer</code>），整表由 :3211 的 <code>RegisterMethodsOrDie</code> 一次性注册。<code>SpecializeCommon</code> 是两个 fork 入口的公共路径——uid/gid/capabilities 到内核态身份切换的差异集中在那里，而 Java 侧只是把参数拼成字符串数组传下去。</p>
+<p>循环侧的结构在 <code>ZygoteServer.java</code>（共 659 行）：<code>runSelectLoop(String abiList)</code>（:394）用 <code>Os.poll</code>（:486）等多路 FD 就绪——方法名里的 Select 是历史遗留，源码实际用 poll。挂进 poll 的不止命令 socket：USAP 池启用时，:440 把 <code>mUsapPoolEventFD</code> 也挂进 <code>pollFDs</code>，:446-453 再把 <code>usapPipeFDs</code> 里每个管道 FD 逐个挂上。所以「等命令」这个说法不完整，它同时在等池事件与池管道。</p>
+<p>命令侧：命令 socket 可读时调 <code>acceptCommandPeer(String abiList)</code>（:199）拿到一个 <code>ZygoteConnection</code>，交给它的 <code>processCommand</code>（<code>ZygoteConnection.java</code> :120）。子进程处理完走 <code>handleChildProc</code>（:507），连接关闭走 <code>closeSocket</code>（<code>ZygoteConnection.java</code> :485 是方法定义，调用点见 <code>:515</code>）。</p>
+<p>USAP 侧：:624 的 <code>if (usapPoolFDRead)</code> 是池管道的读事件，进来后按两条判据决定补池方式——:627 若 <code>usapPoolCount &lt; mUsapPoolSizeMin</code> 判为 IMMEDIATE（:629，只补到下限），否则 :630 若 <code>mUsapPoolSizeMax - usapPoolCount &gt;= mUsapPoolRefillThreshold</code> 就把 <code>mUsapPoolRefillTriggerTimestamp</code> 记成当前时刻（:632），等延迟窗到点。延迟窗的计时也在这层：:459-482 用 <code>mUsapPoolRefillDelayMs</code> 算出本次 poll 的 <code>pollTimeoutMs</code>，超时（:464-470）或 poll 返回 0（:491-498）都把动作置成 DELAYED。:637-648 是统一出口：动作不为 NONE 时取会话 socket 的裸 FD 列表，:648 调 <code>fillUsapPool(sessionSocketRawFDs, isPriorityRefill)</code>，返回值若不为 null 就 <code>return command</code>（:651）——USAP 子进程正是从这里离开循环、变成 App 进程。</p>
+<p><code>fillUsapPool</code>（:312）的补池量按类型分开算：优先级补 <code>mUsapPoolSizeMin - usapPoolCount</code>（:323），延迟补 <code>mUsapPoolSizeMax - usapPoolCount</code>（:329）；随后 :339-346 的 <code>while (--numUsapsToSpawn &gt;= 0)</code> 逐个子进程调 <code>Zygote.forkUsap(mUsapPoolSocket, sessionSocketRawFDs, isPriorityRefill)</code>（:341）。父进程里 <code>forkUsap</code> 返回 null，循环继续；子进程里返回一个 <code>Runnable</code>，函数提前 <code>return</code> 把它交上去。这段代码就在 <code>runSelectLoop</code> 的循环体之内，不是 <code>processCommand</code>。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>拿一台 64 位设备的开机过程走一遍，只看 zygote 自己的日志：</p>
+<ol><li>init 解析到 <code>on zygote-start</code>（<code>init.rc</code> :1091），执行段内的 <code>start zygote</code>（:1094），拉起 <code>init.zygote64.rc</code> 定义的服务，参数带 <code>--start-system-server</code>（该文件 :1）。</li><li>zygote 进 <code>ZygoteInit.main</code>（:824），打 <code>BOOT_TIME_EVENT_ELAPSED_TIME__EVENT__ZYGOTE_INIT_START</code>。</li><li>打 <code>LOG_BOOT_PROGRESS_PRELOAD_START</code>，值 3020。</li><li>进 <code>preload</code>（:128），<code>PreloadClasses</code> 里逐行读 <code>/system/etc/preloaded-classes</code>，每行一个 trace。</li><li><code>PreloadAppProcessHALs</code>（:142）、<code>PreloadGraphicsDriver</code>（:145）依次跑完。</li><li>打 <code>LOG_BOOT_PROGRESS_PRELOAD_END</code>，值 3030。此刻到步骤 3 的差值就是纯预加载耗时。</li></ol>
+<p>步骤 3 到 6 整段都包在 <code>if (!enableLazyPreload)</code>（:888）里。<code>enableLazyPreload</code> 由 :859 的 <code>--enable-lazy-preload</code> 参数置真，本树 <code>init.zygote64_32.rc:3</code> 对 <code>zygote_secondary</code> 就是带这个参数的（<code>init.rc:1095</code> 会 <code>start zygote_secondary</code>）。在这条模式下，<code>ZygotePreload</code> 区间与 3020/3030 两个事件都不会出现，预加载被推到首次 fork 之前：<code>ZygoteConnection.preload()</code>（:461-462）调 <code>ZygoteInit.lazyPreload()</code>（:178），后者另起一个 tag 为 <code>ZygoteInitTiming_lazy</code> 的 <code>TimingsTraceLog</code>（:182）再跑同一份 <code>preload</code>。所以「3020 到 3030 的差值」这个测法只对主 zygote 有效。</p>
+<ol><li><code>PostZygoteInitGC</code> 区间包住 <code>gcAndFinalize()</code>。</li><li><code>new ZygoteServer</code> 建监听 socket；若 <code>startSystemServer</code> 为真，<code>forkSystemServer</code> 拉出 uid 1000 的 system_server。</li><li>自己进 <code>runSelectLoop</code>。此后 fork 有两条来源：App 启动时 <code>processCommand</code> 里的 specialize fork；USAP 池需要回填时，:648 调 <code>fillUsapPool</code>，:341 的 <code>Zygote.forkUsap</code> 在循环体内直接 fork。前一条由命令驱动；后一条常规由池计数与延迟计时器驱动，但 <code>stateChangeWithUsapPoolReset</code>（<code>ZygoteConnection.java:370</code>）在 API deny list 状态变更后会主动再补一次池，属命令侧例外。</li></ol>
+<p>第 6 步那个差值，是判断「开机慢在预加载还是在 system_server」的第一刀。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P8-201</code> 讲 init 与属性系统，本篇只从 <code>on zygote-start</code> 接住，不再展开 init 的服务模型。</li><li><code>AND-P3-201</code>（ART 类加载与 DEX/OAT：从 ClassLoader 到 AOT 编译）讲类加载，<code>preloadClasses</code> 的 <code>Class.forName</code> 只作为调用点出现在本篇，加载器内部机制在该篇；<code>AND-P2-401</code>（进程模型：Zygote、fork、COW 与进程优先级 adj）提供进程侧背景。</li><li>USAP 与类共享的优化形态归 <code>AND-P8-302</code>；本篇描述的是一次性全量预加载这条基线。</li><li>fork 之后 App 进程如何 specialize、如何跑起 ActivityThread，归 <code>AND-P1-101</code>。</li><li>system_server 内各系统服务的启动顺序，归 <code>AND-P8-401</code>（SystemServer 启动序列与三阶段服务编排）；本篇的交付物只是「把 system_server 进程 fork 出来」。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>启动主流程</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>main</code>、<code>preload</code>、<code>forkSystemServer</code></td><td>1009 行，全篇主线</td></tr><tr><td>fork 声明</td><td><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td><code>nativeForkAndSpecialize</code>、<code>nativeForkSystemServer</code></td><td>1514 行，Java 到 native 的接口</td></tr><tr><td>命令循环</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></td><td><code>runSelectLoop</code>、<code>acceptCommandPeer</code></td><td>659 行</td></tr><tr><td>单连接处理</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java</code></td><td><code>processCommand</code>、<code>handleChildProc</code>、<code>closeSocket</code></td><td>655 行</td></tr><tr><td>native 实现</td><td><code>frameworks/base/core/jni/com_android_internal_os_Zygote.cpp</code></td><td><code>SpecializeCommon</code>、两个 native 入口</td><td>3216 行</td></tr><tr><td>预加载清单（boot 口径）</td><td><code>frameworks/base/boot/preloaded-classes</code></td><td>15205 行类名</td><td><code>PreloadClasses</code> 的数据源</td></tr><tr><td>init 触发</td><td><code>system/core/rootdir/init.rc</code></td><td><code>on zygote-start</code> / <code>start zygote</code></td><td>服务触发点</td></tr><tr><td>zygote 服务定义</td><td><code>system/core/rootdir/init.zygote64.rc</code></td><td><code>--start-system-server</code></td><td>决定是否 fork system_server</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash"># 1. 文件规模对账
+wc -l frameworks/base/core/java/com/android/internal/os/ZygoteInit.java \
+      frameworks/base/core/java/com/android/internal/os/Zygote.java \
+      frameworks/base/core/java/com/android/internal/os/ZygoteServer.java \
+      frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java \
+      frameworks/base/core/jni/com_android_internal_os_Zygote.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：依次为 1009、1514、659、655、3216。</p>
+<pre><code class="lang-bash"># 2. 只看 main 与 preload 的骨架
+grep -n &quot;public static void main\|static void preload(\|forkSystemServer\|runSelectLoop&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：能看到 <code>main(String[] argv)</code> 在 :824、<code>preload</code> 在 :128、<code>forkSystemServer</code> 在 :699、<code>runSelectLoop</code> 在 :926 附近。</p>
+<pre><code class="lang-bash"># 3. 预加载分段 trace 名一次捞全
+grep -n &quot;BeginPreload\|PreloadClasses\|CacheNonBootClasspathClassLoaders\|PreloadResources\|PreloadAppProcessHALs\|PreloadGraphicsDriver&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：六段名称全部出现，其中 <code>PreloadAppProcessHALs</code> 在 :142、<code>PreloadGraphicsDriver</code> 在 :145。</p>
+<pre><code class="lang-bash"># 4. 预加载清单路径与逐类 trace
+grep -n &quot;PRELOADED_CLASSES\|FileInputStream\|PreloadDexCaches\|ResetJitCounters&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：清单常量在 :112，<code>FileInputStream</code> 在 :296，<code>PreloadDexCaches</code> 在 :381，<code>ResetJitCounters</code> 在 :389。</p>
+<pre><code class="lang-bash"># 5. fork system_server 的硬编码参数
+grep -n -- &quot;--setuid=1000\|--setgid=1000\|--nice-name=system_server\|com.android.server.SystemServer&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：命中点在 :726-741 区间内。</p>
+<pre><code class="lang-bash"># 6. capabilities 常量与掩码组装
+grep -n &quot;CAP_IPC_LOCK\|CAP_MAC_ADMIN\|CAP_BLOCK_SUSPEND&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：命中点在 :702-715 区间内（<code>CAP_MAC_ADMIN</code> 在 :715）。</p>
+<pre><code class="lang-bash"># 7. 两侧行数对账
+wc -l frameworks/base/boot/preloaded-classes frameworks/base/config/preloaded-classes</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：15205 与 18807。</p>
+<pre><code class="lang-bash"># 8. init 触发点
+grep -n &quot;zygote-start\|start zygote&quot; system/core/rootdir/init.rc
+grep -n &quot;start-system-server&quot; system/core/rootdir/init.zygote64.rc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：<code>init.rc</code> 的 <code>on zygote-start</code> 在 :1091，段内 <code>start zygote</code> 在 :1094；<code>init.zygote64.rc</code> 第 1 行含 <code>--start-system-server</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：预加载只在启动时跑一次，所以测不到。</strong> 纠正：它是启动时跑的，正常运行期间测不到。要么抓开机 trace，要么看 <code>logcat -b events</code> 里 3020 与 3030 两个事件的时间差。</p>
+<p><strong>误区二：`runSelectLoop` 只等命令，fork 全在 `processCommand` 里。</strong> 纠正：这个说法只覆盖了命令侧。循环里确有 fork，第二条来源是 USAP 池回填——<code>fillUsapPool</code>（<code>ZygoteServer.java:312</code>）在 :339-346 的 while 里调 <code>Zygote.forkUsap</code>（:341），调用点就在 <code>runSelectLoop</code> 的循环体内（:648），触发靠 :624-634 的池计数判定与 :459-498 的延迟计时器，与命令无关。命令侧那条才是 <code>processCommand</code>（<code>ZygoteConnection.java</code> :120）。system_server 那次更早——它在进循环之前就被 <code>forkSystemServer</code>（:912）拉走了。</p>
+<p><strong>误区三（看起来对其实是错的）：system_server 的进程名来自某个可执行文件。</strong> 纠正：它的名字来自传给 fork 的 <code>--nice-name=system_server</code> 参数，入口是 <code>com.android.server.SystemServer</code> 这个类。参数串在 :726-741 里硬编码，没有任何配置文件参与。</p>
+<p><strong>误区四：改了 `preloaded-classes` 就必须重编 zygote。</strong> 纠正：清单是运行时从 <code>/system/etc/preloaded-classes</code> 读的文本文件，zygote 只认路径不认内容。改动的影响体现为开机时间与内存，不体现为代码差异。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么每个类加载要单独打一个 trace，不是整段打一个？</p>
+<p><strong>答</strong>：因为预加载的瓶颈通常集中在少数几个重类上，整段一个 trace 只给总时长，定位不到具体类。逐类 trace 的代价是 trace buffer 压力，但只在开机出现。</p>
+<p><strong>追问</strong>：那怎么从 trace 里快速找出最慢的那几个类？</p>
+<p><strong>答</strong>：按 <code>TRACE_TAG_DALVIK</code> 过滤后对同名区间的持续时间排序，取头部。名字就是清单里的类名原文，不用做映射。</p>
+<p><strong>问</strong>：<code>forkSystemServer</code> 和后续的 <code>runSelectLoop</code> 之间必须这个顺序吗？</p>
+<p><strong>答</strong>：是的。<code>forkSystemServer</code>（:912）之前已经完成 <code>initNativeState</code>（:905）与 <code>new ZygoteServer</code>（:909）；顺序反过来，system_server 就可能在监听 socket 尚未就绪时被拉起来。</p>
+<p><strong>追问</strong>：那如果 <code>--start-system-server</code> 没传呢？</p>
+<p><strong>答</strong>：<code>forkSystemServer</code> 那条路径不会执行，zygote 直接进 <code>runSelectLoop</code>，只作为纯 App 进程母体存在。是否传参由 <code>init.zygote64.rc</code> 决定。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>开机慢，怀疑预加载</td><td><code>adb logcat -b events -s boot_progress_preload_start boot_progress_preload_end</code></td><td>两个事件行的时间戳差</td><td>仅在非 lazy-preload 的 zygote 上成立（主 zygote 一般如此）；<code>zygote_secondary</code> 带 <code>--enable-lazy-preload</code>（<code>init.zygote64_32.rc:3</code>），两个事件不触发，改用 <code>atrace</code> 抓 <code>ZygotePreload</code> 或 <code>ZygoteInitTiming_lazy</code> 区间</td></tr><tr><td>想看逐类加载耗时</td><td><code>adb shell atrace -t 10 -b 32768 dalvik --boot</code></td><td><code>ZygoteInit</code> 下逐个类名区间</td><td>按持续时间排序取头部</td></tr><tr><td>system_server 没起来</td><td><code>adb shell ps -A | grep system_server</code></td><td>有无 uid 1000 的该进程</td><td>无→查 zygote 是否收到 <code>--start-system-server</code></td></tr><tr><td>改了清单但无效果</td><td><code>adb shell head -5 /system/etc/preloaded-classes</code></td><td>文件是否存在、是否为预期版本</td><td>路径不对说明推送目标错</td></tr><tr><td>想知道 fork 到底走哪条 native</td><td><code>grep -n &quot;nativeForkSystemServer|nativeForkAndSpecialize&quot; frameworks/base/core/jni/com_android_internal_os_Zygote.cpp</code></td><td>:2667 与 :2608 两处入口</td><td>两条都汇入 <code>SpecializeCommon</code> :1913</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：</p>
+<ul><li>USAP 与类共享的预加载优化形态 → <code>AND-P8-302</code></li><li>fork 之后 App 进程的 specialize 与 ActivityThread 启动 → <code>AND-P1-101</code></li><li>system_server 内各系统服务的启动编排 → <code>AND-P8-401</code></li><li>init 的服务模型与属性系统细节 → <code>AND-P8-201</code></li></ul>
+<p><strong>本篇前置依赖</strong>：<code>AND-P8-201</code>、<code>AND-P2-401</code></p>
+<p><strong>本篇后继</strong>：<code>AND-P8-302</code>、<code>AND-P8-401</code>、<code>AND-P1-101</code></p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>ZygoteInit.java</code> 1009 行、<code>Zygote.java</code> 1514 行、<code>ZygoteServer.java</code> 659 行、<code>ZygoteConnection.java</code> 655 行、cpp 3216 行（口径：<code>android17-release</code> 于 2026-10-19 实测，<code>wc -l</code>）。</li><li><code>preloaded-classes</code> 两份清单分别为 15205 行与 18807 行（同上口径）。</li><li>两个 <code>LOG_BOOT_PROGRESS_PRELOAD_*</code> 常量值为 3020/3030（源码常量，定义在 :100/:101）。</li><li>system_server 的 <code>--setgroups</code> 串含 26 个 gid（源码常量，:726-741，逐项计数：1001–1010 共 10 个、1018/1021/1023/1024/1032/1065 共 6 个、3001/3002/3003/3005/3006/3007/3009/3010/3011/3012 共 10 个）。</li><li>capabilities 掩码由 13 个 <code>CAP_*</code> 常量组成（源码常量，表达式 :702-715，逐项计数）。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树实测）</td><td><code>preload</code> 分六段 trace（<code>BeginPreload</code> 为方法内首段，外层总区间由 <code>ZygotePreload</code> :889-895 圈出），含 <code>PreloadAppProcessHALs</code>（:142）与 <code>PreloadGraphicsDriver</code>（:145）；<code>forkSystemServer</code> 在 :699，<code>runSelectLoop</code> 在 :926</td><td>本篇全部结论的口径</td></tr><tr><td>更早版本</td><td>预加载分段更少、图形驱动预加载尚无独立区间</td><td>抓老设备的 boottrace 会缺少这两段，不能按本篇的分段对账；具体版本切分点本篇不断言</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>boot flow</code>、<code>preloaded classes</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ZygoteInit preload</code>、<code>forkSystemServer</code>、<code>runSelectLoop</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code>、<code>frameworks/base/boot/preloaded-classes</code>、<code>frameworks/base/core/jni/com_android_internal_os_Zygote.cpp</code>。</li><li>承接篇：<code>AND-P8-201</code>（init 触发）、<code>AND-P8-401</code>（system_server 内部编排）。</li></ul>
+</article>
+<footer>android-100 · AND-P8-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

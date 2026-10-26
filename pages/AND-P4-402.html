@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>其余 HAL：电源、震动、NFC 与门锁</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>其余 HAL：电源、震动、NFC 与门锁</h1>
+<div class="kv"><span>ID：AND-P4-402</span><span>卷：P4</span><span>章：4.4</span><span>难度：2</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl ；hardware/interfaces/vibrator/aidl/android/hardware/vibrator/IVibrator.aidl ；hardware/interfaces/nfc/aidl/android/hardware/nfc/INfc.aidl ；hardware/interfaces/oemlock/aidl/android/hardware/oemlock/IOemLock.aidl</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>电源、震动、NFC、门锁四类小 HAL 都属硬件抽象层（HAL），接口都是 AIDL 包，规模落在 5 个方法（<code>IOemLock</code>）到 30 个（<code>IVibrator</code>）之间，共性是「方法不多、每个参数都带状态语义」。判断一个能力有没有 HAL 接口，先看 <code>hardware/interfaces/&lt;域&gt;/aidl/android/hardware/&lt;域&gt;/</code> 下有没有 <code>interface</code> 声明，再看方法签名里的参数与回调。电源 HAL 的 hint session 面向调度器，震动 HAL 用 <code>Effect</code>＋<code>EffectStrength</code> 描述动作，NFC 的 <code>open</code>/<code>close</code> 成对且 <code>close</code> 要带关闭类型，门锁 HAL 用 <code>getName</code> 区分锁、用 <code>byte[]</code> 承载校验请求有效性的厂商签名。四者的通用契约（版本声明、接口查询、兼容性校验）不属于本篇，归 AND-P4-101。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P4-101。本篇只给四份小 HAL 的接口形状与调用方，契约机制（manifest、接口查询、兼容性校验）在那一篇，不重复。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl</code></li><li><code>hardware/interfaces/vibrator/aidl/android/hardware/vibrator/IVibrator.aidl</code></li><li><code>hardware/interfaces/nfc/aidl/android/hardware/nfc/INfc.aidl</code></li><li><code>hardware/interfaces/oemlock/aidl/android/hardware/oemlock/IOemLock.aidl</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在写一个系统服务，需要「让设备短震一下」或「查设备是否允许 OEM 解锁」。翻 <code>frameworks/base</code> 找到某个 Manager 类，但不确定它底下到底有没有硬件侧接口、换一台机器还灵不灵。再往前一步：升版本后被 vendor 兼容性卡住，报错指向某个 HAL 版本，你分不清这是接口本身演进，还是厂商实现没跟上。这四类小 HAL 的共同问题是「接口窄、语义强」——方法少，但每个参数都带约定，读错一个布尔或漏掉一个回调就整条链路失效。本篇把它们的形状摊开，让你能定位「这件事该找哪个服务」。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：HAL 接口（<code>interface</code> 声明）、调用方 Manager/服务、能力或状态枚举、回调参数。关系是单向的：上层 Manager 绑定 HAL 接口，用枚举参数表达意图，需要异步结果时传回调。</p>
+<p>图 1：四类小 HAL 的调用方向</p>
+<pre><code>上层 Manager / 系统服务
+        |
+        v
+  HAL interface (AIDL)
+        |
+        v
+  vendor 实现（HAL 服务进程）</code></pre>
+<p>四份接口的差异不在调用方向，而在参数承载的语义：电源用 hint 描述负载、震动用枚举描述动作、NFC 用回调会话描述连接、门锁用 <code>byte[]</code> 承载厂商自定义数据。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>通用形状是「方法不多＋状态语义明确」，但四者的量级并不齐：最小的 <code>IOemLock</code> 只有 5 个方法，最大的 <code>IVibrator</code> 有 30 个。下面按接口逐个看。电源 <code>IPower</code>（14 个方法）的核心方法：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>setMode(Mode, boolean)</code></td><td>设置电源模式及是否启用</td><td><code>IPower.aidl:45</code></td></tr><tr><td><code>createHintSession</code></td><td>为线程组创建 hint session</td><td><code>IPower.aidl:105</code></td></tr><tr><td><code>getHintSessionPreferredRate</code></td><td>查询 hint session 首选频率</td><td><code>IPower.aidl:115</code></td></tr><tr><td><code>createHintSessionWithConfig</code></td><td>带配置 bundle 的 hint session</td><td><code>IPower.aidl:131</code></td></tr></tbody></table>
+<p><code>createHintSession</code> 与 <code>createHintSessionWithConfig</code> 成对存在：前者给线程组，后者额外带配置 bundle。hint session 面向调度器，不是让应用直接改频率，而是把负载意图告诉底层。</p>
+<p>震动 <code>IVibrator</code>（30 个方法）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>getCapabilities()</code></td><td>返回能力位</td><td><code>IVibrator.aidl:88</code></td></tr><tr><td><code>off()</code></td><td>关闭震动</td><td><code>IVibrator.aidl:98</code></td></tr><tr><td><code>on(timeoutMs, callback)</code></td><td>按时长开启</td><td><code>IVibrator.aidl:113</code></td></tr><tr><td><code>perform(Effect, EffectStrength, callback)</code></td><td>按效果＋强度执行</td><td><code>IVibrator.aidl:131</code></td></tr></tbody></table>
+<p><code>getCapabilities</code> 的能力位决定调用方能否用回调，注释落在 <code>IVibrator.aidl:105/118</code>。这意味着「能不能拿到异步完成通知」不是查文档问出来的，是读能力位读出来的。</p>
+<p>NFC <code>INfc</code>（11 个方法）：<code>open(INfcClientCallback)</code>（<code>INfc.aidl:41</code>）成功后控制器才接受 NCI 命令；<code>close(in NfcCloseType type)</code>（<code>INfc.aidl:55</code>）要带关闭类型。关闭类型由 <code>NfcCloseType</code> 枚举表达，该枚举文件（<code>NfcCloseType.aidl</code>）与接口同目录。</p>
+<p>门锁 <code>IOemLock</code>（5 个方法）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>getName()</code></td><td>返回锁名称</td><td><code>IOemLock.aidl:40</code></td></tr><tr><td><code>setOemUnlockAllowedByCarrier(boolean, byte[])</code></td><td>运营商维度设置</td><td><code>IOemLock.aidl:72</code></td></tr><tr><td><code>setOemUnlockAllowedByDevice(boolean)</code></td><td>设备维度设置</td><td><code>IOemLock.aidl:80</code></td></tr></tbody></table>
+<p>门锁这条接口跨了两代机制，两处痕迹别混：<code>hardware/interfaces/oemlock/1.0/</code> 里是 HIDL 时代的 <code>IOemLock.hal</code> 与 <code>types.hal</code>，与 <code>aidl/</code> 同级；AIDL 这一代自己的版本推进记在 <code>aidl/aidl_api/android.hardware.oemlock/</code> 下：<code>1/</code> 是 v1 的冻结快照，<code>current/</code> 是当前接口导出的快照，两者都由构建系统生成、不允许手改（文件头就写着 IMMUTABLE）。</p>
+<p>图 2：同一形状下的四种参数语义</p>
+<pre><code>IPower     Mode + 开关          -&gt; 提示负载意图（hint session）
+IVibrator  Effect + Strength    -&gt; 描述动作与强度
+INfc       callback 会话        -&gt; 描述连接的生命周期
+IOemLock   boolean + byte[]     -&gt; 校验请求有效性的厂商签名</code></pre>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>场景：系统服务要实现「短震一下并知道何时结束」。走 <code>IVibrator</code>：先调 <code>getCapabilities()</code>（<code>IVibrator.aidl:88</code>）读能力位，确认是否支持回调；支持则调 <code>on(timeoutMs, callback)</code>（<code>IVibrator.aidl:113</code>），把时长和回调一起传下去，回调返回即震动结束。若上层想要的是「按效果震」而非「按时长震」，改用 <code>perform(Effect, EffectStrength, callback)</code>（<code>IVibrator.aidl:131</code>），由 HAL 把效果映射成具体波形。两条路都不需要上层知道马达型号——这正是小 HAL 的价值。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P4-101 讲通用契约机制：manifest 声明、<code>getService</code>/<code>getStub</code> 查询、兼容性校验，本篇全部跳过。NFC 的协议栈与控制流程在 AND-P7-402，本篇只到 <code>INfc</code> 的接口边界。bootloader 侧的解锁与刷写链路见 AND-P8-101（bootloader、Verified Boot）与 AND-P8-102（启动镜像、fastboot），启动链的信任验证见 AND-P9-102。电源与功耗策略见 AND-P10-301，本篇只到 <code>IPower</code> 的 hint session 形状，不讲策略怎么定。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>电源接口</td><td><code>hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl</code></td><td><code>IPower</code>、<code>setMode</code>、<code>createHintSession</code>、<code>createHintSessionWithConfig</code></td><td>14 个方法，hint 面向调度器</td></tr><tr><td>震动接口</td><td><code>hardware/interfaces/vibrator/aidl/android/hardware/vibrator/IVibrator.aidl</code></td><td><code>IVibrator</code>、<code>getCapabilities</code>、<code>on</code>、<code>perform</code></td><td>30 个方法，能力位决定可用性</td></tr><tr><td>NFC 接口</td><td><code>hardware/interfaces/nfc/aidl/android/hardware/nfc/INfc.aidl</code></td><td><code>INfc</code>、<code>open</code>、<code>close</code></td><td>11 个方法，连接会话式，close 带类型</td></tr><tr><td>门锁接口</td><td><code>hardware/interfaces/oemlock/aidl/android/hardware/oemlock/IOemLock.aidl</code></td><td><code>IOemLock</code>、<code>getName</code>、<code>setOemUnlockAllowedByCarrier</code></td><td>5 个方法，上级目录有 <code>1.0</code> HIDL 历史版本</td></tr></tbody></table>
+<p>四份都在 <code>hardware/interfaces/</code> 的 <code>aidl</code> 子树，命名一致、位置一致，是判断「有没有 HAL 接口」的第一落点。</p>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：hardware/interfaces:0162af698935</p></blockquote>
+<p>验证方式：静态源码分析。在源码树根执行。</p>
+<pre><code class="lang-bash">git -C hardware/interfaces rev-parse HEAD</code></pre>
+<p>期望输出 <code>0162af698935</code> 开头的提交号，对上锚点。</p>
+<pre><code class="lang-bash">grep -n &quot;interface IPower&quot; hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:34</code>，对上电源接口声明。</p>
+<pre><code class="lang-bash">grep -n &quot;createHintSession&quot; hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:105</code> 与 <code>:131</code>，对上两者成对存在的事实。</p>
+<pre><code class="lang-bash">grep -n &quot;perform\|getCapabilities&quot; hardware/interfaces/vibrator/aidl/android/hardware/vibrator/IVibrator.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:88</code> 与 <code>:131</code>，对上震动接口两个关键方法。</p>
+<pre><code class="lang-bash">grep -nE &quot;^\s+void (open|close)\(&quot; hardware/interfaces/nfc/aidl/android/hardware/nfc/INfc.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:41</code>（<code>open</code>）与 <code>:55</code>（<code>close</code>），对上 open/close 成对。不带 <code>^\s+void</code> 锚点直接 grep <code>open\|close</code> 会被注释行淹没，首命中落在 <code>:30</code>。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/oemlock/</code></pre>
+<p>期望输出 <code>1.0</code>、<code>OWNERS</code>、<code>aidl</code> 三项，对上「HIDL 代与 AIDL 代并存」。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/oemlock/aidl/aidl_api/android.hardware.oemlock/</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 <code>1</code>、<code>current</code>，对上 AIDL 侧的两代快照。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li><strong>误区：小 HAL 方法少，所以可以硬编码版本</strong>。纠正：方法少不等于契约松散。门锁这一条在同一棵树里就摆着两代痕迹：上级目录的 <code>1.0/</code> 是 HIDL 的 <code>.hal</code>，<code>aidl/</code> 是 AIDL 版，而 AIDL 版内部还有 <code>aidl_api</code> 的冻结快照。硬编码版本会在换机时直接失败。</li><li><strong>误区：`on` 和 `perform` 只是语法糖二选一</strong>。纠正：<code>on</code> 按毫秒时长，<code>perform</code> 按 <code>Effect</code>＋<code>EffectStrength</code>；后者的效果映射由 HAL 负责，跨设备表现不同。选错会导致马达行为不可预期。</li><li><strong>误区：震动回调总是可用</strong>。纠正：这个判断看起来有理，其实是错的。能否用回调由 <code>getCapabilities()</code> 的能力位决定，注释明确落在 <code>IVibrator.aidl:105/118</code>。不读能力位就传回调，在不支持的实现上会拿不到完成通知。</li><li><strong>误区：`INfc.close` 无参数调用即可</strong>。纠正：<code>close</code> 要带关闭类型（<code>INfc.aidl:55</code>），类型由 <code>NfcCloseType</code> 枚举表达。漏掉类型等于跳过正常关闭会话的路径。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：我要「让设备别降频」，能不能直接调 <code>IPower</code>？ <strong>答</strong>：<code>IPower</code> 暴露的是 <code>setMode(Mode, boolean)</code> 与 hint session 系列，hint session 是告诉调度器的负载提示，不是直接改频率的开关。真正怎么用这些提示是电源与功耗策略，见 AND-P10-301。 <strong>追问</strong>：那 <code>createHintSession</code> 和 <code>createHintSessionWithConfig</code> 我该用哪个？ <strong>答</strong>：前者只给线程组，后者额外带配置 bundle；需要下发配置就用后者，两者成对存在（<code>IPower.aidl:105/131</code>）。</p>
+<p><strong>问</strong>：<code>IOemLock</code> 的 <code>setOemUnlockAllowedByCarrier</code> 带 <code>byte[]</code>，这个字节数组是什么？ <strong>答</strong>：接口注释里写得很直白——<code>@param signature to prove validity of this request or empty if not required</code>（<code>IOemLock.aidl:65</code>），也就是用来校验这次设置请求有效性的厂商签名，不需要时可传空。哪种签名算对、走什么协议，由 vendor 实现决定。要看解锁流程本身怎么走，见 AND-P8-101 与 AND-P8-102；启动链如何验证见 AND-P9-102。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>震动回调不触发</td><td><code>grep -n &quot;getCapabilities&quot; hardware/interfaces/vibrator/aidl/android/hardware/vibrator/IVibrator.aidl</code></td><td>能力位语义注释</td><td>核对实现返回的能力位是否含回调能力</td></tr><tr><td>NFC 打不开</td><td><code>grep -nE &quot;^\s+void (open|close)\(&quot; hardware/interfaces/nfc/aidl/android/hardware/nfc/INfc.aidl</code></td><td>open/close 签名与类型参数</td><td>检查是否漏传关闭类型</td></tr><tr><td>门锁设置被忽略</td><td><code>ls hardware/interfaces/oemlock/</code></td><td><code>aidl/</code> 与 <code>1.0/</code> 是否并存，<code>1.0/</code> 里是不是 <code>.hal</code></td><td>确认调用方与实现版本是否同一代</td></tr><tr><td>电源 hint 无效果</td><td><code>grep -n &quot;createHintSession&quot; hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl</code></td><td>两个创建方法的差异</td><td>确认是否该用带配置的那个</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：电源与功耗策略（含 Doze）归 AND-P10-301；NFC 协议栈与控制流程归 AND-P7-402；bootloader 解锁与刷写链路归 AND-P8-101／AND-P8-102，启动链验证归 AND-P9-102；通用契约机制归 AND-P4-101。</li><li><strong>本篇前置依赖</strong>：AND-P4-101。</li><li><strong>本篇后继</strong>：AND-P7-402、AND-P8-101、AND-P8-102、AND-P9-102、AND-P10-301。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>四类接口方法数：<code>IOemLock</code> 5 个、<code>INfc</code> 11 个、<code>IPower</code> 14 个、<code>IVibrator</code> 30 个（口径：各 <code>.aidl</code> 里以 <code>);</code> 结尾的方法声明逐条清点，本篇统计）。</li><li><code>IOemLock</code> 版本痕迹：HIDL 一代（<code>1.0/</code>，<code>.hal</code>）＋ AIDL 一代（<code>aidl/</code>），AIDL 侧另有 <code>aidl_api</code> 的 <code>1</code>／<code>current</code> 两代快照（来源：目录列举）。</li><li><code>IPower</code> hint session 创建方法：2 个，成对（来源：<code>IPower.aidl:105/131</code>）。</li><li>震动能力位具体位数：暂无实测，列为待补。</li><li>NFC 关闭类型枚举项数：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL 一代（<code>oemlock/1.0/</code>）</td><td>门锁接口以 <code>IOemLock.hal</code>／<code>types.hal</code> 形式存在，与 AIDL 目录同级</td><td>按版本查询时需先分辨是 HIDL 还是 AIDL 实现，两代的查询与注册方式不同</td></tr><tr><td><code>android17-release</code>（本树）</td><td>四类接口均为 AIDL 包，方法数 5／11／14／30；门锁 <code>1.0/</code> 与 <code>aidl/</code> 并存，AIDL 侧 <code>aidl_api</code> 有 <code>1</code>／<code>current</code></td><td>本树实测状态，接口形状如上表</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>aidl hal</code>、<code>power hal</code>、<code>vibrator hal</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>IPower</code>、<code>IVibrator</code>、<code>INfc</code>、<code>IOemLock</code>。</li><li>本仓关键路径：</li><ul class="nested"><li><code>hardware/interfaces/power/aidl/android/hardware/power/IPower.aidl</code></li><li><code>hardware/interfaces/vibrator/aidl/android/hardware/vibrator/IVibrator.aidl</code></li><li><code>hardware/interfaces/nfc/aidl/android/hardware/nfc/INfc.aidl</code></li><li><code>hardware/interfaces/oemlock/aidl/android/hardware/oemlock/IOemLock.aidl</code></li></ul><li>承接篇：AND-P4-101（契约机制）、AND-P7-402（NFC 协议栈）、AND-P10-301（功耗策略）。</li></ul>
+</article>
+<footer>android-100 · AND-P4-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

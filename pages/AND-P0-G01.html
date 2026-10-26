@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：本书地图与四种读法</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：本书地图与四种读法</h1>
+<div class="kv"><span>ID：AND-P0-G01</span><span>卷：P0</span><span>章：G01</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：.repo/manifests/default.xml ；system/core/init/main.cpp ；system/core/init/first_stage_main.cpp ；system/core/init/init.cpp ；frameworks/base/core/java/android/app/ActivityThread.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>本书共 108 篇：96 篇正文加 12 篇卷导读，正文按 12 卷各 8 篇排布。卷是「层与职责」，篇是「一个可核验的问题」。系统只记一张图：L1 到 L5 五层堆叠，加五条端到端调用链。读法有四种，按你的角色选一条路径走完即可，不必从第一页顺读。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：无硬前置。本书入口篇，读完即可按 §2 选路径。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>.repo/manifests/default.xml</code></li><li><code>system/core/init/main.cpp</code></li><li><code>system/core/init/first_stage_main.cpp</code></li><li><code>system/core/init/init.cpp</code></li><li><code>frameworks/base/core/java/android/app/ActivityThread.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树加 git/grep 即可。本篇验证方式为静态源码分析，不需要编译与真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>初读 AOSP 常见两种挫败。一种是打开源码树，上千个 git 项目铺在眼前，不知道从哪条路径切进去。另一种是背下了「AMS 管四大组件」这类口号，真遇到点击不响应，却串不起完整链路。问题不在信息量，在缺地图。本篇给你地图、层级与四种读法。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个键：卷、层、链。卷是学习单元，层是代码摆放位置，链是运行时真实顺序。三者是同一系统的三个投影。</p>
+<p>图 1：本书的三个分类维度：卷、层、链</p>
+<pre><code>  卷(P0..P11)      层(L1..L5)         链(共 5 条)
+     │                 │                 │
+  怎么分类读       代码放在哪        运行时怎么走</code></pre>
+<p>一篇正文只回答一个问题，同时挂到这三维上。看篇号即可定位：<code>AND-P6-…</code> 属图形卷。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>12 卷定位如下，这张表是全书目录的浓缩。</p>
+<table><thead><tr><th>卷</th><th>定位</th></tr></thead><tbody><tr><td>P0</td><td>体系总览与学习方法</td></tr><tr><td>P1</td><td>应用层</td></tr><tr><td>P2</td><td>Java 框架层</td></tr><tr><td>P3</td><td>Native 框架与 ART</td></tr><tr><td>P4</td><td>HAL 与 VINTF</td></tr><tr><td>P5</td><td>内核</td></tr><tr><td>P6</td><td>图形</td></tr><tr><td>P7</td><td>媒体与通信</td></tr><tr><td>P8</td><td>开机与启动</td></tr><tr><td>P9</td><td>安全</td></tr><tr><td>P10</td><td>性能与调试</td></tr><tr><td>P11</td><td>构建与生态</td></tr></tbody></table>
+<p>五层堆叠自顶向下：L1 应用层、L2 Java 框架层、L3 Native 与 ART、L4 硬件抽象层（HAL）、L5 内核。卷与层不是一一对应，同一卷会横穿多层，例如图形卷同时涉及框架侧与 Native 侧。</p>
+<p>五条调用链，来自《选题规划》§1.2：</p>
+<table><thead><tr><th>链</th><th>起止</th></tr></thead><tbody><tr><td>① 开机到桌面</td><td><code>init</code>(PID 1) 到 vsync 上屏</td></tr><tr><td>② 点击到响应</td><td>输入事件到 SurfaceFlinger 合成</td></tr><tr><td>③ 一次跨进程调用</td><td>Binder 驱动到 reply</td></tr><tr><td>④ 一次相机预览</td><td>Camera API 到 SurfaceFlinger</td></tr><tr><td>⑤ 一次 APK 安装</td><td>安装会话到广播</td></tr></tbody></table>
+<p>四种读法即四类读者路径（《选题规划》§5.3）：A 应用开发者 1–2 个月；B 系统与 Framework 工程师 3–6 个月；C 内核与驱动工程师 6 个月以上；D 架构师按问题检索。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以路径 A 为例。起点 P0 全卷建立地图与术语；P1 应用层全读，这是应用开发者每天用的那一层；再挑 P2 的 2.2（系统服务编排）与 P8 的 8.4、P10 的 10.1/10.2/10.3，1–2 个月走完，问题都落在「怎么用、怎么调」。路径 B 则走 P2 全卷、P8 全卷，再取 P3 的 3.1/3.3 与 P6 的 6.1/6.2，最后 P10 全卷，周期 3–6 个月。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>本卷 9 篇：G01 给地图与读法；101/102/201/202 讲环境与方法；301/302 讲怎么读；401/402 讲怎么查。401 是锚点篇（P0 卷纲 §三），被后续 11 卷引用。五条链的逐层细节不展开，放在 P1 到 P11 各卷。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>版本锚点</td><td><code>.repo/manifests/default.xml</code></td><td>default revision</td><td>本树为 <code>android17-release</code></td></tr><tr><td>项目清单</td><td><code>.repo/project.list</code></td><td>已同步 git 项目</td><td>共 1084 个</td></tr><tr><td>链①入口</td><td><code>system/core/init/main.cpp</code></td><td><code>int main</code>（约 53 行）</td><td><code>init</code> 进程入口；一阶段另在 <code>first_stage_main.cpp</code></td></tr><tr><td>链①二阶段</td><td><code>system/core/init/init.cpp</code></td><td><code>SecondStageMain</code>（约 1066 行）</td><td>主循环宿主，不是入口</td></tr><tr><td>链①宿主</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td>应用进程主线程</td><td>应用侧入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：.repo/manifests:ad156f32c</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">grep -n 'revision' .repo/manifests/default.xml | head
+# 期望：能看到 default revision 指向 android17-release（本书 version_anchor）
+
+wc -l &lt; .repo/project.list
+# 期望：输出 1084（本树已同步 git 项目数，2026-10-14 实测）
+
+ls system/core/init/main.cpp system/core/init/init.cpp frameworks/base/core/java/android/app/ActivityThread.java
+# 期望：三个文件均在盘，入口是 main.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一</strong>：以为全书要按篇号顺读。实际四种读者路径各有取舍，路径 A 不读 P5、P6 底层。</p>
+<p><strong>误区二</strong>：以为卷排序等于启动顺序。卷的排列是学习顺序，不是运行时顺序，运行时顺序看五条链。</p>
+<p><strong>误区三</strong>：以为背下五条链就够了。链是索引不是答案，每一环的机制在对应卷里。</p>
+<p><strong>误区四</strong>（看起来对其实是错的）：以为「12 卷 × 8 篇 = 96 篇」就是全部。实际是 96 篇正文加 12 篇卷导读，共 108 篇。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：我该选哪条路径？ <strong>答</strong>：按当前岗位选，路径 A 到 D 分别对应应用开发、Framework、内核驱动、架构。<strong>追问</strong>：能混着走吗？ <strong>答</strong>：可以，但跨路径跳读容易断链，建议先走完一条。</p>
+<p><strong>问</strong>：术语在哪里查？ <strong>答</strong>：看 AND-P0-401，它被后续 11 卷引用（P0 卷纲 §三），是全书术语基准。<strong>追问</strong>：术语增补了怎么办？ <strong>答</strong>：术语表 SSOT 是 <code>_meta/glossary.md</code>，增补走追加不改；401 是读者侧入口。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知本树版本</td><td><code>grep -n 'revision' .repo/manifests/default.xml</code></td><td>default revision 值</td><td>与 101 对照</td></tr><tr><td>不知同步多少仓</td><td><code>wc -l &lt; .repo/project.list</code></td><td>行数</td><td>与 102 对照</td></tr><tr><td>稿件路径无法核验</td><td><code>ls system/core/init/init.cpp</code></td><td>文件是否存在</td><td>按 201 核对工作流</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：版本与发布节奏见 AND-P0-101；源码树结构见 AND-P0-102；术语定义见 AND-P0-401；五条链逐层细节见 P1–P11 各卷。</p>
+<p><strong>本篇前置依赖</strong>：无。</p>
+<p><strong>本篇后继</strong>：AND-P0-101、AND-P0-102、AND-P0-201、AND-P0-202、AND-P0-301、AND-P0-302、AND-P0-401、AND-P0-402。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>全书 108 篇＝96 篇正文＋12 篇卷导读，口径为《选题规划》§2.1 注 1/注 2（选题规划.md:110–114）。</li><li>本卷 9 篇＝1 篇导读＋8 篇正文，口径为 P0 卷纲篇数行（<code>_volumes/P0-intro.md</code>）。</li><li>源码树 1084 个已同步 git 项目，口径为 <code>.repo/project.list</code> 行数，2026-10-14 实测。</li><li>路径 A 周期 1–2 个月，口径为《选题规划》§5.3（选题规划.md:426–458），属规划估算。</li><li>路径 C 周期 6 个月以上，同上。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>实测 default revision，1084 个 git 项目</td><td>读者对照命令可直接复现</td></tr><tr><td>更早版本</td><td>版本号与项目数未在本篇断言</td><td>以各自 <code>.repo/manifests/default.xml</code> 为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>source tree</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>init</code> 相关改动。</li><li>本仓关键路径：<code>system/core/init/init.cpp</code>、<code>frameworks/base/core/java/android/app/ActivityThread.java</code>。</li><li>承接篇：AND-P0-102、AND-P0-301。</li></ul>
+</article>
+<footer>android-100 · AND-P0-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

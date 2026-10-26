@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HAL 契约体系：从 HIDL 到 AIDL HAL 的演进</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>HAL 契约体系：从 HIDL 到 AIDL HAL 的演进</h1>
+<div class="kv"><span>ID：AND-P4-101</span><span>卷：P4</span><span>章：4.1</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：hardware/interfaces/current.txt ；hardware/interfaces/audio/aidl/default/main.cpp ；hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml ；system/hwservicemanager/ServiceManager.cpp ；system/libhidl/transport/HidlPassthroughSupport.cpp ；system/libhwbinder/ProcessState.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>HAL 契约的形态正在替换：HIDL 停止新增，<code>hardware/interfaces/current.txt</code> 里直接写着 <code>There will be no more HIDL HALs. Use AIDL instead.</code>。HIDL 时代靠 <code>android.hidl.manager@1.0::IServiceManager</code> 加 <code>hidl_string</code> 实例名注册，AIDL 时代靠 <code>AServiceManager_addService</code> 加 <code>IFoo/default</code> 实例名注册，两者在发现链路上是两套平行设施。AIDL 包的版本靠 <code>aidl_api/</code> 下冻结的版本目录固化，历史目录只读。passthrough 包装仍在源码里，但它只是兼容旧调用形态的桥，不是新增 HAL 的选项。判断「这件事能不能通过 HAL 做到」，先看契约是不是 AIDL、实例名是否以 <code>/default</code> 收尾。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P4-G01</code>。它给出 P4 卷的层位与术语底，本篇默认你知道 HAL 服务跑在独立进程里。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>hardware/interfaces/current.txt</code></li><li><code>hardware/interfaces/audio/aidl/default/main.cpp</code></li><li><code>hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml</code></li><li><code>system/hwservicemanager/ServiceManager.cpp</code></li><li><code>system/libhidl/transport/HidlPassthroughSupport.cpp</code></li><li><code>system/libhwbinder/ProcessState.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在一个旧机型上跑 <code>lshal</code>，<code>android.hardware.foo@1.0::IFoo</code> 列得出来，换成新机型同样的服务却怎么也不出现。或者你照抄了一份老 HIDL 的 <code>default</code> 实现，编译过了，服务起了，客户端 <code>getService</code> 却拿不到实例。再或者：升级系统镜像后设备起不来，日志只说 vendor 侧某接口对不上。</p>
+<p>这些现象落在同一处——契约以什么形态声明、注册到哪个注册表、别人用什么名字找它。契约形态是 HIDL 还是 AIDL，决定了注册函数、实例名拼法、VINTF 描述形状全都不同。本篇只讲这条线；怎么被校验归 AND-P4-102，事务怎么走归 AND-P3-302。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：契约（接口声明与版本）、注册表（服务登记处）、实例名（查找键）、包装层（passthrough 桥）。</p>
+<p>HIDL 与 AIDL 各有一套注册表与命名规则，客户端按契约形态选对应的查找路径。</p>
+<p>图 1：HIDL 与 AIDL 两条注册与发现链路</p>
+<pre><code>HIDL                          AIDL
+接口 @1.0::IFoo               接口 IFoo (aidl_api 版本冻结)
+   |                            |
+注册 ServiceManager::add     AServiceManager_addService
+   |  (hidl_string name)        |  (moduleFqn = IFoo/default)
+   v                            v
+hwservicemanager             servicemanager
+   ^                            ^
+   | getService(name)           | getService(&quot;IFoo/default&quot;)
+客户端                        客户端</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>两条链路互不相通：注册进 hwservicemanager 的服务，AIDL 侧按名字查不到，反之亦然。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>契约命名。</strong> HIDL 的完全限定名带版本段，形如 <code>android.hidl.manager@1.0::IServiceManager</code>，包名写作 <code>android.hidl.manager@1.0</code>。AIDL 的实例名由接口名加 <code>/default</code> 拼出，包级版本不上名字——版本体现在 <code>aidl_api/</code> 的冻结目录里。</p>
+<p><strong>注册入口。</strong> HIDL 侧是 <code>ServiceManager::add(const hidl_string&amp; name, const sp&lt;IBase&gt;&amp; service)</code>，名字是 <code>hidl_string</code>。AIDL 侧是 <code>AServiceManager_addService(result.getBinder(), moduleFqn.c_str())</code>，名字是普通 C 字符串。</p>
+<p><strong>线程池默认值（易踩）。</strong> HIDL 服务侧 <code>DEFAULT_MAX_BINDER_THREADS</code> 为 0，服务起来什么都不处理；要并发必须先 <code>configureRpcThreadpool</code> 再 <code>joinRpcThreadpool</code>。libbinder 侧默认 15 线程，AIDL 服务没有这个坑。</p>
+<p><strong>passthrough 退场。</strong> <code>wrapPassthroughInternal(sp&lt;IBase&gt; iface)</code> 内部走 <code>tryWrap</code>，把同进程直调包装成 HIDL 接口。它是老调用形态的兼容桥，不是新 HAL 的写法。</p>
+<p>图 2：binderized 与 passthrough 的形态差异</p>
+<pre><code> binderized（跨进程）                passthrough（同进程）
+ client --Binder--&gt; HAL 进程          client --dlopen--&gt; HAL 库
+ 注册：hwservicemanager               包装：wrapPassthroughInternal
+ 线程池：须 configureRpcThreadpool    线程池：无（直调）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>表 1：HIDL 与 AIDL 契约要素对照（出处均为本树实测）</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>android.hidl.manager@1.0::IServiceManager</code></td><td>HIDL 注册表接口完全限定名</td><td><code>system/libhidl/transport/manager/1.0/IServiceManager.hal</code></td></tr><tr><td><code>manager</code></td><td>注册表实例名</td><td>同上</td></tr><tr><td><code>ServiceManager::add</code></td><td>HIDL 服务注册入口</td><td><code>system/hwservicemanager/ServiceManager.cpp</code></td></tr><tr><td><code>wrapPassthroughInternal</code> / <code>tryWrap</code></td><td>passthrough 包装链</td><td><code>system/libhidl/transport/HidlPassthroughSupport.cpp</code></td></tr><tr><td><code>DEFAULT_MAX_BINDER_THREADS</code></td><td>HIDL 服务线程池默认值 0</td><td><code>system/libhwbinder/ProcessState.cpp</code></td></tr><tr><td><code>AServiceManager_addService</code></td><td>AIDL 服务注册入口</td><td><code>hardware/interfaces/audio/aidl/default/main.cpp</code></td></tr><tr><td><code>configureRpcThreadpool</code> / <code>joinRpcThreadpool</code></td><td>HIDL 服务线程池显式配置</td><td><code>system/libhidl/transport/HidlTransportSupport.cpp</code></td></tr></tbody></table>
+<p><strong>AIDL 的版本冻结。</strong> <code>hardware/interfaces/audio/aidl/aidl_api/android.hardware.audio.core/</code> 下有 <code>1</code>/<code>2</code>/<code>3</code>/<code>4</code>/<code>current</code> 五个目录。历史版本冻结不可改，升级只能新增版本目录并改 <code>current</code>。</p>
+<p><strong>规模口径。</strong> 2026-10-17 实测：<code>hardware/interfaces</code> 一级目录 56 个，其中 40 个带 <code>aidl/</code>；另有 87 个 <code>X.Y</code> 版本化目录。同一棵树里 HIDL 历史版本与 AIDL 接口并存，所以「HAL 已经全是 AIDL」与「树里还都是 <code>@1.0</code>」两种观感都能成立。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以音频 HAL 为例，走一遍 AIDL 契约的声明、注册、发现。</p>
+<p><strong>声明。</strong> 接口在 <code>android.hardware.audio.core</code> 包里，<code>aidl_api</code> 目录的当前版本是 <code>4</code>，历史 <code>1</code>/<code>2</code>/<code>3</code> 冻结。</p>
+<p><strong>注册。</strong> 进程入口调 <code>AServiceManager_addService(result.getBinder(), moduleFqn.c_str())</code>。<code>moduleFqn</code> 由 <code>Module::descriptor</code> 拼上传入的实例名得到（<code>main.cpp:54</code>），所以同一个接口会以 <code>IModule/default</code>、<code>IModule/r_submix</code>、<code>IModule/bluetooth</code> 等多个名字分别注册；配置接口那条走另一处硬拼（<code>configFqn = Config::descriptor + &quot;/default&quot;</code>，<code>:84</code>）。</p>
+<p><strong>服务定义。</strong> rc 文件声明 <code>service vendor.audio-hal-aidl /apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example</code>，带 <code>class hal</code>、<code>user audioserver</code>、<code>onrestart restart audioserver</code>。</p>
+<p><strong>VINTF 形状。</strong> 同一目录的设备清单片段里，<code>android.hardware.audio.core</code> 有 4 条 <code>&lt;fqname&gt;</code>：<code>IModule/default</code>、<code>IModule/r_submix</code>、<code>IModule/bluetooth</code>、<code>IConfig/default</code>，每条都在 <code>&lt;hal format=&quot;aidl&quot;&gt;</code> 下带 <code>&lt;version&gt;4&lt;/version&gt;</code>；另有 effect 包的 <code>IFactory/default</code>，<code>IModule/stub</code> 与 <code>IModule/usb</code> 两条被注释掉。<code>format=&quot;aidl&quot;</code> 是这里的判别键——校验侧靠它决定走哪套解析。</p>
+<p><strong>发现。</strong> 客户端拿 <code>android.hardware.audio.core.IModule/default</code> 这个字符串去 AIDL 注册表查，查到就拿到 Binder 代理。字符串差一个字符就查不到，这一点与 HIDL 的 <code>getService</code> 查找手感一致。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P4-G01</code>（前置）：层位与术语。</li><li><code>AND-P4-102</code>（后继）：设备清单（manifest）与兼容性矩阵（compatibility matrix）的校验，怎么判一个 <code>format=&quot;aidl&quot;</code> 条目合法。</li><li><code>AND-P3-302</code>（边界）：拿到 Binder 之后事务怎么走，本篇不展开。</li><li><code>AND-P4-201</code>–<code>AND-P4-402</code>（边界）：各子域契约里具体有什么方法。</li><li>本篇位置：契约怎么声明、怎么注册、怎么被发现。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>HIDL 退场注记</td><td><code>hardware/interfaces/current.txt</code></td><td><code>There will be no more HIDL HALs. Use AIDL instead.</code></td><td>仓内明文口径，位置固定在 910 行</td></tr><tr><td>AIDL 注册入口</td><td><code>hardware/interfaces/audio/aidl/default/main.cpp</code></td><td><code>AServiceManager_addService</code>、<code>Config::descriptor</code></td><td>实例名拼法也在此</td></tr><tr><td>AIDL 的 VINTF 形状</td><td><code>hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml</code></td><td><code>&lt;hal format=&quot;aidl&quot;&gt;</code>、<code>&lt;fqname&gt;</code></td><td>校验输入样例</td></tr><tr><td>HIDL 注册实现</td><td><code>system/hwservicemanager/ServiceManager.cpp</code></td><td><code>ServiceManager::add</code></td><td>名字为 <code>hidl_string</code></td></tr><tr><td>passthrough 包装</td><td><code>system/libhidl/transport/HidlPassthroughSupport.cpp</code></td><td><code>wrapPassthroughInternal</code>、<code>tryWrap</code></td><td>兼容桥，非新写法</td></tr><tr><td>HIDL 线程池默认值</td><td><code>system/libhwbinder/ProcessState.cpp</code></td><td><code>DEFAULT_MAX_BINDER_THREADS</code></td><td>值为 0</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：hardware/interfaces:0162af698935</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 源码树根执行。</p>
+<pre><code class="lang-bash">sed -n '905,915p' hardware/interfaces/current.txt</code></pre>
+<p>期望看到 <code>There will be no more HIDL HALs. Use AIDL instead.</code>，即 §4.2 的退场注记。</p>
+<pre><code class="lang-bash">grep -rn &quot;AServiceManager_addService&quot; hardware/interfaces/audio/aidl/default/main.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中一行，且同文件 <code>Config::descriptor</code> 附近能看到 <code>/default</code> 拼接，对应 §4.3 的实例名来源。</p>
+<pre><code class="lang-bash">grep -n &quot;format=\&quot;aidl\&quot;\|fqname\|&lt;version&gt;&quot; hardware/interfaces/audio/aidl/default/android.hardware.audio.service-aidl.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>&lt;hal format=&quot;aidl&quot;&gt;</code>、<code>&lt;version&gt;4&lt;/version&gt;</code>，以及 4 条 <code>android.hardware.audio.core</code> 的 <code>&lt;fqname&gt;</code>（<code>IModule/default</code>、<code>IModule/r_submix</code>、<code>IModule/bluetooth</code>、<code>IConfig/default</code>）与 effect 包的 <code>IFactory/default</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;ServiceManager::add&quot; system/hwservicemanager/ServiceManager.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 HIDL 注册入口定义，形参为 <code>const hidl_string&amp; name</code>。</p>
+<pre><code class="lang-bash">grep -rn &quot;wrapPassthroughInternal\|tryWrap&quot; system/libhidl/transport/HidlPassthroughSupport.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望同时命中包装入口与内部 <code>tryWrap</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;DEFAULT_MAX_BINDER_THREADS&quot; system/libhwbinder/ProcessState.cpp frameworks/native/libs/binder/ProcessState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前者为 0、后者为 15，对照出 HIDL 服务默认不处理请求。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/audio/aidl/aidl_api/android.hardware.audio.core/</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出 <code>1</code> <code>2</code> <code>3</code> <code>4</code> <code>current</code> 五个目录。</p>
+<pre><code class="lang-bash">ls -d hardware/interfaces/*/aidl 2&gt;/dev/null | wc -l; ls -d hardware/interfaces/*/[0-9]*.[0-9]* 2&gt;/dev/null | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别得到 40 与 87，对上 §4.2 的规模口径。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>「HAL 全是 AIDL 了，树里不该再有 HIDL。」</strong> 错。<code>hardware/interfaces</code> 下仍有 87 个 <code>X.Y</code> 版本化目录，HIDL 历史版本与 AIDL 接口并存。停的是新增，不是存量。</p>
+<p><strong>「AIDL HAL 的实例名带版本号，像 `IFoo@4/default`。」</strong> 错。AIDL 实例名是 <code>IFoo/default</code>，版本在 <code>aidl_api/</code> 目录里，不在查找键上。</p>
+<p><strong>「服务进程起了，客户端就该拿到。」</strong> 看起来对，其实错。HIDL 服务侧 <code>DEFAULT_MAX_BINDER_THREADS</code> 是 0，不做 <code>configureRpcThreadpool</code> + <code>joinRpcThreadpool</code>，注册成功也不处理请求，表现为「服务在、调用挂住」。</p>
+<p><strong>「passthrough 是新 HAL 的一种轻量写法。」</strong> 错。<code>wrapPassthroughInternal</code> 是兼容桥，用来接住旧调用形态，不是新接口的推荐声明方式。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：VINTF 清单里怎么一眼看出这是 AIDL 还是 HIDL？ <strong>答</strong>：看 <code>&lt;hal format=&quot;aidl&quot;&gt;</code> 这个属性；AIDL 条目还会给 <code>&lt;version&gt;</code> 数字与两条 <code>&lt;fqname&gt;</code>。 <strong>追问</strong>：那 <code>&lt;version&gt;4&lt;/version&gt;</code> 和 <code>aidl_api</code> 下的 <code>4</code> 是同一件事吗？ <strong>答</strong>：是同一个版本号的两个落点，前者给校验侧读，后者放接口定义的冻结快照。</p>
+<p><strong>问</strong>：HIDL 的 <code>ServiceManager::add</code> 和 AIDL 的 <code>AServiceManager_addService</code> 能不能互查？ <strong>答</strong>：不能。前者进 hwservicemanager，后者进 servicemanager，两套注册表平行。 <strong>追问</strong>：那混用的设备上怎么排查？ <strong>答</strong>：按契约形态分别用对应工具去查，不要拿一边的名字去另一边找。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>服务起了但客户端拿不到</td><td><code>grep -rn &quot;AServiceManager_addService|ServiceManager::add&quot; &lt;你的 main.cpp&gt;</code></td><td>注册函数用了哪一套，名字字符串对不对</td><td>名字与客户端查找键逐字符比对</td></tr><tr><td>服务在但调用挂住</td><td><code>grep -n &quot;configureRpcThreadpool|joinRpcThreadpool&quot; &lt;你的 main.cpp&gt;</code></td><td>是否显式配了线程池</td><td>补上两步再启动</td></tr><tr><td>换机后 vendor 侧起不来</td><td><code>grep -n &quot;format=\&quot;aidl\&quot;|@1.0&quot; &lt;设备 manifest&gt;</code></td><td>条目是老 HIDL 形状还是 AIDL 形状</td><td>对齐成实际实现的形态</td></tr><tr><td>分不清某包是 AIDL 还是历史 HIDL</td><td><code>ls hardware/interfaces/&lt;包名&gt;/</code></td><td>有无 <code>aidl/</code> 与 <code>X.Y</code> 目录</td><td>有 <code>aidl/</code> 即新实现走 AIDL</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：VINTF 清单与矩阵的校验规则（<code>AND-P4-102</code>）；Binder 事务本体（<code>AND-P3-302</code>）；各子域 HAL 的具体方法与实现（<code>AND-P4-201</code>–<code>AND-P4-402</code>）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P4-G01</code>。</li><li><strong>本篇后继</strong>：<code>AND-P4-102</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>hardware/interfaces</code> 一级目录 56 个，其中 40 个带 <code>aidl/</code>（口径：2026-10-17 本树实测目录计数）。</li><li><code>X.Y</code> 版本化目录 87 个（同上口径），说明 HIDL 存量面仍大。</li><li><code>android.hardware.audio.core</code> 的 <code>aidl_api</code> 现有 5 个目录，版本上限 4（口径：目录列举）。</li><li>HIDL 服务线程池默认 0、libbinder 默认 15（口径：源码常量）。</li><li>HIDL 完全退场的时间点暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL 引入期</td><td>契约以 <code>@X.Y</code> 版本段命名，注册进 hwservicemanager</td><td>版本进名字，客户端查找键带版本</td></tr><tr><td>AIDL HAL 期</td><td>契约走 AIDL，注册进 servicemanager，版本放 <code>aidl_api/</code></td><td>实例名为 <code>IFoo/default</code>，版本不进查找键</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td>同时存在 40 个带 <code>aidl/</code> 的目录与 87 个 <code>X.Y</code> 目录；<code>current.txt</code> 明写不再有 HIDL HAL</td><td>新实现只能走 AIDL，老 HIDL 仍需维护</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>hidl aidl hal</code>、<code>hal interface versioning</code>；developer.android.com 站内检索 <code>aidl hal</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>aidl_api</code>、<code>android.hidl.manager</code>、<code>AServiceManager_addService</code>。</li><li>本仓关键路径：<code>hardware/interfaces/current.txt</code>、<code>hardware/interfaces/audio/aidl/default/</code>、<code>system/libhidl/transport/manager/1.0/</code>。</li><li>承接篇：<code>AND-P4-102</code>（校验侧怎么读这些声明）。</li></ul>
+</article>
+<footer>android-100 · AND-P4-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JIT、Profile 与基线配置：代码为什么要被编译两次</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>JIT、Profile 与基线配置：代码为什么要被编译两次</h1>
+<div class="kv"><span>ID：AND-P3-203</span><span>卷：P3</span><span>章：3.2</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：art/runtime/jit/jit.cc ；art/runtime/jit/jit_options.cc ；art/runtime/jit/jit_options.h ；art/runtime/jit/profile_saver.cc ；art/libprofile/profile/profile_compilation_info.h ；art/profman/profman.cc ；art/libartbase/base/compiler_filter.h ；art/libartservice/service/java/com/android/server/art/ArtShellCommand.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 上的 Java 代码常常被编译两次：先跑解释器与 JIT，把热点攒成 profile，再按 profile 做一次更&quot;懂代码&quot;的编译。JIT 的热度门槛默认被顶到 <code>0xffff</code>，也就是默认几乎不因为计数就触发优化编译——例外在 arm64：fast baseline 编译器生效时初始热度阈值为 4（<code>jit.cc:1272-1280</code>）。<code>ProfileSaver::ProcessProfilingInfo</code> 负责把内存里的采样落到 <code>primary.prof</code> 这类文件，强制保存时恒写。profile 文件头是 <code>{'p','r','o','\0'}</code> 加版本 <code>015</code>（boot image 用 <code>016</code>）。基线 profile（baseline profile）就是随 APK 分发的参考 profile，ART 侧读它的路径与本地 profile 完全相同。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P3-201。先知道 AOT 静态产物（dex2oat 与档位）长什么样，本篇才好讲&quot;第二次编译&quot;的数据从哪来。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>art/runtime/jit/jit.cc</code></li><li><code>art/runtime/jit/jit_options.cc</code></li><li><code>art/runtime/jit/jit_options.h</code></li><li><code>art/runtime/jit/profile_saver.cc</code></li><li><code>art/libprofile/profile/profile_compilation_info.h</code></li><li><code>art/profman/profman.cc</code></li><li><code>art/libartbase/base/compiler_filter.h</code></li><li><code>art/libartservice/service/java/com/android/server/art/ArtShellCommand.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式是静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你可能见过这种日志：应用冷启动慢，装上跑几天反而快了；或者 <code>pm compile</code> 出来的包，换台设备表现完全不同。有人于是拆 APK，发现里面躺着一个 <code>baseline.prof</code>，但不知道它和后端 <code>/data/misc/profiles/</code> 下的文件是什么关系。更常见的困惑是：既然有 AOT，为什么还要 JIT？如果 JIT 已经编译过了，为什么还要再编译一次？这三个问题的答案都在同一个链条上：热度计数 → profile 落盘 → 按 profile 重编。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念串成一条链。<strong>热度计数（hotness counter）</strong> 是入口点上的热度计数值，计数耗尽即视为方法变热。<strong>JIT</strong> 消费计数，把方法编成机器码放进 JIT code cache。<strong>profile</strong> 是运行中记录下来的&quot;哪些方法热、哪些类被加载过&quot;的采样集，由 <code>ProfileSaver</code> 落盘。<strong>编译档位（compiler filter）</strong> 决定第二次编译要用多少 profile 信息。</p>
+<p>图 1：热度、JIT、profile 与重编的关系</p>
+<pre><code>  解释执行/JIT 计数
+        |
+        v
+  热度耗尽（ResetCounter）
+        |
+        v
+   Jit::CompileMethod --(入队)--&gt; JIT 编译
+        |
+        v
+   ProfileSaver::ProcessProfilingInfo
+        |
+        v
+   primary.prof 等文件 --&gt; profman/dex2oat 按档位重编</code></pre>
+<p>关键点：JIT 与 profile 采集不是同一件事。JIT 关心&quot;现在要不要编&quot;，profile 关心&quot;以后怎么编得更好&quot;。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>阈值默认值。</strong> <code>jit_options.cc</code> 里三个常量：<code>kJitDefaultWarmupThreshold = 0xffff</code>、<code>kJitDefaultOptimizeThreshold = 0xffff</code>、<code>kJitMaxThreshold</code> 为 <code>uint16</code> 最大值。两个默认值都顶在上限附近，意味着默认配置下计数几乎不会自己触发优化编译——但 arm64 上 fast baseline 编译器生效（且非 debuggable）时例外：<code>Jit::GetInitialHotnessThreshold</code>（<code>jit.cc:1268-1276</code>）此时直接返回 <code>kFastThreshold = 4</code>。想改就传运行时选项 <code>JITWarmupThreshold</code> / <code>JITOptimizeThreshold</code>，声明在 <code>runtime_options.def</code>。</p>
+<p><strong>阈值在哪里被读。</strong> 热度计数在入口点递减，耗尽即视为热，<code>Jit::CompileMethod</code>（<code>jit.h:207</code>）把方法交给编译队列；初始阈值由 <code>Jit::GetInitialHotnessThreshold</code>（<code>jit.cc:1268</code>）给出。阈值的打印不在 <code>Jit</code> 构造函数里，而在 <code>Jit::CreateJit</code> 流程（<code>jit.cc:115-120</code>），走 <code>VLOG(jit)</code>，需要 <code>-verbose:jit</code> 才会出现在 logcat。</p>
+<p><strong>表 1：JIT 与 profile 侧的关键符号</strong></p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>kJitDefaultWarmupThreshold</code></td><td>默认 warmup 阈值 <code>0xffff</code></td><td><code>art/runtime/jit/jit_options.cc</code></td></tr><tr><td><code>kJitDefaultOptimizeThreshold</code></td><td>默认 optimize 阈值 <code>0xffff</code></td><td><code>art/runtime/jit/jit_options.cc</code></td></tr><tr><td><code>kJitMaxThreshold</code></td><td>阈值上限，<code>uint16</code> 最大值</td><td><code>art/runtime/jit/jit_options.cc</code></td></tr><tr><td><code>JITWarmupThreshold</code> / <code>JITOptimizeThreshold</code></td><td>覆盖默认值的运行时选项</td><td><code>art/runtime/runtime_options.def</code></td></tr><tr><td><code>Jit::CompileMethod</code></td><td>热度耗尽后的编译入口，入队 JIT 编译</td><td><code>art/runtime/jit/jit.h</code></td></tr><tr><td><code>Jit::GetInitialHotnessThreshold</code></td><td>初始热度阈值；fast 路径返回 4</td><td><code>art/runtime/jit/jit.cc</code></td></tr><tr><td><code>ProfileSaver::ProcessProfilingInfo</code></td><td>profile 落盘主流程</td><td><code>art/runtime/jit/profile_saver.cc</code></td></tr><tr><td><code>--dump-only</code></td><td>profman 只打印不写</td><td><code>art/profman/profman.cc</code></td></tr><tr><td><code>--reference-profile-file=</code></td><td>profman 指定参考 profile</td><td><code>art/profman/profman.cc</code></td></tr></tbody></table>
+<p><strong>落盘细节。</strong> <code>ProfileSaver::ProcessProfilingInfo</code> 是落盘入口。强制保存时恒写，不做&quot;没变化就跳过&quot;的优化，<code>artd</code> 依赖这个保证。写列表里 <code>primary.prof</code> 被放在末位，这个顺序本身是有意为之的（末位意味着前面若干项先写）。</p>
+<p><strong>文件格式。</strong> <code>profile_compilation_info.cc</code> 定义 magic 为 <code>{'p','r','o','\0'}</code>，常规版本号 <code>015</code>，boot image 专用版本 <code>016</code>。所以拿到一个 <code>.prof</code> 先看头四个字节和紧随的版本串，就能判断是不是当前格式、是不是 boot image 用的。</p>
+<p><strong>profman。</strong> 这是 profile 的离线工具，<code>--dump-only</code> 只读不写，<code>--reference-profile-file=</code> 指定参考 profile。核对两个 <code>.prof</code> 的差异、把基线 profile 和本地 profile 对账，都走它。</p>
+<p><strong>档位与 profile 的耦合。</strong> <code>art/libartbase/base/compiler_filter.h</code> 里 <code>kSpeedProfile</code> / <code>kEverythingProfile</code> / <code>kSpaceProfile</code> 都属于&quot;依赖 profile&quot;的档位，<code>DependsOnProfile</code> 给出判定。这就是&quot;编译两次&quot;的根因：第二次编译的质量取决于第一次跑出来的 profile 质量；profile 不匹配，档位退化成接近无 profile 的编译。</p>
+<p><strong>基线 profile。</strong> baseline profile 是随 APK 分发的参考 profile，ART 侧消费路径与本地 profile 一样，走 profman/dex2oat 的 <code>--profile-file</code> 一族参数。它解决的问题是&quot;首次安装时设备上还没有本地 profile&quot;，让第二次编译一开始就有依据。</p>
+<p><strong>shell 入口。</strong> <code>ArtShellCommand</code> 处理 <code>compile</code> 子命令并调用 <code>setCompilerFilter</code>；原来 <code>pm force-dex-opt</code> 的位置已给出废弃提示，改用 <code>pm compile</code>。手工验证档位与 profile 配合时，入口在这里。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设开发者在调试设备上确认 JIT 到底有没有按阈值编译。做法：查 <code>jit_options.cc</code> 拿到 <code>0xffff</code>，知道默认阈值接近 <code>uint16</code> 上限（arm64 fast 路径除外，初始阈值为 4）；在 <code>jit.h:207</code> 确认 <code>Jit::CompileMethod</code> 是编译入口，初始阈值看 <code>Jit::GetInitialHotnessThreshold</code>（<code>jit.cc:1268</code>）；运行时打印的值要走 <code>-verbose:jit</code> 才看得到。</p>
+<p>接着查 profile：<code>ProfileSaver::ProcessProfilingInfo</code> 是落盘入口，强制保存恒写，<code>primary.prof</code> 在写列表末位。想让 profile 立即反映当前运行状态，就走强制保存路径，别指望常规保存会因为你&quot;感觉没变&quot;而触发。</p>
+<p>最后核对文件：读 <code>profile_compilation_info.cc</code> 里的 magic <code>{'p','r','o','\0'}</code> 和版本 <code>015</code>，确认手上的 <code>.prof</code> 是常规 profile 而不是 boot image 的 <code>016</code>。再用 <code>profman --dump-only</code> 看内容，需要对比参考 profile 就加 <code>--reference-profile-file=</code>。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P3-201 讲 AOT 静态面：dex2oat 怎么把 dex 编译成产物、档位怎么选。本篇不重复那段，只讲&quot;第二次编译的输入从哪来&quot;。堆与 GC 归 AND-P3-202，本篇不涉及对象分配与回收。后台 dexopt 的调度归 P10，本篇只说 <code>artd</code> 依赖强制保存恒写这一条约束。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>阈值常量</td><td><code>art/runtime/jit/jit_options.cc</code></td><td><code>kJitDefaultWarmupThreshold</code>、<code>kJitDefaultOptimizeThreshold</code>、<code>kJitMaxThreshold</code></td><td>默认值与上限</td></tr><tr><td>阈值选项声明</td><td><code>art/runtime/jit/jit_options.h</code></td><td>选项结构</td><td>与 <code>runtime_options.def</code> 配套</td></tr><tr><td>入口点判定</td><td><code>art/runtime/jit/jit.cc</code></td><td><code>Jit::CompileMethod</code>、<code>Jit::GetInitialHotnessThreshold</code></td><td>热度耗尽后入队，初始阈值含 fast 路径</td></tr><tr><td>profile 落盘</td><td><code>art/runtime/jit/profile_saver.cc</code></td><td><code>ProfileSaver::ProcessProfilingInfo</code></td><td>写列表顺序、强制保存恒写</td></tr><tr><td>profile 格式</td><td><code>art/libprofile/profile/profile_compilation_info.h</code></td><td>magic、版本常量</td><td>格式头定义</td></tr><tr><td>profile 工具</td><td><code>art/profman/profman.cc</code></td><td><code>--dump-only</code>、<code>--reference-profile-file=</code></td><td>离线读写与对账</td></tr><tr><td>shell 入口</td><td><code>art/libartservice/service/java/com/android/server/art/ArtShellCommand.java</code></td><td><code>compile</code>、<code>setCompilerFilter</code></td><td>手工触发编译</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：art:b753cf97923c</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;kJitDefaultWarmupThreshold\|kJitDefaultOptimizeThreshold\|kJitMaxThreshold&quot; art/runtime/jit/jit_options.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到三个常量，前两个值为 <code>0xffff</code>，第三个是 <code>uint16</code> 最大值（对应事实 1）。</p>
+<pre><code class="lang-bash">grep -n &quot;JITWarmupThreshold\|JITOptimizeThreshold&quot; art/runtime/runtime_options.def</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到两个运行时选项声明（对应事实 1 的覆盖入口）。</p>
+<pre><code class="lang-bash">grep -n &quot;CompileMethod\|GetInitialHotnessThreshold&quot; art/runtime/jit/jit.cc
+grep -n &quot;warmup\|optimize&quot; art/runtime/jit/jit.cc | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>CompileMethod</code> 定义（编译入口）与 <code>GetInitialHotnessThreshold</code>（初始阈值，fast 路径为 4），以及 <code>CreateJit</code> 中 <code>VLOG(jit)</code> 打印阈值的语句（对应事实 2）。</p>
+<pre><code class="lang-bash">grep -n &quot;ProcessProfilingInfo\|primary.prof&quot; art/runtime/jit/profile_saver.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在 <code>ProcessProfilingInfo</code> 内看到 <code>primary.prof</code> 出现在写列表末位（对应事实 3）。</p>
+<pre><code class="lang-bash">grep -n &quot;'p'\|015\|016&quot; art/libprofile/profile/profile_compilation_info.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 magic 四字符与两个版本号常量（对应事实 4）。</p>
+<pre><code class="lang-bash">grep -n &quot;dump-only\|reference-profile-file&quot; art/profman/profman.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到两个参数解析分支（对应事实 5）。</p>
+<pre><code class="lang-bash">grep -n &quot;kSpeedProfile\|kEverythingProfile\|kSpaceProfile\|DependsOnProfile&quot; art/libartbase/base/compiler_filter.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到三个档位与依赖 profile 的判定（对应事实 7）。</p>
+<p>行号是&quot;怎么找&quot;的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>&quot;JIT 阈值默认很小，跑几次就编译&quot;。</strong> 事实相反，<code>kJitDefaultWarmupThreshold</code> 与 <code>kJitDefaultOptimizeThreshold</code> 都是 <code>0xffff</code>，接近 <code>uint16</code> 上限。不显式传 <code>JITWarmupThreshold</code>/<code>JITOptimizeThreshold</code> 时，计数本身几乎不会成为触发条件；唯一的例外是 arm64 上 fast baseline 编译器生效的场景，此时初始热度阈值为 4（<code>jit.cc:1272-1280</code>）。</p>
+<p><strong>&quot;有 AOT 了就不需要 profile&quot;。</strong> <code>kSpeedProfile</code>/<code>kEverythingProfile</code>/<code>kSpaceProfile</code> 都依赖 profile，<code>DependsOnProfile</code> 明确给出判定。没有 profile，这些档位拿不到优化依据。</p>
+<p><strong>&quot;profile 只在进程正常退出时才写&quot;。</strong> 强制保存路径恒写，不看&quot;有没有变化&quot;，<code>artd</code> 正是依赖这条保证。看起来&quot;没变化就不该写&quot;的直觉在这里是错的。</p>
+<p><strong>&quot;`baseline.prof` 和本地 profile 是两套机制&quot;。</strong> ART 侧消费路径相同，都走 profman/dex2oat 的 <code>--profile-file</code> 一族参数；区别只在来源和分发方式。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么默认阈值要设到 <code>0xffff</code>？ <strong>答</strong>：这是 ART 的默认配置选择，清单只给常量值，不给设计动机。 <strong>追问</strong>：那实际设备的有效阈值怎么确认？ <strong>答</strong>：开 <code>-verbose:jit</code> 后看 <code>Jit::CreateJit</code> 里 <code>VLOG(jit)</code> 打印的 warmup/optimize 值，确认运行时选项有没有覆盖默认；fast 路径下注意初始阈值可能只有 4。</p>
+<p><strong>问</strong>：<code>primary.prof</code> 为什么排写列表末位？ <strong>答</strong>：清单给的是顺序事实，<code>primary.prof</code> 位于写列表末位；顺序含义本篇不断言。 <strong>追问</strong>：想看当前 profile 内容怎么读？ <strong>答</strong>：<code>profman --dump-only</code> 只读打印。需要和参考 profile 对比就加 <code>--reference-profile-file=</code>。</p>
+<p><strong>问</strong>：<code>pm force-dex-opt</code> 还能用吗？ <strong>答</strong>：该入口已给出废弃提示，改用 <code>pm compile</code>。 <strong>追问</strong>：<code>pm compile</code> 背后是什么？ <strong>答</strong>：<code>ArtShellCommand</code> 处理 <code>compile</code> 子命令并调用 <code>setCompilerFilter</code>。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑 JIT 阈值被改过</td><td><code>grep -n &quot;warmup|optimize&quot; art/runtime/jit/jit.cc</code></td><td><code>CreateJit</code> 中 <code>VLOG(jit)</code> 打印的阈值</td><td>对照 <code>runtime_options.def</code> 的选项名</td></tr><tr><td>怀疑 profile 没落盘</td><td><code>grep -n &quot;ProcessProfilingInfo&quot; art/runtime/jit/profile_saver.cc</code></td><td>强制保存恒写分支</td><td>确认走的是强制保存路径</td></tr><tr><td><code>.prof</code> 格式对不上</td><td><code>grep -n &quot;'p'|015|016&quot; art/libprofile/profile/profile_compilation_info.cc</code></td><td>magic 与版本常量</td><td>区分常规 <code>015</code> 与 boot image <code>016</code></td></tr><tr><td>编译后没变快</td><td><code>grep -n &quot;DependsOnProfile&quot; art/libartbase/base/compiler_filter.h</code></td><td>档位是否依赖 profile</td><td>换依赖 profile 的档位或先攒 profile</td></tr><tr><td>旧命令不好用</td><td><code>grep -n &quot;force-dex-opt&quot; art/libartservice/service/java/com/android/server/art/ArtShellCommand.java</code></td><td>废弃提示与替代命令</td><td>改用 <code>pm compile</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：AOT 静态产物与 dex2oat 档位细节见 AND-P3-201；堆与 GC 见 AND-P3-202；后台 dexopt 的调度见 P10；baseline profile 的 AndroidX 生成工具只点名，不展开。</p>
+<p><strong>本篇前置依赖</strong>：AND-P3-201。</p>
+<p><strong>本篇后继</strong>：P3 卷内讲述运行时其他子系统的篇目，以及 P10 的 dexopt 调度篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>热度阈值默认 <code>0xffff</code>，上限为 <code>uint16</code> 最大值；arm64 fast 路径初始阈值为 4 —— 口径：源码常量，<code>art/runtime/jit/jit_options.cc</code>、<code>art/runtime/jit/jit.cc:1272-1280</code>。</li><li>profile 版本串 <code>015</code>，boot image 版本 <code>016</code> —— 口径：源码常量，<code>art/libprofile/profile/profile_compilation_info.cc</code>。</li><li><code>primary.prof</code> 位于写列表末位 —— 口径：源码位置，<code>art/runtime/jit/profile_saver.cc</code>。</li><li>依赖 profile 的档位共 3 个（<code>kSpeedProfile</code>/<code>kEverythingProfile</code>/<code>kSpaceProfile</code>）—— 口径：源码枚举，<code>art/libartbase/base/compiler_filter.h</code>。</li><li>典型 profile 文件大小与采样条目数量级 —— 暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树（<code>android17-release</code>）</td><td><code>pm force-dex-opt</code> 已给废弃提示，改指 <code>pm compile</code>；<code>ArtShellCommand</code> 处理 <code>compile</code> 并 <code>setCompilerFilter</code></td><td>旧脚本需迁移到 <code>pm compile</code></td></tr><tr><td>本树（<code>android17-release</code>）</td><td>profile 版本串为 <code>015</code>，boot image 专用为 <code>016</code></td><td>跨版本读取 <code>.prof</code> 需先核对版本串</td></tr><tr><td>更早版本</td><td>具体演进节点本篇不断言</td><td>以 <code>profman --dump-only</code> 与实际文件头为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>art jit profile</code>、source.android.com 站内检索 <code>baseline profile</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ProfileSaver</code>、<code>Jit::CompileMethod</code>、<code>compiler_filter</code>。</li><li>本仓关键路径：<code>art/runtime/jit/</code>（JIT 与 profile 落盘）、<code>art/libprofile/</code>（profile 格式）、<code>art/libartservice/</code>（编译入口）。</li><li>承接篇：AND-P3-201（AOT 静态面）、AND-P3-202（堆与 GC）。</li></ul>
+</article>
+<footer>android-100 · AND-P3-203 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

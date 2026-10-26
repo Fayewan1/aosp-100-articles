@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binder oneway 与缓冲限制：内核侧的形状</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Binder oneway 与缓冲限制：内核侧的形状</h1>
+<div class="kv"><span>ID：AND-P5-202</span><span>卷：P5</span><span>章：5.2</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：external/kernel-headers/original/uapi/linux/android/binder.h ；frameworks/native/libs/binder/IPCThreadState.cpp ；frameworks/native/libs/binder/ProcessState.cpp ；frameworks/native/libs/binder/include/binder/IBinder.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>oneway 调用在内核侧只是 <code>TF_ONE_WAY = 0x01</code> 一个标志位，语义是「异步、无返回」。真正的限制来自异步缓冲的记账：目标进程为每个来源保留一份待处理异步事务，新事务可借 <code>TF_UPDATE_TXN = 0x40</code> 覆盖旧的，超出阈值时驱动回 <code>BR_ONEWAY_SPAM_SUSPECT</code>。缓冲用完后 oneway 不再进入目标队列，调用方看不到失败，这是「oneway 丢了」的主要成因。进程冻结后，异步事务与同步回复走不同的通知通道：<code>BR_FROZEN_REPLY</code> 管同步回复，<code>BR_TRANSACTION_PENDING_FROZEN</code> 管被冻结目标上的待处理事务。用户态默认开启刷屏检测，开关在 <code>ProcessState.cpp:50</code>。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P5-201</code>，驱动通用排队与线程池是理解异步缓冲记账的前提。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></li><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></li><li><code>frameworks/native/libs/binder/include/binder/IBinder.h</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机；验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>调用一个 AIDL 里的 <code>oneway</code> 方法，返回立刻成功，接收端却始终没进方法体。日志里出现 <code>BR_ONEWAY_SPAM_SUSPECT</code>，或者干脆什么都没有。另一头，某进程被冻结后，发给它的事务既不完成也不报错，调用线程就那么挂着。这两类现象都不是框架层在丢东西，而是内核契约层的缓冲与通知机制在起作用。要判断问题落在哪一段，得先看清 oneway 在 uapi 头文件里长什么样。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：事务标志、载荷形状、异步缓冲记账。标志决定事务是否走异步通道；载荷形状决定数据怎么搬（单块还是散布/聚集）；记账决定异步通道能容纳多少、何时报警。</p>
+<p>图 1：oneway 事务从用户态到目标队列的三层契约</p>
+<pre><code>用户态 IPCThreadState
+  | BC_TRANSACTION / BC_TRANSACTION_SG
+  |   flags 含 TF_ONE_WAY
+  v
+Binder 内核驱动（契约层）
+  |-- 同步通道：等待目标 reply
+  |-- 异步通道：按 (目标, 来源) 记账
+  |     新 async 事务 + TF_UPDATE_TXN
+  |       -&gt; 覆盖同目标旧 pending 事务
+  |     分配超阈值
+  |       -&gt; BR_ONEWAY_SPAM_SUSPECT
+  v
+目标进程 binder 线程读取
+  BR_TRANSACTION / BR_TRANSACTION_SEC_CTX</code></pre>
+<p><code>TF_ONE_WAY</code> 的注释原句是 &quot;this is a one-way call: async, no return&quot;。这句注释就是全部语义承诺：不返回。没有返回值通道，也没有失败回执通道。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>同族常量集中列出。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>TF_ONE_WAY</code></td><td>异步调用，无返回，值 <code>0x01</code></td><td><code>binder.h:341</code></td></tr><tr><td><code>TF_CLEAR_BUF</code></td><td>事务完成时清缓冲，值 <code>0x20</code></td><td><code>binder.h:345</code></td></tr><tr><td><code>TF_UPDATE_TXN</code></td><td>更新过期的待处理异步事务，值 <code>0x40</code></td><td><code>binder.h:346</code></td></tr><tr><td><code>BC_TRANSACTION_SG</code></td><td>散布/聚集方式发送事务</td><td><code>binder.h:613</code></td></tr><tr><td><code>BC_REPLY_SG</code></td><td>散布/聚集方式回复</td><td><code>binder.h:614</code></td></tr><tr><td><code>BINDER_ENABLE_ONEWAY_SPAM_DETECTION</code></td><td>刷屏检测开关，<code>_IOW('b', 16, __u32)</code></td><td><code>binder.h:321</code></td></tr><tr><td><code>BR_ONEWAY_SPAM_SUSPECT</code></td><td>异步缓冲超阈值告警</td><td><code>binder.h:513</code></td></tr><tr><td><code>BC_REQUEST_FREEZE_NOTIFICATION</code></td><td>申请冻结通知</td><td><code>binder.h:619</code></td></tr><tr><td><code>BC_CLEAR_FREEZE_NOTIFICATION</code></td><td>撤销冻结通知</td><td><code>binder.h:626</code></td></tr><tr><td><code>BC_FREEZE_NOTIFICATION_DONE</code></td><td>冻结通知处理完毕</td><td><code>binder.h:633</code></td></tr><tr><td><code>BR_FROZEN_REPLY</code></td><td>同步回复被冻结拦截</td><td><code>binder.h:507</code></td></tr><tr><td><code>BR_TRANSACTION_PENDING_FROZEN</code></td><td>目标被冻结，事务转入待处理</td><td><code>binder.h:520</code></td></tr><tr><td><code>BR_FROZEN_BINDER</code></td><td>冻结状态通知，载荷 <code>struct binder_frozen_state_info</code></td><td><code>binder.h:525</code></td></tr></tbody></table>
+<p><code>TF_UPDATE_TXN</code> 的注释原句是 &quot;update the outdated pending async txn&quot;。这是 oneway「只保留最新一份」的契约位：同一目标上尚未被读走的异步事务可被后来的同目标事务替换，而不是排队累积。</p>
+<p>载荷形状有两个扩展。<code>struct binder_transaction_data_sg</code>（<code>:389</code>）等于 <code>binder_transaction_data</code> 加一个 <code>buffers_size</code> 字段，把一块额外的缓冲区随事务一起带过去。<code>struct binder_transaction_data_secctx</code>（<code>:384</code>）等于 <code>binder_transaction_data</code> 加 <code>binder_uintptr_t secctx</code>，把安全上下文随事务传递。接收侧两者共用返回值 <code>2</code>：<code>BR_TRANSACTION_SEC_CTX</code>（<code>:424</code>）与 <code>BR_TRANSACTION</code>（<code>:429</code>）取值相同，区别只在读取方是否按带安全上下文的布局解释。</p>
+<p>冻结一侧的数据结构分三层。<code>struct binder_freeze_info</code>（<code>:268</code>）是 pid／enable／timeout_ms，控制侧下发。<code>struct binder_frozen_status_info</code>（<code>:274</code>）是 pid／sync_recv／async_recv，回读某进程在冻结期间是否收到过同步或异步事务。<code>struct binder_frozen_state_info</code>（<code>:287</code>）是 cookie／is_frozen／reserved，随 <code>BR_FROZEN_BINDER</code> 上报单个 Binder 对象的冻结状态。</p>
+<p>三条返回码的分工值得单独画出来，因为它们常被当成同一件事：</p>
+<p>图 2：冻结期间同步回复与异步事务的两条通知通道</p>
+<pre><code>                     目标进程被冻结
+                          |
+          +---------------+----------------+
+          |                                |
+   同步调用的发起方                   异步事务的发送方
+          |                                |
+   BR_FROZEN_REPLY                 BR_TRANSACTION_PENDING_FROZEN
+   （回复被扣住）                     （事务转入待处理）
+          |                                |
+          +---------------+----------------+
+                          |
+        控制侧经 BR_FROZEN_BINDER 收到状态变化
+        载荷 struct binder_frozen_state_info
+        回读用 struct binder_frozen_status_info</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>某进程 A 通过 oneway 向进程 B 连续发送更新。用户态默认开启刷屏检测：<code>ProcessState.cpp:50</code> 的 <code>DEFAULT_ENABLE_ONEWAY_SPAM_DETECTION 1</code>。A 每次调用都立即返回成功。</p>
+<p>B 的异步缓冲按来源记账。A 发来的后续事务命中 <code>TF_UPDATE_TXN</code> 路径，B 尚未读走的旧事务被替换，所以 B 只看到最新一份——这是设计如此，不是丢包。</p>
+<p>当 A 的发送速率持续高于 B 的消费速率，异步缓冲分配超过检测阈值，驱动向 A 回 <code>BR_ONEWAY_SPAM_SUSPECT</code>。头文件注释的原句是「Current process sent too many oneway calls to target, and the last asynchronous transaction makes the allocated async buffer size exceed detection threshold.」——译过来就是：当前进程向目标发送了过多 oneway 调用，最后一个异步事务使已分配的异步缓冲大小超过检测阈值。A 侧看到这个返回值，才知道自己的 oneway 已经在被限流。</p>
+<p>接着 B 被冻结。A 再发的异步事务进入待处理状态，A 收到 <code>BR_TRANSACTION_PENDING_FROZEN</code>；若 A 此前有同步调用挂在 B 上，A 收到 <code>BR_FROZEN_REPLY</code>。两条通道分开正是为了让调用方区分「异步没人接」和「同步回复被扣住」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>驱动通用排队、线程池唤醒与 <code>binder_thread</code> 生命周期归 <code>AND-P5-201</code>，本篇不重述。框架层 oneway 的声明语义、AIDL 生成代码的形态归 <code>AND-P2-101</code>。显示侧 vsync 与一帧抖动归 <code>AND-P5-401</code>，与异步事务缓冲无耦合。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>事务标志</td><td><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td><code>TF_ONE_WAY</code>、<code>TF_UPDATE_TXN</code>、<code>TF_CLEAR_BUF</code></td><td>标志位定义与注释原句</td></tr><tr><td>载荷形状</td><td>同上</td><td><code>binder_transaction_data_sg</code>、<code>binder_transaction_data_secctx</code></td><td>散布/聚集与安全上下文布局</td></tr><tr><td>命令与返回码</td><td>同上</td><td><code>BC_TRANSACTION_SG</code>、<code>BR_ONEWAY_SPAM_SUSPECT</code></td><td>用户态可见的协议面</td></tr><tr><td>冻结协议</td><td>同上</td><td><code>BC_REQUEST_FREEZE_NOTIFICATION</code>、<code>BR_FROZEN_BINDER</code></td><td>冻结通知的请求与上报</td></tr><tr><td>开关默认值</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>DEFAULT_ENABLE_ONEWAY_SPAM_DETECTION</code>、<code>DRIVER_FEATURES_PATH</code></td><td>默认开启与能力探测路径</td></tr><tr><td>命令下发</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>事务命令组装</td><td>标志如何进入 <code>BC_TRANSACTION</code></td></tr><tr><td>事务抽象</td><td><code>frameworks/native/libs/binder/include/binder/IBinder.h</code></td><td><code>FLAG_ONEWAY</code></td><td>框架层标志与内核标志的对应</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：external/kernel-headers:68a96878f2ce</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git -C external/kernel-headers rev-parse HEAD</code></pre>
+<p>期望输出 <code>68a96878f2ce</code>，对齐本篇锚点。</p>
+<pre><code class="lang-bash">grep -n &quot;TF_ONE_WAY\|TF_UPDATE_TXN\|TF_CLEAR_BUF&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>0x01</code>、<code>0x40</code>、<code>0x20</code> 三个值与各自的注释原句。</p>
+<pre><code class="lang-bash">sed -n '380,400p' external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>binder_transaction_data_secctx</code> 与 <code>binder_transaction_data_sg</code> 两个结构体并列。</p>
+<pre><code class="lang-bash">grep -n &quot;BC_TRANSACTION_SG\|BC_REPLY_SG\|BR_ONEWAY_SPAM_SUSPECT&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:613</code>、<code>:614</code>、<code>:513</code> 三处命中。</p>
+<pre><code class="lang-bash">grep -n &quot;FREEZE_NOTIFICATION\|FROZEN_REPLY\|PENDING_FROZEN\|FROZEN_BINDER&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到命令侧三条、返回侧三条的完整配对。</p>
+<pre><code class="lang-bash">grep -n &quot;DEFAULT_ENABLE_ONEWAY_SPAM_DETECTION\|DRIVER_FEATURES_PATH&quot; frameworks/native/libs/binder/ProcessState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:50</code> 与 <code>:537</code> 两处命中。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：oneway 返回成功就是送达了。</strong> 返回的是「事务已交给内核」。异步缓冲记账失败、目标被冻结、旧事务被 <code>TF_UPDATE_TXN</code> 覆盖，都不会让调用方收到失败。</p>
+<p><strong>误区二：连续 oneway 会排队，接收端按序全收到。</strong> 同目标上未读走的异步事务可被后续事务更新，接收端只留最新一份。要保序保量就不能用 oneway。</p>
+<p><strong>误区三：`BR_ONEWAY_SPAM_SUSPECT` 是一个错误码，收到就说明调用失败。</strong> 它是告警信号，提示已分配的异步缓冲超过检测阈值。它不表示某一次具体调用被拒。</p>
+<p><strong>误区四：冻结后所有事务都静默卡住。</strong> 同步回复与待处理异步事务走两条不同通知：<code>BR_FROZEN_REPLY</code> 与 <code>BR_TRANSACTION_PENDING_FROZEN</code>。调用方拿不到通知，多半是没注册冻结通知（<code>BC_REQUEST_FREEZE_NOTIFICATION</code>）。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>BR_TRANSACTION_SEC_CTX</code> 和 <code>BR_TRANSACTION</code> 值一样，接收端怎么区分？ <strong>答</strong>：内核给的是同一个值 <code>2</code>，能不能拿到安全上下文取决于读取方是否按 <code>binder_transaction_data_secctx</code> 的布局解释载荷。 <strong>追问</strong>：那读错了会怎样？ <strong>答</strong>：会把尾部多出的 <code>secctx</code> 字段当成别的东西，属于读取方布局选择问题，不是协议冲突。</p>
+<p><strong>问</strong>：默认刷屏检测能关吗？ <strong>答</strong>：能。<code>BINDER_ENABLE_ONEWAY_SPAM_DETECTION</code> 是 <code>_IOW('b', 16, __u32)</code> 的驱动开关，用户态默认值由 <code>ProcessState.cpp:50</code> 给出为 1。是否开启可由能力探测路径 <code>:537</code> 的 <code>DRIVER_FEATURES_PATH &quot;/dev/binderfs/features/&quot;</code> 查到的特性决定。 <strong>追问</strong>：关了就无限量吗？ <strong>答</strong>：不是。关掉的是检测告警，异步缓冲的记账与容量限制仍在。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>接收端只收到最后一次 oneway</td><td><code>grep -n &quot;TF_UPDATE_TXN&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>注释原句 &quot;update the outdated pending async txn&quot;</td><td>确认是否同目标重复发送，改用同步调用或自建队列</td></tr><tr><td>日志出现 spam suspect</td><td><code>grep -n &quot;BR_ONEWAY_SPAM_SUSPECT&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>注释里「异步缓冲超过检测阈值」的表述</td><td>降低 oneway 频率或让目标侧加快消费</td></tr><tr><td>冻结后调用无响应</td><td><code>grep -n &quot;BR_FROZEN_REPLY|BR_TRANSACTION_PENDING_FROZEN&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>两条返回码的载荷差异</td><td>检查是否发了 <code>BC_REQUEST_FREEZE_NOTIFICATION</code></td></tr><tr><td>大块载荷 oneway 失败</td><td><code>grep -n &quot;BC_TRANSACTION_SG&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td><code>binder_transaction_data_sg</code> 的 <code>buffers_size</code></td><td>确认发送路径走的是散布/聚集命令</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：驱动通用排队、线程池与唤醒归 <code>AND-P5-201</code>；框架侧 oneway 声明与 AIDL 生成代码归 <code>AND-P2-101</code>；vsync 与帧节奏归 <code>AND-P5-401</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P5-201</code>。</p>
+<p><strong>本篇后继</strong>：与冻结、进程生命周期相关的上层篇目；<code>AND-P5-401</code> 为同卷并行篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>TF_ONE_WAY</code> 取值 <code>0x01</code>，来源：源码常量（<code>binder.h:341</code>）。</li><li><code>TF_UPDATE_TXN</code> 取值 <code>0x40</code>，来源：源码常量（<code>binder.h:346</code>）。</li><li>刷屏检测的阈值数值：头文件只给语义不给数字，本篇不断言，列为待补。</li><li>异步缓冲的总容量上限：驱动实现不在本树核验范围，暂无实测，列为待补。</li><li>冻结超时默认值：结构体中只有 <code>timeout_ms</code> 字段（<code>binder.h:268</code>），取值由控制侧决定，本篇不断言。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树实测）</td><td><code>BR_TRANSACTION_SEC_CTX</code> 与 <code>BR_TRANSACTION</code> 共用值 <code>2</code>；冻结通知协议含 <code>BR_TRANSACTION_PENDING_FROZEN</code> 与 <code>BR_FROZEN_BINDER</code></td><td>接收端须按命令值加标志区分载荷布局</td></tr><tr><td>更早版本</td><td>冻结通知协议的存在与完整性本篇不断言，本树相关常量取样为 <code>:507</code>／<code>:520</code>／<code>:525</code></td><td>跨版本比对时按符号 grep 重锚，不按行号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>binder oneway</code>、<code>binder freeze notification</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>oneway spam detection</code>、<code>freeze notification</code>。</li><li>本仓关键路径：<code>external/kernel-headers/original/uapi/linux/android/binder.h</code>、<code>frameworks/native/libs/binder/ProcessState.cpp</code>。</li><li>承接篇：<code>AND-P5-201</code>、<code>AND-P2-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P5-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

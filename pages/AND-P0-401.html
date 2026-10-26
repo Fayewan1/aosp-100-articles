@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全书术语表与符号约定</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>全书术语表与符号约定</h1>
+<div class="kv"><span>ID：AND-P0-401</span><span>卷：P0</span><span>章：0.4</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/ProcessState.cpp ；system/core/init/main.cpp ；frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp ；build/make/core/version_util.mk ；build/make/core/build_id.mk</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>全书只有一份术语表：<code>_meta/glossary.md</code>（v1，四组 52 条）；本篇是它的读者侧入口，不另立第二套说法。标准名首次出现写「中文名（英文名）」，此后单用中文名即可；路径一律相对 AOSP 根，标识符与命令包反引号，状态枚举全大写。后续 11 卷只引用不重定义；要加术语，往 glossary 追加，不改旧条。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：无硬前置。本篇是 P0 卷的锚点篇，可作全书第一篇。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>system/core/init/main.cpp</code></li><li><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></li><li><code>build/make/core/version_util.mk</code></li><li><code>build/make/core/build_id.mk</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树 + <code>git</code>/<code>grep</code>；本篇为静态分析，不需要编译与真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你搜到三篇讲 Binder 的文章，一篇写「Binder 驱动」，一篇写「binder 机制」，一篇写「IPC 通道」，拿不准是不是同一个东西；自己写文档也纠结，该写 <code>Activity</code> 还是「活动」。更麻烦的是团队历史文档里同一概念三种叫法，新人接不上——问题不在读得少，在于缺一份全员共用的命名基线。本篇给的正是这份基线。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：术语表 SSOT（唯一真源）、标准名（首选写法）、别名（不得出现在正文的写法）。关系单向：SSOT 定标准名，标准名反推黑名单，正文只用标准名。</p>
+<p>图 1：术语表 SSOT 与各卷消费方的关系</p>
+<pre><code>术语表 SSOT (_meta/glossary.md, v1/52 条)
+        |
+        v
+   标准名 + aliases 黑名单
+        |
+        v
+   各卷正文（只引用，不重定义）</code></pre>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>glossary 分四组：进程与应用框架 / Binder 与 IPC / Native-ART-HAL / 内核-构建-工程。高频术语节选如下（完整 52 条以 glossary 为准）：</p>
+<table><thead><tr><th>名称</th><th>一句话定义</th></tr></thead><tbody><tr><td>Zygote 进程（Zygote）</td><td>预加载公共类与资源后 fork 出所有应用进程</td></tr><tr><td>活动（Activity）</td><td>与用户交互的单屏界面组件</td></tr><tr><td>服务（Service）</td><td>无界面、长时运行的后台组件</td></tr><tr><td>广播接收器（BroadcastReceiver）</td><td>响应系统或应用间广播消息的组件</td></tr><tr><td>内容提供器（ContentProvider）</td><td>跨应用共享结构化数据的组件</td></tr></tbody></table>
+<p>其余高频词同样以 glossary 为准：InputManager 输入管理器、Binder 机制、事务、oneway 调用、libbinder、ART 运行时、dex2oat、OAT 文件、JNI、ashmem、memfd、HAL 硬件抽象层、VINTF、gralloc、BufferQueue、SurfaceFlinger、vsync、Choreographer、HWUI、GKI、LMKD、PSI、zram、SELinux、seccomp、APEX、Soong。AMS、PMS、WMS 的缩写即标准名，禁用的是不带 Service 的裸类名。</p>
+<p>符号约定四条：路径一律相对 AOSP 根；标识符、命令、常量包反引号；版本坐标（manifest/API/QPR）以 <code>_meta/version-anchor.md</code> 为准，BUILD_ID 取值见 <code>build/make/core/build_id.mk</code>；状态枚举全大写。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>拿 <code>ProcessState</code> 走一遍引用规范：路径相对 AOSP 根写 <code>frameworks/native/libs/binder/ProcessState.cpp</code>；符号写 <code>ProcessState::self()</code>，包反引号，约 106 行；状态枚举写 <code>RESUMED</code>/<code>PAUSED</code>/<code>STOPPED</code>，全大写。它的标准名与中文名都是 <code>ProcessState</code>，不另造中文说法，写成其它同义写法即机检 FAIL。同类示范：<code>init</code>（<code>system/core/init/</code>，<code>int main</code> 在 <code>main.cpp</code> 约 53 行）、<code>SurfaceFlinger</code>（<code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code>）、<code>PLATFORM_VERSION</code>（<code>build/make/core/version_util.mk</code>，约 148–154 行）。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>与前置的 <code>AND-P0-G01</code> 共管约定层：G01 管阅读方法，本篇管命名与符号。后继各卷的机制类文章（如 Binder、ART、图形）引用本篇术语，不得自行展开定义；术语增补流程归后续工程规范，本篇只给「追加不改」这一条结论。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号</th></tr></thead><tbody><tr><td>术语引用示范</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>ProcessState::self()</code></td></tr><tr><td>入口进程示范</td><td><code>system/core/init/main.cpp</code></td><td><code>int main</code></td></tr><tr><td>图形合成示范</td><td><code>frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp</code></td><td><code>SurfaceFlinger</code></td></tr><tr><td>版本坐标示范</td><td><code>build/make/core/version_util.mk</code></td><td><code>PLATFORM_VERSION</code></td></tr><tr><td>版本号取值示范</td><td><code>build/make/core/build_id.mk</code></td><td><code>BUILD_ID</code></td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析；前两条在书仓根（<code>android-100/</code>）执行，后三条在源码树根执行。</p>
+<pre><code class="lang-bash"># 书仓根：术语表规模（期望 56 行，含 4 行表头，即 52 个条目行）
+grep -c '^| ' _meta/glossary.md
+# 书仓根：别名黑名单列（期望命中 aliases 列表头）
+grep -n 'aliases（禁用）' _meta/glossary.md</code></pre>
+<pre><code class="lang-bash"># 源码树根：符号行号示范（期望约 106 行）
+grep -n 'ProcessState::self' frameworks/native/libs/binder/ProcessState.cpp
+# 源码树根：入口符号（期望约 53 行）
+grep -n 'int main' system/core/init/main.cpp
+# 源码树根：版本取值逻辑（期望 ifndef PLATFORM_VERSION 起的 7 行）
+sed -n '148,154p' build/make/core/version_util.mk</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号仅为示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：每个概念每卷都可以自己定义一次。</strong> SSOT 只有 <code>_meta/glossary.md</code> 一份，后续 11 卷只引用不重定义。</p>
+<p><strong>误区二：别名只是「另一个说法」，用哪个都行。</strong> glossary aliases 列出的是黑名单，正文出现即机检 FAIL——是硬约束，不是风格偏好。</p>
+<p><strong>误区三（看起来对其实是错的）：路径写绝对路径更好找。</strong> 绝对路径绑死机器与目录；本书统一相对 AOSP 根，跨环境可复现。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：首次出现写了「中文名（英文名）」，第二次还要写英文吗？ <strong>答</strong>：不必，此后单用中文名即可。<strong>追问</strong>：那缩写能直接上吗？ <strong>答</strong>：看标准名列——AMS、PMS、WMS 的缩写即标准名；给 SurfaceFlinger 与 ContentProvider 配的缩写是黑名单。</p>
+<p><strong>问</strong>：遇到 glossary 里没有的术语怎么办？ <strong>答</strong>：走 glossary 追加，不改旧条。<strong>追问</strong>：能临时在正文先定义再补表吗？ <strong>答</strong>：不建议，会形成第二真源，先补表再引用。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>疑似用了别名</td><td><code>grep -n 'aliases（禁用）' _meta/glossary.md</code></td><td>对照 aliases 列</td><td>正文改用标准名</td></tr><tr><td>路径写了绝对路径</td><td><code>grep -rn '^/' *.md</code></td><td>是否相对根</td><td>去掉前导斜杠</td></tr><tr><td>术语条目数对不上</td><td><code>grep -c '^| ' _meta/glossary.md</code></td><td>是否 56 行</td><td>核对四组是否齐</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：各机制实现细节，见 P0 之后各卷对应篇目。</li><li><strong>前置依赖</strong>：<code>AND-P0-G01</code>。</li><li><strong>后继</strong>：机制类各卷，均引用本篇术语。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>术语表规模：52 条、四组，口径为 <code>_meta/glossary.md</code> 表格行（2026-10-14 实测；文件头自述「约 45 条」为旧口径）。</li><li>版本锚点 android17-release、API 37，口径为 <code>_meta/version-anchor.md</code>；BUILD_ID <code>CP2A.260605.016</code>，口径为 <code>build/make/core/build_id.mk</code>。</li><li>图从「图 1」起连续编号，表不编号（本书排版约定）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release</td><td>glossary v1 生效，四组 52 条</td><td>本树实测状态，正文按此校</td></tr><tr><td>后续版本</td><td>术语增补走追加</td><td>旧条不改，引用不失效</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 检索 <code>architecture</code>；developer.android.com 检索 <code>binder overview</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ProcessState</code>、<code>version_util</code>。</li><li>承接篇：<code>AND-P0-G01</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P0-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

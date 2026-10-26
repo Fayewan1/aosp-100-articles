@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>相机 HAL：Camera3、metadata 与流式配置</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>相机 HAL：Camera3、metadata 与流式配置</h1>
+<div class="kv"><span>ID：AND-P4-401</span><span>卷：P4</span><span>章：4.4</span><span>难度：4</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：hardware/interfaces/camera/provider/aidl/android/hardware/camera/provider/ICameraProvider.aidl ；hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDevice.aidl ；hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl ；frameworks/av/services/camera/libcameraservice/device3/Camera3Device.cpp ；system/media/camera/include/system/camera_metadata.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>相机 HAL 的接口被切成三段：<code>ICameraProvider</code> 枚举设备、<code>ICameraDevice</code> 拿到能力并打开、<code>ICameraDeviceSession</code> 做流配置与请求提交。三段都是 AIDL，流和请求都靠 metadata 描述，而 metadata 在请求与结果两个方向上各走一条 FMQ。接入失败的典型形态集中在一处：<code>configureStreams</code> 返回的 <code>HalStream[]</code> 与请求里假设的流对不上，后续 <code>processCaptureRequest</code> 就会长期无结果。判断「某件事能不能通过 HAL 做到」，先看它落在哪一段、对应符号是否在 <code>ICameraDevice</code> 或 <code>ICameraDeviceSession</code> 上。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P4-101（HAL 与 VINTF 的基础形态），本篇默认你已理解 HAL 接口按版本/接口注册的基本约定。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>hardware/interfaces/camera/provider/aidl/android/hardware/camera/provider/ICameraProvider.aidl</code></li><li><code>hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDevice.aidl</code></li><li><code>hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></li><li><code>frameworks/av/services/camera/libcameraservice/device3/Camera3Device.cpp</code></li><li><code>system/media/camera/include/system/camera_metadata.h</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>相机起流失败时，日志常只有一句 <code>configureStreams</code> 返回错误，看不出是流组合不支持还是格式/尺寸不匹配。请求卡住时，表现为 <code>processCaptureRequest</code> 返回成功但结果队列一直空。结果对不上时，是回调里拿到的 metadata 与请求中设置的参数不是同一套字段。这三种现象对应三段接口上的三类契约破坏，需要分别定位。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：<strong>provider</strong>（设备枚举者，进程级单入口）、<strong>device</strong>（单台相机的能力查询与打开句柄）、<strong>session</strong>（一次开流后的会话，承载流配置、请求与结果）。关系是单向的：provider 产出 device，device 打开后产出 session，session 关闭后回到 device。</p>
+<p>图 1：三段接口的调用链与 metadata 两条队列</p>
+<pre><code>ICameraProvider
+  getCameraIdList / getCameraDeviceInterface
+        |
+        v
+ICameraDevice
+  getCameraCharacteristics / isStreamCombinationSupported
+  open(ICameraDeviceCallback) -&gt; ICameraDeviceSession
+        |
+        v
+ICameraDeviceSession
+  configureStreams -&gt; HalStream[]
+  getCaptureRequestMetadataQueue  &lt;-- 请求 metadata (FMQ)
+  getCaptureResultMetadataQueue   &lt;-- 结果 metadata (FMQ)
+  processCaptureRequest / flush / close</code></pre>
+<p>两条 FMQ 的方向相反：请求 metadata 由框架写入、HAL 读出；结果 metadata 由 HAL 写入、框架读出。二者都是 <code>MQDescriptor&lt;byte, SynchronizedReadWrite&gt;</code>。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>第一段：枚举。</strong> <code>interface ICameraProvider</code>（<code>ICameraProvider.aidl:58</code>）只有少数几个方法。<code>getCameraIdList()</code>（:119）给出可用相机 id；<code>getCameraDeviceInterface(String)</code>（:147）按 id 取到该相机的 <code>ICameraDevice</code>；<code>notifyDeviceStateChange</code>（:186）把设备状态变化告知 provider。同目录还有 <code>CameraIdAndStreamCombination.aidl</code> 和 <code>ConcurrentCameraIdCombination.aidl</code>，描述多相机并发组合。</p>
+<p><strong>第二段：能力与打开。</strong> <code>ICameraDevice</code> 上，<code>getCameraCharacteristics()</code>（:63）返回静态能力集；<code>isStreamCombinationSupported(StreamConfiguration)</code>（:158）用来在不打开会话的前提下提前确认「这套流组合是否可行」；<code>open(ICameraDeviceCallback)</code>（:188）返回 <code>ICameraDeviceSession</code>；<code>constructDefaultRequestSettings</code>（:362）给出某类请求的默认参数；<code>setTorchMode</code>（:273）控制闪光灯常亮。</p>
+<p><strong>第三段：流与请求。</strong> <code>ICameraDeviceSession</code> 上，<code>configureStreams</code> 返回 <code>HalStream[]</code>（:162），这是流的实际配置结果；<code>processCaptureRequest(CaptureRequest[], BufferCache[] cachesToRemove)</code>（:486）提交请求，第二个参数是一批 <code>(streamId, bufferId)</code> 二元组，告知 HAL 这些缓冲可以从缓存表里删掉（<code>BufferCache.aidl:35</code>／<code>:39</code>）；<code>flush()</code>（:324）排空在途请求；<code>close()</code>（:50）结束会话；<code>configureStreamsV2</code> 返回 <code>ConfigureStreamsRet</code>（:616）。请求与结果的 metadata 各走一条队列：<code>getCaptureRequestMetadataQueue()</code>（:339）、<code>getCaptureResultMetadataQueue()</code>（:357）。</p>
+<table><thead><tr><th>方法</th><th>所属段</th><th>契约要点</th><th>出处</th></tr></thead><tbody><tr><td><code>getCameraIdList()</code></td><td>provider</td><td>返回可用相机 id 列表</td><td><code>ICameraProvider.aidl:119</code></td></tr><tr><td><code>getCameraDeviceInterface(String)</code></td><td>provider</td><td>按 id 取 device 句柄</td><td><code>ICameraProvider.aidl:147</code></td></tr><tr><td><code>notifyDeviceStateChange</code></td><td>provider</td><td>告知设备状态变化</td><td><code>ICameraProvider.aidl:186</code></td></tr><tr><td><code>getCameraCharacteristics()</code></td><td>device</td><td>静态能力集</td><td><code>ICameraDevice.aidl:63</code></td></tr><tr><td><code>isStreamCombinationSupported</code></td><td>device</td><td>提前确认组合可行性</td><td><code>ICameraDevice.aidl:158</code></td></tr><tr><td><code>open(ICameraDeviceCallback)</code></td><td>device</td><td>返回 session</td><td><code>ICameraDevice.aidl:188</code></td></tr><tr><td><code>constructDefaultRequestSettings</code></td><td>device</td><td>默认请求参数</td><td><code>ICameraDevice.aidl:362</code></td></tr><tr><td><code>setTorchMode</code></td><td>device</td><td>闪光灯常亮</td><td><code>ICameraDevice.aidl:273</code></td></tr><tr><td><code>configureStreams</code></td><td>session</td><td>返回 <code>HalStream[]</code></td><td><code>ICameraDeviceSession.aidl:162</code></td></tr><tr><td><code>processCaptureRequest</code></td><td>session</td><td>提交请求数组与待移除缓冲缓存</td><td><code>ICameraDeviceSession.aidl:486</code></td></tr><tr><td><code>flush()</code> / <code>close()</code></td><td>session</td><td>排空 / 结束会话</td><td><code>ICameraDeviceSession.aidl:324</code> / <code>:50</code></td></tr><tr><td><code>configureStreamsV2</code></td><td>session</td><td>返回 <code>ConfigureStreamsRet</code></td><td><code>ICameraDeviceSession.aidl:616</code></td></tr></tbody></table>
+<p><strong>metadata 的实体。</strong> 请求和结果的参数集在 C 侧是同一个类型：<code>typedef struct camera_metadata camera_metadata_t</code>（<code>camera_metadata.h:150</code>），容量申请走 <code>allocate_camera_metadata</code>（:167）。FMQ 里传的是这个结构的字节序列，所以两端对字段布局与容量的理解必须一致。</p>
+<p><strong>metadata 接口的版本面。</strong> <code>hardware/interfaces/camera/metadata/</code> 下同时存在 <code>3.2</code>–<code>3.7</code> 的 HIDL 版本与 <code>aidl</code> 目录。设备接口已经 AIDL 化，metadata 的旧版本目录仍在树里。</p>
+<p><strong>服务侧对应物。</strong> <code>Camera3Device::configureStreams</code>（<code>Camera3Device.cpp:1416</code>）是服务侧进入配置的入口，实际工作在 <code>configureStreamsLocked</code>（:2553）；请求提交收敛到 <code>submitRequestsHelper</code>（:862）。</p>
+<p>图 2：流配置的请求与权威结果</p>
+<pre><code>框架提交 StreamConfiguration          HAL 侧
+  width/height/format/usage   ----&gt;   资源协商
+                                      |
+  HalStream[]（流 id、格式、用法）&lt;---+
+     |
+     +--&gt; 后续请求必须引用这里的流 id，不用提交时的假设</code></pre>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一次典型的开流→出图过程，按符号走：</p>
+<ol><li><code>getCameraIdList()</code> 拿到 id，<code>getCameraDeviceInterface(id)</code> 得到 <code>ICameraDevice</code>。</li><li><code>getCameraCharacteristics()</code> 读能力，用 <code>isStreamCombinationSupported(StreamConfiguration)</code> 先验证预备的流组合。</li><li><code>open(ICameraDeviceCallback)</code> 得到 <code>ICameraDeviceSession</code>。</li><li>提交流配置。走哪个入口不是由调用方随便挑：框架按 <code>ANDROID_INFO_SUPPORTED_BUFFER_MANAGEMENT_VERSION</code> 二选一（<code>ICameraDeviceSession.aidl:93-96</code> 与 <code>:603-607</code> 两处文档都写明这条约束）——未声明该字段、或值为 <code>..._AIDL</code> 时调 <code>configureStreams</code>（:162）拿 <code>HalStream[]</code>；值为 <code>..._SESSION_CONFIGURABLE</code> 时改调 <code>configureStreamsV2</code>（:616）拿 <code>ConfigureStreamsRet</code>。<strong>返回的流是权威</strong>：后续请求里引用的流 id 必须以它为准，不能以提交时的假设为准。</li><li><code>getCaptureRequestMetadataQueue()</code> 与 <code>getCaptureResultMetadataQueue()</code> 各取一个 <code>MQDescriptor&lt;byte, SynchronizedReadWrite&gt;</code>。</li><li>每帧把 <code>camera_metadata_t</code> 序列化写入请求队列，再 <code>processCaptureRequest(CaptureRequest[], BufferCache[] cachesToRemove)</code> 提交（<code>BufferCache</code> 传空数组即可，只在要回收缓冲时才填）；结果从结果队列读出。</li><li>停止时 <code>flush()</code> 排空，再 <code>close()</code>。</li></ol>
+<p>失败点集中在第 4 步：如果 <code>HalStream[]</code> 里流 id 或格式与第 6 步写入的请求不一致，请求会被接受但永不出结果。</p>
+<p>图 3：一帧的请求与结果两条队列</p>
+<pre><code>框架                                  HAL
+  |-- 请求 metadata 写入 FMQ（:339）---&gt;|
+  |-- processCaptureRequest(:486) ---&gt;|
+  |                                   |  采集 / 处理
+  |&lt;-- 结果 metadata FMQ（:357）-------|
+  |&lt;-- CaptureResult（含流 id、时间戳）--|</code></pre>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>本篇只讲三段接口与流/请求的契约。相机服务如何管理 device、Camera2 API 如何映射到这些调用，归 P7-301。3A 算法与图像处理属 vendor 内部实现，不在接口契约内。显示侧是另一条「生产—提交」通路，见 P4-202，可与本篇的「配置—提交」结构对照阅读。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>枚举段接口</td><td><code>hardware/interfaces/camera/provider/aidl/android/hardware/camera/provider/ICameraProvider.aidl</code></td><td><code>getCameraIdList</code>、<code>getCameraDeviceInterface</code>、<code>notifyDeviceStateChange</code></td><td>进程级入口</td></tr><tr><td>能力与打开</td><td><code>hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDevice.aidl</code></td><td><code>getCameraCharacteristics</code>、<code>isStreamCombinationSupported</code>、<code>open</code></td><td>单相机句柄</td></tr><tr><td>流与请求</td><td><code>hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></td><td><code>configureStreams</code>、<code>processCaptureRequest</code>、两条 metadata 队列</td><td>会话主体</td></tr><tr><td>服务侧实现</td><td><code>frameworks/av/services/camera/libcameraservice/device3/Camera3Device.cpp</code></td><td><code>configureStreams</code>、<code>configureStreamsLocked</code>、<code>submitRequestsHelper</code></td><td>服务侧对应物</td></tr><tr><td>metadata 实体</td><td><code>system/media/camera/include/system/camera_metadata.h</code></td><td><code>camera_metadata_t</code>、<code>allocate_camera_metadata</code></td><td>请求/结果的数据结构</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/av:475269ec44ac</p></blockquote>
+<p>验证方式：静态源码分析。行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<pre><code class="lang-bash">git -C hardware/interfaces rev-parse HEAD</code></pre>
+<p>期望输出 <code>0162af698935...</code>，与本篇接口行号口径一致。</p>
+<pre><code class="lang-bash">grep -n &quot;getCameraIdList\|getCameraDeviceInterface\|notifyDeviceStateChange&quot; \
+  hardware/interfaces/camera/provider/aidl/android/hardware/camera/provider/ICameraProvider.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:119</code>、<code>:147</code>、<code>:186</code> 三处声明，对应 §4.2 第一段。</p>
+<pre><code class="lang-bash">grep -n &quot;getCameraCharacteristics\|isStreamCombinationSupported\|constructDefaultRequestSettings\|setTorchMode&quot; \
+  hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDevice.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:63</code>、<code>:158</code>、<code>:362</code>、<code>:273</code>，对应第二段的四个能力方法。</p>
+<pre><code class="lang-bash">grep -n &quot;configureStreams\|processCaptureRequest\|flush\|close\|MetadataQueue&quot; \
+  hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>:162</code>（<code>configureStreams</code>）、<code>:486</code>（<code>processCaptureRequest</code>）、<code>:324</code>（<code>flush</code>）、<code>:50</code>（<code>close</code>）、<code>:339</code>/<code>:357</code>（两条队列），以及 <code>:616</code> 的 <code>configureStreamsV2</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;MQDescriptor&lt;byte, SynchronizedReadWrite&gt;&quot; \
+  hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望两行命中，确认请求与结果队列的实体类型相同。</p>
+<pre><code class="lang-bash">grep -n &quot;Camera3Device::configureStreams\|configureStreamsLocked\|submitRequestsHelper&quot; \
+  frameworks/av/services/camera/libcameraservice/device3/Camera3Device.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:1416</code>、<code>:2553</code>、<code>:862</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;camera_metadata_t\|allocate_camera_metadata&quot; \
+  system/media/camera/include/system/camera_metadata.h</code></pre>
+<p>期望命中 <code>:150</code> 的类型定义与 <code>:167</code> 的容量申请。</p>
+<pre><code class="lang-bash">ls hardware/interfaces/camera/metadata/</code></pre>
+<p>期望输出包含 <code>3.2</code> 到 <code>3.7</code> 与 <code>aidl</code>，对应 §4.2 的版本面。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为请求里的流 id 由自己决定。</strong> 实际以 <code>configureStreams</code> 返回的 <code>HalStream[]</code> 为准。返回的流顺序、id 与提交时的假设不同时，请求仍会被接受，但结果不会来。</p>
+<p><strong>误区二：以为 `isStreamCombinationSupported` 是必须的。</strong> 它是可选的前置问答，不调用也能 <code>open</code> 并 <code>configureStreams</code>。它的价值在于把失败提前到开流之前。</p>
+<p><strong>误区三：以为两条 metadata 队列是同一块内存。</strong> 这个判断看起来有理，其实是错的。<code>getCaptureRequestMetadataQueue()</code>（:339）与 <code>getCaptureResultMetadataQueue()</code>（:357）返回两个独立的 <code>MQDescriptor&lt;byte, SynchronizedReadWrite&gt;</code>，方向相反，容量各自独立，不能复用同一块缓冲读写。</p>
+<p><strong>误区四：以为 metadata 的 AIDL 化意味着旧版本目录已删。</strong> <code>hardware/interfaces/camera/metadata/</code> 下 <code>3.2</code>–<code>3.7</code> 与 <code>aidl</code> 并存，设备接口 AIDL 化不等于 metadata 的 HIDL 版本目录消失。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>configureStreams</code> 返回成功，为什么还是不出帧？ <strong>答</strong>：先看返回的 <code>HalStream[]</code> 与你请求里引用的流是否一致，再确认请求 metadata 是否真的写进了请求队列。 <strong>追问</strong>：如果流一致、队列也写了，还是不回结果呢？ <strong>答</strong>：看 <code>flush()</code> 是否能正常返回；<code>flush</code> 卡住说明会话已在 HAL 侧失联，问题在更下层而不是请求参数。</p>
+<p><strong>问</strong>：<code>constructDefaultRequestSettings</code> 能不能完全替代自己组 metadata？ <strong>答</strong>：它给的是某类请求的默认参数骨架，能用，但不包含你业务相关的控制字段。 <strong>追问</strong>：那能不能把它返回的 metadata 直接改几个字段再用？ <strong>答</strong>：可以，但字段容量受 <code>allocate_camera_metadata</code> 申请的大小约束，加字段前要先确认容量够。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>起流失败</td><td><code>grep -n &quot;configureStreams&quot; hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></td><td>返回类型是 <code>HalStream[]</code> 还是 <code>ConfigureStreamsRet</code></td><td>确认服务侧走的是哪个变体，再对齐流 id</td></tr><tr><td>组合被拒</td><td><code>grep -n &quot;isStreamCombinationSupported&quot; hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDevice.aidl</code></td><td>该方法是否存在、签名是否与调用一致</td><td>在 <code>open</code> 之前先调用它做校验</td></tr><tr><td>请求无结果</td><td><code>grep -n &quot;MetadataQueue&quot; hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></td><td>两条队列是否都取了、方向是否用反</td><td>确认请求写请求队列、结果读结果队列</td></tr><tr><td>metadata 字段异常</td><td><code>grep -n &quot;allocate_camera_metadata&quot; system/media/camera/include/system/camera_metadata.h</code></td><td>容量申请的入口</td><td>核对两端对结构容量的理解是否一致</td></tr><tr><td>停流卡住</td><td><code>grep -n &quot;flush|close&quot; hardware/interfaces/camera/device/aidl/android/hardware/camera/device/ICameraDeviceSession.aidl</code></td><td><code>flush</code> 与 <code>close</code> 的调用顺序</td><td>先 <code>flush</code> 排空再 <code>close</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：相机服务与 Camera2 API 的映射（P7-301）；3A 算法与图像处理（vendor 内部）；显示侧同类通路（P4-202）。</li><li><strong>本篇前置依赖</strong>：AND-P4-101。</li><li><strong>本篇后继</strong>：P7-301。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>三段接口的方法规模：provider 段 3 个核心方法、device 段 4 个能力方法、session 段 5 个核心方法（口径：本篇 §4.2 表格，按源码符号统计）。</li><li>metadata 队列数量：2 条，方向相反（口径：<code>ICameraDeviceSession.aidl:339</code>、<code>:357</code>）。</li><li>metadata 版本目录范围：<code>3.2</code>–<code>3.7</code> 加 <code>aidl</code>（口径：<code>hardware/interfaces/camera/metadata/</code> 目录列表）。</li><li>单帧请求的 metadata 容量：暂无实测，列为待补（取决于各设备 <code>allocate_camera_metadata</code> 的实际申请值）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>（早期设备接口）</td><td>设备接口曾以 HIDL 形式存在，metadata 有 <code>3.2</code>–<code>3.7</code> 的版本目录</td><td>旧设备上 <code>configureStreams</code> 的返回形态与 AIDL 版不同，跨版本对接要对齐变体</td></tr><tr><td>android17-release（本树实测）</td><td><code>ICameraDeviceSession</code> 上 <code>configureStreams</code>（:162）返回 <code>HalStream[]</code>，另有 <code>configureStreamsV2</code>（:616）返回 <code>ConfigureStreamsRet</code>；metadata 的 <code>3.2</code>–<code>3.7</code> 与 <code>aidl</code> 并存</td><td>同一接口存在两套配置入口，服务侧选哪个决定返回结构与错误携带方式</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>camera hal</code>、<code>camera metadata</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ICameraDeviceSession</code>、<code>configureStreamsV2</code>、<code>camera_metadata</code>。</li><li>本仓关键路径：<code>hardware/interfaces/camera/device/aidl/</code>、<code>hardware/interfaces/camera/provider/aidl/</code>、<code>system/media/camera/include/system/</code>。</li><li>承接篇：AND-P4-101、P7-301。</li></ul>
+</article>
+<footer>android-100 · AND-P4-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

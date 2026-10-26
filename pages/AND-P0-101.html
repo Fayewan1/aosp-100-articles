@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Android 的版本与发布节奏：从半年发到 trunk-stable</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Android 的版本与发布节奏：从半年发到 trunk-stable</h1>
+<div class="kv"><span>ID：AND-P0-101</span><span>卷：P0</span><span>章：0.1</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/make/core/version_util.mk ；build/make/core/build_id.mk ；build/release/flag_values/trunk_staging/RELEASE_PLATFORM_VERSION_LAST_STABLE.textproto ；build/release/release_configs/trunk_staging.textproto</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 的版本号不再靠「半年一个大版本」的手工排期，而是由一套 release config 旗标派生出来的。<code>release_configs/trunk_staging.textproto</code> 声明配置类型，<code>flag_values/trunk_staging/</code> 下的旗标给出 LAST_STABLE、CODENAME、SDK 三个值，<code>version_util.mk</code> 再把它们派生成 <code>PLATFORM_VERSION</code> 等变量。<code>trunk_staging</code> 三个旗标的实测值是 <code>17</code>、<code>Baklava</code>、<code>37</code>；同一棵树上别名 <code>aosp_current</code> 指向的 <code>cp2a</code> 已定型，派生出的是数字 <code>17</code>。构建号前缀与版本一一对应：<code>ap3a</code> → 15，<code>bp2a</code> → 16，<code>cp2a</code> → 17。codename 屡经试改与回滚、SDK 定型后未再变动，这个时间差在本树可复现，并非笔误。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：无硬前置。本篇是版本坐标背景篇。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/release/release_configs/trunk_staging.textproto</code></li><li><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_VERSION_LAST_STABLE.textproto</code></li><li><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_VERSION_CODENAME.textproto</code></li><li><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_SDK_VERSION.textproto</code></li><li><code>build/make/core/version_util.mk</code></li><li><code>build/make/core/build_id.mk</code></li><li><code>.repo/manifests/default.xml</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树 + git/grep 即可。本篇验证方式为静态源码分析，不需要编译与真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你看到构建号 <code>CP2A.260605.016</code>，想知道它对应哪个 Android 版本。翻 <code>build_id.mk</code> 只有一串数字，翻文档说是「Android 17」，但 <code>PLATFORM_VERSION_CODENAME</code> 里写着 <code>Baklava</code>，SDK 又写着 <code>37</code>。三个数字互不相同，谁是版本、谁是别名，没有一处集中说明。更麻烦的是 <code>release_configs</code> 下躺着 <code>ap4a</code>、<code>bp4a</code>、<code>cp1a</code>、<code>mainline_2026_01</code> 等一长串配置，看不出哪个是「当前」。这篇把这些散落的符号拉成一条链。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个关键概念：release config（一套命名的版本参数集合）、旗标（flag，配置里的单个键值）、派生变量（构建系统读旗标后算出的变量）。</p>
+<p>图 1：发布配置到派生变量的传导</p>
+<pre><code>release config  →  旗标键值  →  派生变量
+trunk_staging      LAST_STABLE=17    PLATFORM_VERSION
+                   CODENAME=Baklava  PLATFORM_VERSION_CODENAME
+                   SDK_VERSION=37    PLATFORM_VERSION_SDK_VERSION</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>build/release/release_configs/trunk_staging.textproto</code> 是配置的入口，内容为 <code>name &quot;trunk_staging&quot;</code>、<code>release_config_type RELEASE_CONFIG</code>，并把 aconfig 值集指向 <code>aconfig_value_set-platform_build_release-trunk_staging</code>。取值按旗标拆成独立 textproto 文件。</p>
+<p><code>build/make/core/version_util.mk</code> 负责派生：当 codename 为 <code>REL</code> 时 <code>PLATFORM_VERSION</code> 取 <code>PLATFORM_VERSION_LAST_STABLE</code>，否则取 codename（约 148–154 行）。即开发中显示甜点名、已发布显示数字。</p>
+<p>同族旗标集中如下：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>RELEASE_PLATFORM_VERSION_LAST_STABLE</code></td><td>最近一个已定型的主版本号</td><td><code>flag_values/trunk_staging/</code></td></tr><tr><td><code>RELEASE_PLATFORM_VERSION_CODENAME</code></td><td>当前开发分支的甜点名</td><td><code>flag_values/trunk_staging/</code></td></tr><tr><td><code>RELEASE_PLATFORM_SDK_VERSION</code></td><td>该分支的 API 级别</td><td><code>flag_values/trunk_staging/</code></td></tr><tr><td><code>RELEASE_PLATFORM_VERSION_KNOWN_CODENAMES</code></td><td>历史 codename 清单</td><td><code>flag_values/trunk_staging/</code></td></tr></tbody></table>
+<p><code>RELEASE_PLATFORM_VERSION_KNOWN_CODENAMES</code> 的末位是 <code>Baklava</code>，前面依次是 <code>UpsideDownCake</code>、<code>VanillaIceCream</code>。想改动 codename 清单只能经这个 <code>RELEASE_*</code> 旗标传入，直接设置 <code>PLATFORM_VERSION_KNOWN_CODENAMES</code> 会报 error。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>读 <code>build/release/flag_values/trunk_staging/</code> 三个文件，得到 <code>LAST_STABLE=&quot;17&quot;</code>、<code>CODENAME=&quot;Baklava&quot;</code>、<code>SDK=&quot;37&quot;</code>。codename 不是 <code>REL</code>，<code>PLATFORM_VERSION</code> 取 <code>Baklava</code>。构建号由 <code>build/make/core/build_id.mk</code> 给出：<code>BUILD_ID=CP2A.260605.016</code>，前缀 <code>cp2a</code> 对应的旗标是 37 / 17 / <code>REL</code>，与 <code>ap3a</code>（35 / 15 / <code>REL</code>）、<code>bp2a</code>（36 / 16 / <code>REL</code>）同族。同一棵树上有两套取值：<code>cp2a</code> 已定型，<code>PLATFORM_VERSION</code> 显示数字 <code>17</code>；<code>trunk_staging</code> 仍在开发，显示 <code>Baklava</code>。<code>build/release/release_config_map.textproto</code> 的别名 <code>aosp_current</code> 本树指向 <code>cp2a</code>，而 <code>lunch</code> 不给 <code>TARGET_RELEASE</code> 时默认取 <code>trunk_staging</code>（<code>build/make/envsetup.sh</code> 用法说明）——故「本树版本」须带配置类型。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>前置篇 <code>AND-P0-G01</code> 给出全书阅读地图与版本锚点口径。同卷的 <code>AND-P0-102</code> 及后续篇目按本文建立的坐标谈具体子系统，遇到「这个 API 从哪个版本起有」时回查 §6 的旗标读取方法。构建细节归 <code>AND-P11-101</code>、<code>AND-P11-201</code>，本篇不涉及 Soong。锚点口径以 <code>_meta/version-anchor.md</code> 为准。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>版本派生</td><td><code>build/make/core/version_util.mk</code></td><td><code>PLATFORM_VERSION_LAST_STABLE</code></td><td>codename 决定取数字还是甜点名</td></tr><tr><td>构建号</td><td><code>build/make/core/build_id.mk</code></td><td><code>BUILD_ID=CP2A.260605.016</code></td><td>前缀与版本段可见</td></tr><tr><td>主版本</td><td><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_VERSION_LAST_STABLE.textproto</code></td><td><code>&quot;17&quot;</code></td><td>最近定型主版本</td></tr><tr><td>配置入口</td><td><code>build/release/release_configs/trunk_staging.textproto</code></td><td><code>name &quot;trunk_staging&quot;</code></td><td>声明配置类型与值集</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/make:5ce6f78733</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 当前分支锚点来自 manifest 默认 revision
+grep default .repo/manifests/default.xml
+# 期望：可见 revision 指向 android17-release，即全书 version_anchor
+
+# 2. 读三个旗标取值
+grep -r &quot;RELEASE_PLATFORM&quot; build/release/flag_values/trunk_staging/
+# 期望：LAST_STABLE 为 17、CODENAME 为 Baklava、SDK_VERSION 为 37
+
+# 3. 确认 codename 清单末位
+grep -r &quot;KNOWN_CODENAMES&quot; build/release/flag_values/trunk_staging/
+# 期望：以 ...,UpsideDownCake,VanillaIceCream,Baklava 结尾
+
+# 4. 看构建号与版本派生行
+grep BUILD_ID build/make/core/build_id.mk
+sed -n '145,156p' build/make/core/version_util.mk
+# 期望：BUILD_ID 为 CP2A.260605.016；派生分支里 codename 为 REL 才取 LAST_STABLE
+
+# 5. 核对锚点提交与标签
+git -C build/make rev-parse HEAD
+git -C build/make tag --points-at HEAD
+# 期望：HEAD 为 5ce6f78733，带 tag android-17.0.0_r1</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：SDK 版本号就是平台主版本号。</strong> 本树里两者差 20：SDK 是 <code>37</code>，主版本是 <code>17</code>。两者由不同旗标控制，各走各的节奏。</p>
+<p><strong>误区二：codename 一变，SDK 就跟着跳。</strong> 事实相反。<code>trunk_staging</code> 的 codename 当前仍是 2024-10-22 设定的 <code>Baklava</code>，但期间两度试改又回滚：2025-12-08 改成 <code>DEV</code>、次日回滚，2026-03-04 改成 <code>CinnamonBun</code>、03-10 再回滚（<code>git log</code> 可证）。同期 SDK 在 2026-03-04 推到 <code>37</code> 后没再动过。codename 试改与回滚不带动 SDK。</p>
+<p><strong>误区三（看起来对其实是错的）：构建号前缀只是流水号，跟版本无关。</strong> 前缀是版本段。<code>ap3a</code> 对应 SDK 35 / LAST_STABLE 15，<code>bp2a</code> 对应 36 / 16，<code>cp2a</code> 对应 37 / 17，首字母与数字段都在编码版本信息。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>PLATFORM_VERSION</code> 到底显示 <code>17</code> 还是 <code>Baklava</code>？ <strong>答</strong>：看 codename 是否为 <code>REL</code>。是则取 <code>PLATFORM_VERSION_LAST_STABLE</code>，否则取 codename（约 148–154 行）。 <strong>追问</strong>：开发阶段用户看到的版本是什么？ <strong>答</strong>：甜点名，本树是 <code>Baklava</code>；定型后翻成 <code>REL</code>，对外变回数字 <code>17</code>。</p>
+<p><strong>问</strong>：为什么 <code>release_configs</code> 下有这么多配置？ <strong>答</strong>：目录里另有 <code>ap2a</code>/<code>ap3a</code>/<code>ap4a</code>/<code>bp1a</code>–<code>bp4a</code>/<code>cp1a</code>/<code>cp2a</code>/<code>eng</code>/<code>userdebug</code>/<code>mainline_2026_01</code>–<code>04</code> 等，是历史与变体并存。 <strong>追问</strong>：怎么确认本树用的是哪个配置？ <strong>答</strong>：<code>build/release/release_config_map.textproto</code> 的别名 <code>aosp_current</code> 本树指向 <code>cp2a</code>；它与 manifest 的 <code>android17-release</code> 是两套坐标：前者选 release config，后者选同步分支。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知道当前版本</td><td><code>grep BUILD_ID build/make/core/build_id.mk</code></td><td>前缀如 <code>CP2A</code></td><td>用前缀查旗标目录</td></tr><tr><td>版本显示成甜点名</td><td><code>grep -r CODENAME build/release/flag_values/trunk_staging/</code></td><td>是否为 <code>REL</code></td><td>非 <code>REL</code> 属预期</td></tr><tr><td>改动 codename 清单报错</td><td><code>grep -r KNOWN_CODENAMES build/release/flag_values/trunk_staging/</code></td><td>是否经 <code>RELEASE_*</code> 传入</td><td>改 <code>RELEASE_</code> 前缀旗标</td></tr><tr><td>构建号频繁跳</td><td><code>git -C build/make log --oneline -6 -- core/build_id.mk</code></td><td>是否全是 Version bump</td><td>属正常节奏</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Soong 构建系统内部（<code>AND-P11-101</code>、<code>AND-P11-201</code>）；各版本具体 API 增删（按卷内对应篇号）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P0-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P0-102</code> 及后续按坐标编排的篇目。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>锚点值 <code>android17-release</code>，口径为 <code>.repo/manifests/default.xml</code> 的 default revision，2026-10-14 实测。</li><li><code>trunk_staging</code> 三旗标值 <code>17</code>/<code>Baklava</code>/<code>37</code>，口径为该目录下 textproto，2026-10-14 实测；同树 <code>cp2a</code> 为 <code>17</code>/<code>REL</code>/<code>37</code>。</li><li>构建号 <code>CP2A.260605.016</code>，口径为 <code>build/make/core/build_id.mk</code>，2026-10-14 实测。</li><li>近期 bump 间隔：011→016 跨 2026-05-14 到 06-03，口径为 <code>build_id.mk</code> 最近 6 次提交，2026-10-14 实测。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>SDK 35（<code>ap3a</code>）</td><td>LAST_STABLE 15、codename <code>REL</code></td><td>已定型，对外显示数字</td></tr><tr><td>SDK 36（<code>bp2a</code>）</td><td>LAST_STABLE 16、codename <code>REL</code></td><td>已定型，对外显示数字</td></tr><tr><td>android17-release（本树 <code>aosp_current</code> → <code>cp2a</code>）</td><td>LAST_STABLE 17、codename <code>REL</code>、SDK 37</td><td>已定型，对外显示数字 <code>17</code></td></tr><tr><td>同树 <code>trunk_staging</code> 配置</td><td>LAST_STABLE 17、codename <code>Baklava</code>、SDK 37</td><td>开发中，对外显示甜点名</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>release configs</code>、<code>platform version codenames</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>release_config</code>、<code>version_util</code>。</li><li>本仓关键路径：<code>build/release/release_configs/</code>、<code>build/release/flag_values/trunk_staging/</code>、<code>build/make/core/version_util.mk</code>。</li><li>承接篇：<code>AND-P0-G01</code>、<code>AND-P0-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P0-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PMS、InputManager 与其余系统服务：安装、权限授予与输入分发</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>PMS、InputManager 与其余系统服务：安装、权限授予与输入分发</h1>
+<div class="kv"><span>ID：AND-P2-203</span><span>卷：P2</span><span>章：2.2</span><span>难度：3</span><span>核验：2026-10-15</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/java/com/android/server/SystemServer.java ；frameworks/base/services/core/java/com/android/server/pm/PackageManagerService.java ；frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java ；frameworks/base/services/core/java/com/android/server/input/InputManagerService.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>system_server</code> 把上百个系统服务分成三批拉起：<code>startBootstrapServices</code>、<code>startCoreServices</code>、<code>startOtherServices</code>，顺序本身就是依赖声明。安装链的核心在 <code>PackageManagerService</code>，实际安装动作落在 <code>InstallPackageHelper.installPackagesTraced</code>。输入链的 Java→native 对接发生在 <code>InputManagerService</code> 构造期（<code>mNative</code> 字段初始化，InputManagerService.java:569 → JNI cpp:657），<code>start()</code> 只负责随后启动 native 事件循环，窗口管理器的构造又反过来依赖输入管理器实例。三条线共同解释一件事：服务怎么起、怎么注册、怎么被 Binder 找到。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P2-101，先建立「服务由谁托管、Binder 如何被找到」的基础，否则 §4 的注册与查找会显得跳跃。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/PackageManagerService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/input/InputManagerService.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>、<code>grep</code>。不需要编译，不需要真机，本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>给系统加一个自定义服务，最常遇到的困惑是：代码写完了，<code>ServiceManager.addService</code> 也调了，可 <code>getSystemService</code> 拿到的还是 null。查日志又只看到一串服务名，看不出谁先谁后。另一头，改安装逻辑的开发者会发现：真正干活的不是 <code>PackageManagerService</code> 本体，而是一个 <code>InstallPackageHelper</code>，入口方法名里还带着 <code>Traced</code>。这两类困惑指向同一件事：系统服务不是平铺的，它有一张隐式的启动编排表。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念串起本篇：</p>
+<ul><li><strong>系统服务（system service）</strong>：活在 <code>system_server</code> 进程里的单例对象，由 <code>SystemServiceManager</code> 按阶段拉起。</li><li><strong>Binder 注册点</strong>：服务构造后经 <code>ServiceManager.addService</code> 把自身 Binder 挂到内核驱动，供其他进程按名字查找。</li><li><strong>阶段（boot phase）</strong>：服务之间用「阶段」表达先后依赖，比如 WMS 必须等到传感器服务就绪。</li></ul>
+<p>三者关系：编排决定构造顺序 → 构造完注册 Binder → 后启动的服务可通过阶段感知前者的存在。</p>
+<p>图 1：三段式启动与注册的关系</p>
+<pre><code>SystemServer
+  ├─ startBootstrapServices  → AMS / PMS
+  ├─ startCoreServices
+  └─ startOtherServices      → IMS → WMS → ServiceManager.addService</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>SystemServer</code> 的三段式启动是全篇骨架。Bootstrap 段先起 AMS 与 PMS：<code>ActivityManagerService.Lifecycle.startService</code> 负责前者，<code>PackageManagerService.main</code> 负责后者——注意这里 <code>main</code> 是静态入口，真正的构造与方法定义在 <code>PackageManagerService.java</code>。</p>
+<p>Other 段的次序更值得记：<code>InputManagerService</code> 先起，随后才是 <code>WindowManagerService.main(...)</code>。WMS 的构造实参里直接传入了 <code>inputManager</code>，所以输入管理器必须先于窗口管理器存在；在起 WMS 之前还有一次 <code>startBootPhase(t, SystemService.PHASE_WAIT_FOR_SENSOR_SERVICE)</code>，注释写明 WMS needs sensor service ready。</p>
+<p>服务注册以 WMS 为例：</p>
+<pre><code class="lang-java">ServiceManager.addService(Context.WINDOW_SERVICE, wm,
+    allowIsolated=false,
+    DUMP_FLAG_PRIORITY_CRITICAL | DUMP_FLAG_PRIORITY_HIGH | DUMP_FLAG_PROTO);</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>addService</code> 的四个实参（名字常量、Binder 对象、<code>allowIsolated</code> 布尔、一组 dump 优先级标志）中，后两类集中在一处，走的是同一套常量族：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>DUMP_FLAG_PRIORITY_CRITICAL</code></td><td>最高 dump 优先级</td><td><code>SystemServer.java</code> 注册调用</td></tr><tr><td><code>DUMP_FLAG_PRIORITY_HIGH</code></td><td>高 dump 优先级</td><td>同上</td></tr><tr><td><code>DUMP_FLAG_PROTO</code></td><td>输出 protobuf 格式 dump</td><td>同上</td></tr><tr><td><code>allowIsolated=false</code></td><td>不允许隔离进程访问</td><td>同上</td></tr></tbody></table>
+<p>安装链的入口同样集中：<code>InstallPackageHelper</code> 承担真正的安装流程，<code>installPackagesTraced(List&lt;InstallRequest&gt; requests, MoveInfo moveInfo)</code> 是包内方法（无 public 修饰，调用方限于同包的 <code>PackageManagerService</code>，InstallPackageHelper.java:1081）。权限授予侧由 <code>DefaultPermissionGrantPolicy</code> 承担默认授权，运行期校验路径不属本篇。</p>
+<p>输入链：先辨清三个名字——输入管理器（<code>InputManager</code>，glossary 标准名，指事件分发语义）由 Java 服务类 <code>InputManagerService</code> 承载，其 native 侧类型是 <code>NativeInputManagerService</code>（字段名 <code>mNative</code>）。Java 与 native 的构造对接发生在 <code>InputManagerService</code> 构造期：<code>mNative</code> 字段初始化（InputManagerService.java:569）经 JNI 落到 <code>NativeInputManager</code> 构造（com_android_server_input_InputManagerService.cpp:657），在那里 <code>new InputManager(...)</code>（位于 <code>frameworks/native/services/inputflinger/InputManager.cpp</code>）并 <code>addService(&quot;inputflinger&quot;)</code> 注册。<code>start()</code>（646 行）里的 <code>mNative.start()</code>（648 行）只是随后启动 native 事件循环，不是构造对接点——这个先后常被读反。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>想象一次开机：<code>startBootstrapServices</code> 在 1192 行进入，先走 AMS 的 <code>Lifecycle.startService</code>（1294），再走 <code>PackageManagerService.main</code>（1375）。到了 <code>startOtherServices</code>：1739–1741 行起 <code>InputManagerService</code>，并通过 <code>.getService()</code> 拿回实例；1754–1755 行推进到 <code>PHASE_WAIT_FOR_SENSOR_SERVICE</code>；1756 行调用 <code>WindowManagerService.main(...)</code>，把前面拿到的 <code>inputManager</code> 当实参传进去；1758–1760 行把 <code>wm</code> 注册进 <code>ServiceManager</code>。整个过程没有「服务列表注册中心」，顺序即约定。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><strong>AND-P2-201 / AND-P2-202</strong>：深讲 AMS、WMS 单链；本篇只借它们做编排样例。</li><li><strong>AND-P2-302</strong>：权限运行期校验路径归该篇，本篇只到 <code>DefaultPermissionGrantPolicy</code> 的默认授权入口。</li><li><strong>P9-201</strong>：权限模型归该篇。</li><li><strong>P5-302</strong>：输入子系统的内核侧归该篇，本篇只到 native inputflinger 的构造入口。</li><li><strong>P1 / P8</strong>：安装完成后的进程与组件运行归 P1/P8 两卷的相关篇。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>服务编排</td><td><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td><code>startBootstrapServices</code> / <code>startCoreServices</code> / <code>startOtherServices</code></td><td>三段式启动骨架</td></tr><tr><td>包管理</td><td><code>frameworks/base/services/core/java/com/android/server/pm/PackageManagerService.java</code></td><td><code>main</code>、<code>PackageManagerService.java:1714</code></td><td>静态入口与构造</td></tr><tr><td>安装流程</td><td><code>frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code></td><td><code>installPackagesTraced</code></td><td>安装链落点</td></tr><tr><td>输入服务</td><td><code>frameworks/base/services/core/java/com/android/server/input/InputManagerService.java</code></td><td><code>start()</code>、<code>mNative.start()</code></td><td>Java 到 native 的桥</td></tr><tr><td>默认授权</td><td><code>frameworks/base/services/core/java/com/android/server/pm/permission/</code></td><td><code>DefaultPermissionGrantPolicy</code></td><td>默认授权入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git -C frameworks/base log -1 --format=%H</code></pre>
+<p>期望输出：<code>94b4c163b7df…</code>，确认锚点与工作树一致。</p>
+<pre><code class="lang-bash">grep -n &quot;startBootstrapServices\|startCoreServices\|startOtherServices&quot; \
+  frameworks/base/services/java/com/android/server/SystemServer.java | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：出现 1192 行附近的 <code>startBootstrapServices</code> 定义，以及 core、other 两段的定义与调用点，对应事实 1。</p>
+<pre><code class="lang-bash">grep -n &quot;InputManagerService.Lifecycle\|PHASE_WAIT_FOR_SENSOR_SERVICE\|WindowManagerService.main&quot; \
+  frameworks/base/services/java/com/android/server/SystemServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>InputManagerService.Lifecycle</code> 在 1739–1741 区间，<code>PHASE_WAIT_FOR_SENSOR_SERVICE</code> 在 1754–1755，<code>WindowManagerService.main</code> 在 1756，对应事实 3。</p>
+<pre><code class="lang-bash">grep -n &quot;installPackagesTraced&quot; \
+  frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：方法定义在 1081 行附近，对应事实 5。</p>
+<pre><code class="lang-bash">grep -n &quot;mNative.start\|public void start&quot; \
+  frameworks/base/services/core/java/com/android/server/input/InputManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>start()</code> 在 646 行附近、<code>mNative.start()</code> 在 648 行附近，对应事实 6。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<p>补充运行时对照口径（不计入本篇验证方式）：<code>adb shell dumpsys activity services</code>、<code>adb shell dumpsys input</code>、<code>adb shell pm list packages</code>。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li><strong>误区一</strong>：以为 <code>SystemServer</code> 里有一个服务清单表，加服务只需往表里登记。纠正：顺序是写死在三个 <code>start*Services</code> 方法里的语句，没有声明式的服务清单，先后关系靠代码位置与阶段表达。</li><li><strong>误区二</strong>：以为 <code>PackageManagerService.main</code> 就是安装逻辑的入口。纠正：<code>main</code> 是静态启动入口，方法定义在 1714 行；实际安装落在 <code>InstallPackageHelper.installPackagesTraced</code>。</li><li><strong>误区三</strong>（看起来对其实是错的）：以为 WMS 可以先于输入服务起，只要构造时传个占位对象即可。纠正：<code>WindowManagerService.main</code> 的实参就是前一步拿到的 <code>inputManager</code>，输入服务必须先完成启动。</li><li><strong>误区四</strong>：以为注册进 <code>ServiceManager</code> 就等于立刻可被所有进程访问。纠正：注册调用还带 <code>allowIsolated</code>、dump 优先级等参数，隔离进程的访问是被显式排除的。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 WMS 要等传感器服务就绪？ <strong>答</strong>：<code>startBootPhase(t, SystemService.PHASE_WAIT_FOR_SENSOR_SERVICE)</code> 处的注释直接写了 WMS needs sensor service ready，说明窗口管理器的初始化依赖传感器数据通路。 <strong>追问</strong>：那输入服务和传感器是一个东西吗？ <strong>答</strong>：不是。输入服务由 <code>InputManagerService</code> 承担，传感器服务是另一个阶段所等待的对象，两者在编排里是先后相邻但不同的节点。</p>
+<p><strong>问</strong>：两个服务都要注册，会不会互相覆盖？ <strong>答</strong>：注册用的是 <code>Context</code> 里的名字常量，如 <code>Context.WINDOW_SERVICE</code>，重名会冲突，所以每个服务用各自的常量。 <strong>追问</strong>：怎么确认某个名字确实挂上了？ <strong>答</strong>：静态核验时按 <code>addService</code> 实参配合 grep 定位；运行时用 <code>adb shell dumpsys activity services</code> 对照。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>新服务拿不到</td><td><code>grep -n &quot;addService&quot; frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td>注册调用是否存在、在哪个方法内</td><td>检查注册语句位置是否早于使用方</td></tr><tr><td>启动顺序报依赖错</td><td><code>grep -n &quot;PHASE_WAIT_FOR_SENSOR_SERVICE&quot; frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td>阶段推进点是否在目标服务启动之前</td><td>按阶段检查前序服务</td></tr><tr><td>安装入口找不到</td><td><code>grep -rn &quot;installPackagesTraced&quot; frameworks/base/services/core/java/com/android/server/pm/</code></td><td>定义位置与调用点</td><td>沿调用栈回溯到 <code>PackageManagerService</code></td></tr><tr><td>输入不生效</td><td><code>grep -n &quot;mNative.start&quot; frameworks/base/services/core/java/com/android/server/input/InputManagerService.java</code></td><td>native 是否被启动</td><td>顺着 <code>InputManager::InputManager</code> 查看 native 侧</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：AMS 单链见 AND-P2-201；WMS 单链见 AND-P2-202；权限运行期校验见 AND-P2-302；权限模型见 P9-201；输入子系统内核侧见 P5-302；安装后的进程与组件运行见 P1 / P8。</li><li><strong>本篇前置依赖</strong>：AND-P2-101。</li><li><strong>本篇后继</strong>：AND-P2-201、AND-P2-202、AND-P2-302。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>三批启动段数量：3（口径：<code>SystemServer</code> 源码方法名，本树实测）。</li><li>输入服务先于窗口管理器的次序：1 步（口径：源码语句顺序，本树实测）。</li><li>注册调用的 dump 标志数量：3 个优先级标志 + 1 个布尔参数（口径：<code>addService</code> 调用实参，本树实测）。</li><li>系统服务总数：暂无实测，列为待补（口径需 dumpsys 运行时统计）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本（据公开 AOSP 历史，本树未回溯核实）</td><td>无 <code>InstallPackageHelper</code> 独立类型，安装逻辑集中于 <code>PackageManagerService</code></td><td>安装入口的 grep 位置不同，需按符号而非行号定位</td></tr><tr><td>android17-release（本树实测）</td><td>安装落点为 <code>InstallPackageHelper.installPackagesTraced</code>（1081），输入桥为 <code>mNative.start()</code>（648）</td><td>本篇路径与行号口径成立</td></tr><tr><td>未来版本</td><td>启动段划分可能调整</td><td>三段式方法名是稳定锚点，行号会漂移</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>system server</code>、<code>input pipeline</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>SystemServer startOtherServices</code>、<code>InstallPackageHelper</code>。</li><li>本仓关键路径：<code>frameworks/base/services/java/com/android/server/SystemServer.java</code>、<code>frameworks/base/services/core/java/com/android/server/pm/InstallPackageHelper.java</code>、<code>frameworks/base/services/core/java/com/android/server/input/InputManagerService.java</code>。</li><li>承接篇：AND-P2-201、AND-P2-202。</li></ul>
+</article>
+<footer>android-100 · AND-P2-203 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：落到内核</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：落到内核</h1>
+<div class="kv"><span>ID：AND-P5-G01</span><span>卷：P5</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：kernel/configs/README.md ；kernel/configs/kernel-lifetimes.xml ；external/kernel-headers/original/uapi/linux/android/binder.h ；system/memory/lmkd/lmkd.cpp ；bionic/libc/kernel/uapi/linux/input.h ；system/core/libsuspend/autosuspend.c</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>上承 VINTF 校验：HAL 契约之下就是内核接口，本卷回答「请求最终落到内核的哪条路径」。9 篇按五组展开：GKI 与构建配置（101）、Binder 内核驱动与 oneway 缓冲（201/202）、内存与输入（301/302）、显示与电源（401/402）、安全（501）。先给结论：Binder 卡要看驱动契约而非应用代码，进程被杀要看 lmkd 而非 GC 日志，触摸事件要沿 uapi 头一路回溯。源码边界先说清：本树 <code>kernel/</code> 下只有 <code>configs</code>、<code>prebuilts</code>、<code>tests</code> 三个仓，没有 kernel/common，驱动实现细节不在本卷核验范围。篇篇都标了「哪些结论来自用户态契约、哪些只是内核约定」，读的时候别把两者混为一谈。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读（本卷入门，建议全读）</p></blockquote>
+<p><strong>建议先读</strong>：AND-P4-102（VINTF 校验）——VINTF 管的是 HAL 契约，契约往下就是本卷的内核接口，读完再接本卷最顺。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>kernel/configs/README.md</code></li><li><code>kernel/configs/kernel-lifetimes.xml</code></li><li><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></li><li><code>system/memory/lmkd/lmkd.cpp</code></li><li><code>bionic/libc/kernel/uapi/linux/input.h</code></li><li><code>system/core/libsuspend/autosuspend.c</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个应用调 Binder 偶发超时，翻应用代码翻不出问题。一个后台进程莫名被杀，日志里没有异常退出，只有系统侧一条低内存记录。一条触摸事件从手指落到界面中间丢了，不知道断在驱动、输入子系统还是分发层。三种现象三套代码栈，落到内核层却共用同一条思路：找到请求穿过的那个接口，看契约怎么约定、失败形态长什么样。本篇是这本卷的地图，只告诉你每类现象该翻哪一篇。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>入卷四个概念：</p>
+<ul><li><strong>GKI（通用内核镜像，Generic Kernel Image）</strong>：内核二进制与配置的交付形态，决定哪些能力被编进去。</li><li><strong>uapi 头</strong>：用户态与内核共享的接口声明，本卷反复出现的「唯一契约」就指它。</li><li><strong>用户态代理进程</strong>：把策略做在用户态的常驻进程，<code>lmkd</code> 是典型。</li><li><strong>seccomp（安全计算模式，secure computing mode）</strong>：以系统调用为粒度的过滤机制。</li></ul>
+<p>图 1：请求从应用到内核的四条常见落点</p>
+<pre><code>应用/框架
+  ├─ Binder 事务  -&gt; Binder 内核驱动 -&gt; binder.h 契约
+  ├─ 内存压力     -&gt; lmkd 策略进程
+  ├─ 输入事件     -&gt; input.h 契约 -&gt; 输入子系统
+  └─ 显示/电源/安全 -&gt; DRM、autosuspend、SELinux</code></pre>
+<p>四者的关系：uapi 头管「能不能调、参数长什么样」；用户态代理管「什么时候做动作」；GKI 管「这些能力是否在场」。读任何一篇，先分清自己在看哪一层。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇，分 5 章（5.1–5.5）：</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P5-G01</code></td><td>卷导读：落到内核</td><td>本篇：地图与读法</td></tr><tr><td><code>AND-P5-101</code></td><td>内核构建与配置：GKI、defconfig 与模块化</td><td>基础设施章（5.1），先决篇：能力是否在场</td></tr><tr><td><code>AND-P5-201</code></td><td>Binder 内核驱动：binder.c、线程池调度与优先级继承</td><td>纵链终点章（5.2），<strong>锚点篇</strong>，A 档</td></tr><tr><td><code>AND-P5-202</code></td><td>Binder oneway 与缓冲限制：内核侧的形状</td><td>纵链终点章（5.2），B 档横切，201 的失败形态展开</td></tr><tr><td><code>AND-P5-301</code></td><td>内存管理：LMKD、PSI 与 zram/swap</td><td>内存章（5.3），A 档，进程被杀的主线</td></tr><tr><td><code>AND-P5-302</code></td><td>输入子系统：evdev、多点触控与按键映射</td><td>外设章（5.4），A 档，触摸事件来源</td></tr><tr><td><code>AND-P5-401</code></td><td>图形与显示：DRM/KMS、vsync 与 TE 信号</td><td>外设章（5.4），A 档，一帧抖动的下沉终点</td></tr><tr><td><code>AND-P5-402</code></td><td>电源管理：suspend/resume、runtime PM 与 wakeup 源</td><td>电源与安全章（5.5），B 档横切</td></tr><tr><td><code>AND-P5-501</code></td><td>安全模块：SELinux、seccomp 与 IMA</td><td>电源与安全章（5.5），A 档，出卷索引至 P9-202</td></tr></tbody></table>
+<p>依赖链：101 → 201 → 202；101 → 301、302、401、402、501。101 放最前是因为配置决定能力边界，后面的篇目都默认「能力在场」。201 是锚点篇：它把「uapi 头即契约」讲透，其余各篇的读法同构。202 必须紧接 201，否则 oneway 缓冲耗尽的现象会被误读到应用层。</p>
+<p>出卷衔接：401 → P6-201（SurfaceFlinger 合成）｜101 → P8-101（启动镜像）与 P11-201（A/B 分区）｜501 → P9-202（应用沙箱与 SELinux 域）｜301 → P10-201（内存分析）。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以 Binder 为例走一遍读法。<code>external/kernel-headers/original/uapi/linux/android/binder.h</code> 共 640 行，是 Binder 内核驱动对用户态的唯一契约头。其 ioctl 枚举共 14 个入口，从 <code>BINDER_WRITE_READ</code>（:309）到 <code>BINDER_GET_EXTENDED_ERROR</code>（:322）。</p>
+<p>读法三步：先在头文件里定位你要用的那个入口；再确认参数结构体里的字段边界；最后才去应用侧对号。反过来做——从应用代码猜驱动行为——就是 201 要纠正的第一类误区。驱动内部怎么实现，本树没有 kernel/common，不做核验。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><strong>前置</strong>：AND-P4-102 管 HAL 契约，本卷管契约之下的内核接口。</li><li><strong>边界</strong>：GKI 配置细节只在 101；Binder 驱动内幕只在 201/202；LMKD 策略只在 301；输入/显示/电源/安全各子系统机制分归 302/401/402/501。本篇一个都不展开。</li><li><strong>后继</strong>：见 §8。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>GKI 分支导航</td><td><code>kernel/configs/README.md</code></td><td>顶层字母目录命名规则</td><td>分支代号从这读</td></tr><tr><td>版本生命周期</td><td><code>kernel/configs/kernel-lifetimes.xml</code></td><td><code>no-releases</code>、LTS 子版本条目</td><td>判断某分支是否已发版</td></tr><tr><td>Binder 契约</td><td><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>ioctl 枚举 13 项、640 行</td><td>201/202 的锚点文件</td></tr><tr><td>低内存策略</td><td><code>system/memory/lmkd/lmkd.cpp</code></td><td><code>enum lmk_cmd</code>、单文件 4100 余行</td><td>301 的落点</td></tr><tr><td>输入契约</td><td><code>bionic/libc/kernel/uapi/linux/input.h</code></td><td>uapi 输入事件定义</td><td>302 的落点</td></tr><tr><td>电源挂起</td><td><code>system/core/libsuspend/autosuspend.c</code></td><td>自动挂起控制流</td><td>402 的落点</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：kernel/configs:553fd8d03411</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">ls -d kernel/*</code></pre>
+<p>期望：只列出 <code>configs</code>、<code>prebuilts</code>、<code>tests</code> 三个目录，印证内核 C 源码不在本树。</p>
+<pre><code class="lang-bash">ls -d kernel/configs/*</code></pre>
+<p>期望：7 个顶层字母目录 <code>b</code>、<code>c</code>、<code>d</code>、<code>s</code>、<code>t</code>、<code>u</code>、<code>v</code>，即 GKI 分支代号；此外还会列出 <code>build</code>、<code>tools</code>、<code>xsd</code> 三个非分支目录，<code>-d</code> 不过滤目录，只看目录的话它们一并出现。</p>
+<pre><code class="lang-bash">ls kernel/configs/b/android-6.12/</code></pre>
+<p>期望：5 个文件——<code>Android.bp</code>、<code>android-base-conditional.xml</code>、<code>android-base.config</code>、<code>android-tv-base-conditional.xml</code>、<code>android-tv-base.config</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;no-releases&quot; kernel/configs/kernel-lifetimes.xml</code></pre>
+<p>期望：<code>android17-6.18</code> 分支记为 <code>&lt;no-releases reason=&quot;branch in pre-release phase&quot;/&gt;</code>。</p>
+<pre><code class="lang-bash">wc -l external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：640 行。</p>
+<pre><code class="lang-bash">grep -n &quot;BINDER_WRITE_READ\|BINDER_GET_EXTENDED_ERROR&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：分别落在 <code>:309</code> 与 <code>:322</code>，印证 ioctl 枚举 14 个入口的首尾。</p>
+<pre><code class="lang-bash">grep -c &quot;lmk_cmd&quot; system/memory/lmkd/include/lmkd.h</code></pre>
+<p>期望：非零命中，对照 <code>enum lmk_cmd</code> 共 12 项继续数。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：读内核问题必须读内核 C 源码。</strong> 错。本树 <code>kernel/</code> 下只有 <code>configs</code>、<code>prebuilts</code>、<code>tests</code> 三个仓，没有 kernel/common。本卷所有结论都建立在用户态可观测契约上，驱动实现不在核验范围。</p>
+<p><strong>误区二：uapi 头只是「声明」，随便看看就行。</strong> 恰好相反。<code>binder.h</code> 是 Binder 内核驱动对用户态的唯一契约头，640 行里 14 个 ioctl 入口就是全部对话面。参数边界、缓冲上限都从这几百行读出来。</p>
+<p><strong>误区三（看起来对其实是错的）：低内存杀进程的策略在内核里。</strong> 低内存策略的实际执行体是 <code>system/memory/lmkd/lmkd.cpp</code>，单文件 4100 余行，在用户态。内核提供压力信号，进程去或留由用户态决定。301 讲这件事。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：我只追一个现象，能不能不按顺序读？</p>
+<p><strong>答</strong>：可以，按 §4.1 的落点图对号入座就行。追 Binder 从 201 起，追进程被杀从 301 起，追触摸从 302 起。</p>
+<p><strong>追问</strong>：那为什么还建议 101 先读？</p>
+<p><strong>答</strong>：101 管「能力是否在场」。跳过它，后面可能把「配置没编进去」误诊成「机制有问题」。</p>
+<p><strong>问</strong>：本卷所有篇目都能在用户态核验吗？</p>
+<p><strong>答</strong>：是。每篇都给 uapi 头、用户态代理或内核约定的锚点，不依赖驱动 C 源码。</p>
+<p><strong>追问</strong>：那结论的可靠度会不会打折？</p>
+<p><strong>答</strong>：契约层面的结论是硬的——接口在不在、参数长什么样都可核验；驱动内部时序不做断言，避免越界。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知道某能力是否编进内核</td><td><code>ls -d kernel/configs/b/android-6.12/</code></td><td>5 个配置文件是否齐全</td><td>转 101</td></tr><tr><td>怀疑版本分支还没发版</td><td><code>grep -n &quot;no-releases&quot; kernel/configs/kernel-lifetimes.xml</code></td><td>该分支条目</td><td>转 101</td></tr><tr><td>Binder 调用超时</td><td><code>grep -n &quot;BINDER_WRITE_READ&quot; external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>ioctl 入口位置</td><td>转 201</td></tr><tr><td>进程被杀找不到异常退出</td><td><code>wc -l system/memory/lmkd/lmkd.cpp</code></td><td>策略执行体的规模</td><td>转 301</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：GKI 配置细节归 101；Binder 驱动内幕归 201/202；LMKD 策略归 301；输入/显示/电源/安全各子系统机制归 302/401/402/501。</li><li><strong>本篇前置依赖</strong>：AND-P4-102。</li><li><strong>本篇后继</strong>：101、201（201 为锚点篇，202 紧随）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>本卷 9 篇、5 章（5.1–5.5）——口径：本篇编排事实。</li><li><code>kernel/</code> 下 3 个仓、<code>kernel/configs</code> 顶层 7 个分支目录——口径为 2026-10-18 于 android17-release 实测。</li><li><code>binder.h</code> 640 行、14 个 ioctl 入口——口径同上。</li><li><code>lmkd.cpp</code> 单文件 4100 余行、12 个 <code>enum lmk_cmd</code>——口径同上。</li><li>驱动实现内部时序：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android16-6.12</td><td><code>kernel-lifetimes.xml</code> 已有 4 个 LTS 子版本条目</td><td>属已发版状态，可对照生命周期判断维护窗口</td></tr><tr><td>android17-6.18</td><td>记为 <code>&lt;no-releases reason=&quot;branch in pre-release phase&quot;/&gt;</code></td><td>预发布阶段，版本相关断言需注明口径</td></tr><tr><td>android17-release（本树实测）</td><td><code>kernel/configs</code> 顶层 7 个字母目录：b、c、d、s、t、u、v；v→android-6.6，b→android-6.12，c 与 d→android-6.18</td><td>分支代号到内核版本的映射以本树为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>GKI</code>、<code>generic kernel image</code>；kernel.org 站内检索 <code>uapi</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>binder.h</code>、<code>lmkd</code>。</li><li>本仓关键路径：<code>kernel/configs/README.md</code>、<code>external/kernel-headers/original/uapi/linux/android/binder.h</code>、<code>system/memory/lmkd/lmkd.cpp</code>。</li><li>承接篇：201（锚点篇）、101（先决篇）。</li></ul>
+</article>
+<footer>android-100 · AND-P5-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

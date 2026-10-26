@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：从通电到桌面</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：从通电到桌面</h1>
+<div class="kv"><span>ID：AND-P8-G01</span><span>卷：P8</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/init/first_stage_init.cpp ；system/core/init/init.cpp ；system/core/rootdir/init.rc ；system/core/rootdir/init.zygote64.rc ；frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/services/java/com/android/server/SystemServer.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>开机不是一件事，是一条链：bootloader 交棒后，一阶段 init 挂载分区，二阶段 init 解析 init.rc，属性系统起来，Zygote 预热，system_server 起服务，最后 <code>sys.boot_completed</code> 落下、桌面可交互。这条链上任何一环卡住，现象都表现为「开机慢」或「停在动画」，但根因位置完全不同。本卷 9 篇按链条顺序切开，每篇负责一段，能定位到具体文件与符号。导读只给地图和读法，不重复各篇论证。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P2-401（进程模型）。Zygote 与 system_server 的形态都建立在该篇的进程模型上，缺了它 301/401 会读得吃力。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>system/core/init/first_stage_init.cpp</code></li><li><code>system/core/init/init.cpp</code></li><li><code>system/core/rootdir/init.rc</code></li><li><code>system/core/rootdir/init.zygote64.rc</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>现场常听到三种说法：「开机慢」「卡在开机动画」「进桌面后要等很久才能点」。这三种现象在日志里往往混在一起，因为从内核交棒到桌面可交互是一整条同步依赖链，任何一段慢了都会被用户归为同一句话。想拆开它，必须知道链条上有哪几段、每段的入口文件是什么、交接点由谁置位。本卷就是给这条链做分段编号。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>链条的主干是串行的：bootloader 把控制权交出去，之后每一段都要等上一段完成某件事。有一处容易被读成「并列分支」，其实是派生关系——<code>class_start main</code>（把 <code>zygote</code> 这一类服务整体拉起）写在 <code>on nonencrypted</code>（<code>init.rc:1227-1229</code>）里，它的排入者不是 rc 里某条 <code>trigger</code>，而是 fs_mgr 的挂载返回码：设备侧 rc 调 <code>mount_all</code> 时，<code>do_mount_all</code> 内部的 <code>queue_fs_event</code>（<code>builtins.cpp:583</code>/<code>:601</code>）按返回码把 <code>nonencrypted</code> 排进队列（<code>:583</code> 对应 <code>DEV_NOT_ENCRYPTABLE</code>，<code>:601</code> 覆盖 <code>FILE_ENCRYPTED</code>/<code>IS_METADATA_ENCRYPTED</code>/<code>NEEDS_METADATA_ENCRYPTION</code> 三种加密情形——加密设备上这条分支必然被排入）。<code>mount_all</code> 通常挂在 <code>on late-init</code> 的 fs 段之后（本树 rootdir 的 rc 里没有这条命令，故本树不可达），所以这一支实际发生在 <code>trigger post-fs-data</code>（:537）与 <code>trigger load-bpf-programs</code>（:540）之后、<code>trigger zygote-start</code>（:543）之前——是先后关系，不是并列关系。</p>
+<p>图 1：从通电到桌面的主链与各段归属</p>
+<pre><code>bootloader（不在本树）
+   |
+一阶段 init  -&gt; 挂载必须分区
+   |
+二阶段 init  -&gt; 解析 init.rc，触发 early-init/init/late-init
+   |              |
+   |              +--[派生] on nonencrypted（:1227）← 设备侧 mount_all 经 queue_fs_event 排入
+   |                        执行早于 :543；class_start main/late_start（:1228/:1229），无属性门控
+   |
+属性系统就绪 -&gt; 服务可读 prop
+   |
+Zygote       -&gt; 预加载类与资源，等待 fork（起点是 on zygote-start 的 start zygote，不是 trigger boot）
+   |
+system_server -&gt; 起几百个服务，进入三阶段
+   |
+boot_completed -&gt; 开机动画退出，桌面可交互
+                  另有 on property:sys.boot_completed=1（:1237-1241）与
+                  :1102 的无电池配置分支，都是属性驱动的后续动作</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键概念四个：一阶段 init 负责「盘有了」；二阶段 init 负责「规则有了」；属性系统负责「配置可查」；Zygote 与 system_server 负责「进程有了、服务有了」。前两段在 C++，后两段在 Java。</p>
+<p>这一支的落点要记清：<code>class_start main</code> 不在 <code>late-init</code> 的 <code>trigger</code> 序列里，它在 <code>on nonencrypted</code>；而 <code>zygote</code> 自己那条路是 <code>on zygote-start</code>（<code>init.rc:1091</code>）里的 <code>start zygote</code>（<code>:1094</code>）单独点名的。两者不对称，不能当成可互换的两条路：<code>on nonencrypted</code> 没有属性门控，进队就执行 <code>class_start</code>；<code>on zygote-start</code> 段内第一行是 <code>wait_for_prop odsign.verification.done 1</code>（<code>:1092</code>），<code>:1094</code> 的 <code>start zygote</code> 要等这个属性到位才执行——所以「<code>zygote-start</code> 被触发」与「<code>zygote</code> 真的起来」是两个时点，中间可能隔着一段等待。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇，按链条顺序排列。先看地图再决定读哪篇。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P8-101</code></td><td>bootloader 到 init</td><td>链条第 1 段，一阶段挂载与二阶段起始</td></tr><tr><td><code>AND-P8-102</code></td><td>镜像格式与 fastboot</td><td>链条第 0 段的产物形态，决定 bootloader 能加载什么</td></tr><tr><td><code>AND-P8-201</code></td><td>init.rc 语法与触发器</td><td>二阶段的执行规则</td></tr><tr><td><code>AND-P8-202</code></td><td>属性系统</td><td>服务编排的配置底座</td></tr><tr><td><code>AND-P8-301</code></td><td>Zygote 启动流程</td><td>全卷锚点篇，第一段 Java 代码</td></tr><tr><td><code>AND-P8-302</code></td><td>类共享与 USAP</td><td>Zygote fork 快的原因与代价</td></tr><tr><td><code>AND-P8-401</code></td><td>SystemServer 三阶段</td><td>服务编排的主体</td></tr><tr><td><code>AND-P8-402</code></td><td>开机性能埋点</td><td>全链的度量手段</td></tr></tbody></table>
+<p>依赖链：<code>AND-P8-101</code> → <code>AND-P8-102</code> → <code>AND-P8-201</code> → <code>AND-P8-202</code> → <code>AND-P8-301</code> → <code>AND-P8-401</code>。这条是主链，顺着读。<code>AND-P8-102</code> 是 101 的前置知识（镜像格式不清楚就看不懂挂载了什么）；<code>AND-P8-302</code> 是 301 的延伸，可与 301 分头读；<code>AND-P8-402</code> 跨全卷，任何一段想量化都可以先读它。锚点篇是 <code>AND-P8-301</code>，它是整条链第一次进入 Java 世界的位置，也是本卷版本差异最值得核的一篇。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以「属性从哪来」追一遍可以看清分段。二阶段 init 由 <code>system/core/init/init.cpp</code> 承载（共 1346 行），它解析 <code>system/core/rootdir/init.rc</code>（共 1320 行；本文件内 8 个 <code>import</code>、7 条以 <code>service</code> 开头的定义，被 import 引入的服务不在这个计数里）。里面 <code>on late-init</code>（init.rc:518）内先 <code>trigger zygote-start</code>（init.rc:543）拉起 zygote 与 zygote_secondary，之后还依次 <code>trigger firmware_mounts_complete</code>（:546）与 <code>trigger early-boot</code>（:548），最后才 <code>trigger boot</code>（init.rc:549）；被触发的 <code>on zygote-start</code>（init.rc:1091）里 <code>start zygote</code> 与 <code>start zygote_secondary</code> 在 :1094–:1095；这之前还有 <code>trigger load-bpf-programs</code>（:540），夹在 <code>post-fs-data</code>（:537）与 <code>zygote-start</code>（:543）之间。也就是说：late-init 先触发 zygote-start 拉起 Java 世界的入口，再发 boot 触发。这里要防一个误读——<code>zygote</code> 的起点是 <code>on zygote-start</code> 里的 <code>start zygote</code>（:1094，服务自身还带 <code>class main</code>），不是 <code>trigger boot</code>；<code>on nonencrypted</code> 那条 <code>class_start main</code>（:1228）是另一条能起同一类的路径。再往后，<code>ZygoteInit.java</code>（共 1009 行）跑完，<code>SystemServer.java</code>（共 3862 行）编排服务，最后由 <code>ActivityManagerService.finishBooting()</code> 设置 <code>sys.boot_completed</code>（<code>ActivityManagerService.java:5991</code>）与 <code>dev.bootcomplete</code>（:5992）。一条属性，跨了四个文件、三个语言边界。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>入卷前置两篇：AND-P5-101（GKI/镜像构建）是 <code>AND-P8-101</code> 的前置；AND-P2-401（进程模型）是 <code>AND-P8-301</code> 与 <code>AND-P8-401</code> 的前置。</p>
+<p>出卷后继四组：<code>AND-P8-202</code> 与 AND-P3-101（属性消费侧）对读；<code>AND-P8-401</code> 接 AND-P2-203（各服务启动时机）；<code>AND-P8-402</code> 接 AND-P10-101/102（性能方法论与启动优化）；<code>AND-P8-301</code> 与 AND-P1-101（App 进程诞生）对读。</p>
+<p>边界分工：镜像格式与 fastboot 归 <code>AND-P8-102</code>；init.rc 语法与触发器归 <code>AND-P8-201</code>；属性系统归 <code>AND-P8-202</code>；Zygote 启动归 <code>AND-P8-301</code>/<code>AND-P8-302</code>；SystemServer 编排归 <code>AND-P8-401</code>；开机性能埋点归 <code>AND-P8-402</code>。本篇不谈任何一段的内部实现。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>一阶段入口</td><td><code>system/core/init/first_stage_init.cpp</code></td><td>分区挂载</td><td>共 599 行，C++</td></tr><tr><td>一阶段 main</td><td><code>system/core/init/first_stage_main.cpp</code></td><td><code>int main(int argc, char** argv)</code></td><td>第 19 行定义 main，第 20 行调用 <code>FirstStageMain</code>；全文 21 行</td></tr><tr><td>二阶段入口</td><td><code>system/core/init/init.cpp</code></td><td><code>early-init</code>/<code>init</code>/<code>charger</code>/<code>late-init</code></td><td>共 1346 行，触发序列在 1239/1261/1280/1282；charger 与 late-init 是 :1279-1283 的二选一分支，非充电模式才走 late-init</td></tr><tr><td>执行规则</td><td><code>system/core/rootdir/init.rc</code></td><td><code>service</code>、<code>on late-init</code>、<code>on zygote-start</code></td><td>共 1320 行；本文件内 8 import、7 条 service 定义（不含 import 引入的）</td></tr><tr><td>触发 boot</td><td><code>system/core/rootdir/init.rc</code></td><td><code>trigger boot</code></td><td>init.rc:549，位于 <code>on late-init</code></td></tr><tr><td>起 zygote</td><td><code>system/core/rootdir/init.rc</code></td><td>zygote / zygote_secondary</td><td>init.rc:1091</td></tr><tr><td>Zygote 入口</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td>预加载、等待 fork</td><td>共 1009 行</td></tr><tr><td>服务编排</td><td><code>frameworks/base/services/java/com/android/server/SystemServer.java</code></td><td>三阶段启动</td><td>共 3862 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e381；frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行，行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<pre><code class="lang-bash">wc -l system/core/init/first_stage_init.cpp system/core/init/init.cpp \
+      system/core/rootdir/init.rc \
+      frameworks/base/core/java/com/android/internal/os/ZygoteInit.java \
+      frameworks/base/services/java/com/android/server/SystemServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：599、1346、1320、1009、3862 五个行数，与 §4.3 一致。</p>
+<pre><code class="lang-bash">sed -n '549p;1091p' system/core/rootdir/init.rc</code></pre>
+<p>期望输出：第 549 行含 <code>trigger boot</code>，第 1091 行是 <code>on zygote-start</code> 所在处。</p>
+<pre><code class="lang-bash">sed -n '1239p;1261p;1282p' system/core/init/init.cpp</code></pre>
+<p>期望输出：三行分别落在 <code>early-init</code>、<code>init</code>、<code>late-init</code> 的触发处。</p>
+<pre><code class="lang-bash">grep -n 'FirstStageMain' system/core/init/first_stage_main.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：只命中一行——第 20 行的 <code>return android::init::FirstStageMain(argc, argv);</code>。第 19 行是 <code>int main(int argc, char** argv) {</code>，行内不含 <code>FirstStageMain</code> 字样，所以不会被这条 grep 捞出。</p>
+<pre><code class="lang-bash">grep -c '^service ' system/core/rootdir/init.rc; grep -c '^import ' system/core/rootdir/init.rc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>7</code> 与 <code>8</code>，对应 <code>init.rc</code> 本文件内以 <code>service</code> 开头的定义条数与 <code>import</code> 行数。这两个数只覆盖本文件：被 <code>import</code> 引入的 8 个 rc（含 <code>init.zygote64.rc</code>）里的服务定义不计入 7。</p>
+<pre><code class="lang-bash">grep -n 'sys.boot_completed\|dev.bootcomplete' \
+      frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：命中 <code>finishBooting()</code> 内两处，口径为 5991 与 5992。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li><strong>「开机慢就是 init.rc 写太多」</strong>：错。init.rc 只是规则文件，真正耗时在分区挂载、服务启动顺序与 Java 侧预加载。先量化，再定位。</li><li><strong>「Zygote 起来就等于系统起来了」</strong>：错。Zygote 只完成了 Java 运行时与预加载的准备工作，服务编排在 system_server 里才发生。</li><li><strong>「`sys.boot_completed` 置位就全部完成了」</strong>：看起来对，其实只表示开机广播阶段结束。桌面可交互还涉及后续的服务就绪与窗口动画退出。</li><li><strong>「一阶段和二阶段 init 是同一份代码」</strong>：错。两者同在一个目录，但入口文件与职责不同，一阶段只管把必须分区挂上。</li><li><strong>「`trigger boot` 就是 zygote 的起点」</strong>：错，这是把派生关系当成了起点。<code>zygote</code> 由 <code>on zygote-start</code>（<code>init.rc:1091</code>）里的 <code>start zygote</code>（<code>:1094</code>）拉起，而该段首行 <code>wait_for_prop odsign.verification.done 1</code>（<code>:1092</code>）会先卡一道属性门控，<code>trigger zygote-start</code>（<code>:543</code>）排在 <code>trigger boot</code>（<code>:549</code>）之前；<code>on nonencrypted</code> 里的 <code>class_start main</code>（<code>:1228</code>）是另一条按类批量启动的路径。看日志时若只盯 <code>boot</code>，会漏掉前面这条。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：想追「开机到底卡在哪」，从哪篇开始？ <strong>答</strong>：先从 <code>AND-P8-402</code> 拿度量手段，再回 <code>AND-P8-101</code> 顺链条走。 <strong>追问</strong>：如果我只有一份日志，没有源码树呢？ <strong>答</strong>：仍可用属性名与触发名对齐段落，<code>sys.boot_completed</code>、<code>on late-init</code>、<code>on zygote-start</code> 这些名字在日志里都能搜到。</p>
+<p><strong>问</strong>：为什么本卷把 Zygote 定为锚点篇？ <strong>答</strong>：它是整条链首次进入 Java 世界的位置，前面全是 C++ 与内核边界，后面全是 Java 服务。 <strong>追问</strong>：锚点篇必须第一个读吗？ <strong>答</strong>：不必，但它承接前后两半，读完它再回看 101/201 会更快。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>停在开机动画</td><td><code>grep -n 'on zygote-start' system/core/rootdir/init.rc</code></td><td>触发点是否存在、是否被前置条件阻塞</td><td>转 <code>AND-P8-201</code> 查触发器语义</td></tr><tr><td>服务起不来</td><td><code>grep -c '^service ' system/core/rootdir/init.rc</code></td><td>本文件以 <code>service</code> 开头的定义是否为 7 条</td><td>不是 7 先怀疑文件被改；是 7 则转 <code>AND-P8-201</code> 查服务定义（被 import 引入的服务要另查对应 rc）</td></tr><tr><td>属性读不到</td><td><code>grep -n 'sys.boot_completed' frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java</code></td><td>置位点是否可达</td><td>转 <code>AND-P8-202</code> 查属性可见性</td></tr><tr><td>想量化某段耗时</td><td><code>wc -l system/core/init/init.cpp</code></td><td>先确认版本规模与口径</td><td>转 <code>AND-P8-402</code> 查埋点</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：bootloader 到 init 的细节（<code>AND-P8-101</code>）、镜像格式与 fastboot（<code>AND-P8-102</code>）、init.rc 语法（<code>AND-P8-201</code>）、属性系统（<code>AND-P8-202</code>）、Zygote 启动（<code>AND-P8-301</code>/<code>AND-P8-302</code>）、SystemServer 编排（<code>AND-P8-401</code>）、开机性能埋点（<code>AND-P8-402</code>）。</li><li><strong>本篇前置依赖</strong>：AND-P5-101、AND-P2-401。</li><li><strong>本篇后继</strong>：<code>AND-P8-101</code>、<code>AND-P8-102</code>、<code>AND-P8-201</code>、<code>AND-P8-202</code>、<code>AND-P8-301</code>、<code>AND-P8-302</code>、<code>AND-P8-401</code>、<code>AND-P8-402</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>一阶段 init <code>first_stage_init.cpp</code> 599 行（源码常量，口径为 2026-10-19 于 android17-release 实测）。</li><li>二阶段 init <code>init.cpp</code> 1346 行（同上）。</li><li><code>init.rc</code> 1320 行；本文件内 8 个 <code>import</code>、7 条以 <code>service</code> 开头的定义（同上，均不含 import 引入的内容）。</li><li><code>ZygoteInit.java</code> 1009 行、<code>SystemServer.java</code> 3862 行（同上）。</li><li>从通电到桌面的端到端耗时无统一口径，因设备与配置而异，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>旧版本</td><td>二阶段触发序列与 init.rc 结构随版本调整</td><td>行号与篇内定位会漂移，按符号 grep 重锚</td></tr><tr><td>android17-release</td><td>本树实测：<code>init.cpp</code> 触发序列在 1239/1261/1282，<code>init.rc</code> 的 <code>trigger boot</code> 在 549、<code>on zygote-start</code> 在 1091</td><td>本篇所有行号口径以此为准</td></tr><tr><td>android17-release</td><td>本树实测：<code>ActivityManagerService.finishBooting()</code> 在 5991/5992 置 <code>sys.boot_completed</code> 与 <code>dev.bootcomplete</code></td><td>开机完成标志的定位点以本篇为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>boot flow</code>、<code>init language</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>first_stage_init</code>、<code>zygote-start</code>、<code>boot_completed</code>。</li><li>本仓关键路径：<code>system/core/init/</code>、<code>system/core/rootdir/init.rc</code>、<code>frameworks/base/services/java/com/android/server/SystemServer.java</code>。</li><li>承接篇：<code>AND-P8-101</code>、<code>AND-P8-301</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P8-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

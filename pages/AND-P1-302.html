@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BroadcastReceiver 与 ContentProvider：广播演进与数据共享</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>BroadcastReceiver 与 ContentProvider：广播演进与数据共享</h1>
+<div class="kv"><span>ID：AND-P1-302</span><span>卷：P1</span><span>章：1.3</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/content/BroadcastReceiver.java ；frameworks/base/core/java/android/content/ContentProvider.java ；frameworks/base/core/java/android/content/ContentResolver.java ；frameworks/base/services/core/java/com/android/server/am/BroadcastController.java ；frameworks/base/services/core/java/com/android/server/am/BroadcastQueueImpl.java ；frameworks/base/services/core/java/com/android/server/am/ContentProviderHelper.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>广播与内容提供器是应用层两种「无界面」通信：一个传事件、一个传数据。广播的演进方向是收紧——早期可随意发隐式广播唤醒别人，如今后台隐式广播受限，投递由队列按优先级与超时管理。内容提供器以 authority 为核心契约：调用方按 authority 请求，系统侧查找、必要时拉起持有者进程，再交回代理。两条路共用一个前提：目标组件可能不在任何活着的进程里。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-102（组件状态机）、AND-P1-101（进程如何被拉起）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/content/BroadcastReceiver.java</code></li><li><code>frameworks/base/core/java/android/content/ContentProvider.java</code></li><li><code>frameworks/base/core/java/android/content/ContentResolver.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/BroadcastQueueImpl.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ContentProviderHelper.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>两类高频故障：「注册了广播却收不到」与「提供器调用变慢或失败」。前者常被误判为代码写错，实际可能命中隐式广播限制；后者常被误判为数据库慢，实际是持有者进程尚未启动、首次调用含冷启动开销。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>图 1：广播投递与数据查询两条路径</p>
+<pre><code>  广播：发送方 ──Intent──▶ 系统侧队列 ──投递──▶ 接收器
+  数据：调用方 ──authority──▶ 系统侧查找 ──代理──▶ 内容提供器</code></pre>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>广播侧。接收器实现 <code>onReceive</code>；投递由 <code>BroadcastQueueImpl</code> 这类队列承担——取出待投递广播、找到匹配接收者并派发，对不在同进程的接收者可能触发进程启动。一次 <code>onReceive</code> 有超时约束，超时会被记为广播超时事件；需异步处理时可调 <code>goAsync</code> 取得可延后完成的句柄。</p>
+<p>数据侧。提供器子类实现 <code>onCreate</code> 与增删改查等抽象方法。调用方不直接持有提供器对象，而是经 <code>ContentResolver</code> 按 authority 发起请求；系统侧 <code>ContentProviderHelper</code> 查找该 authority，必要时启动宿主进程并调用 <code>onCreate</code>，再把可跨进程调用的代理交回。<strong>首次访问可能含一次冷启动。</strong></p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>应用 A 想读应用 B 的数据。A 给出 B 的 authority 发起查询；若 B 的进程不在运行，系统先启动 B 的进程、创建提供器并执行 <code>onCreate</code>，再返回代理。第二次调用时进程已在，开销显著下降——这就是「第一次查很慢、后面很快」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>组件状态机见 AND-P1-102；进程拉起见 AND-P1-101；组件调度的系统侧管理见 AND-P2-201；权限与 URI 授权归 P9；跨进程调用底层往返归 P2 与 P3。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>接收器基类</td><td><code>frameworks/base/core/java/android/content/BroadcastReceiver.java</code></td><td><code>onReceive</code>（约 408 行）、<code>goAsync</code>（约 446 行）</td><td>回调契约与延后句柄</td></tr><tr><td>提供器基类</td><td><code>frameworks/base/core/java/android/content/ContentProvider.java</code></td><td><code>onCreate</code>（约 1492 行）</td><td>提供器创建回调</td></tr><tr><td>调用入口</td><td><code>frameworks/base/core/java/android/content/ContentResolver.java</code></td><td>查询与获取接口</td><td>调用统一入口</td></tr><tr><td>白名单来源</td><td><code>frameworks/base/services/core/java/com/android/server/am/BroadcastController.java</code></td><td><code>getAllowImplicitBroadcasts</code>（约 2008 行）</td><td>后台隐式广播放宽清单</td></tr><tr><td>投递队列</td><td><code>frameworks/base/services/core/java/com/android/server/am/BroadcastQueueImpl.java</code></td><td>队列实现类</td><td>取出并派发</td></tr><tr><td>提供器查找</td><td><code>frameworks/base/services/core/java/com/android/server/am/ContentProviderHelper.java</code></td><td><code>ContentProviderHelper</code>（约 110 行）</td><td>查找并拉起宿主</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析；命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 接收器与提供器的核心抽象方法
+grep -n &quot;public abstract void onReceive\|public final PendingResult goAsync&quot; \
+  frameworks/base/core/java/android/content/BroadcastReceiver.java
+grep -n &quot;public abstract boolean onCreate&quot; \
+  frameworks/base/core/java/android/content/ContentProvider.java
+# 期望：命中接收器约 408/446 行、提供器约 1492 行
+
+# 2. 后台隐式广播白名单的来源
+grep -n &quot;getAllowImplicitBroadcasts&quot; \
+  frameworks/base/services/core/java/com/android/server/am/BroadcastController.java
+# 期望：命中约 2008 行，来源为系统配置</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为广播一定会唤醒目标应用。</strong> 后台应用的隐式广播受限制，投递可能不发生。</p>
+<p><strong>误区二：以为 `onReceive` 可以长时间阻塞。</strong> 它有执行时长约束，长任务应交给服务或任务调度。</p>
+<p><strong>误区三（看起来对其实是错的）：以为提供器查询总是很快。</strong> 首次调用可能含宿主进程冷启动，耗时远高于后续调用。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么收不到别的应用发的广播？ <strong>答</strong>：先确认是显式还是隐式、接收方是否在后台——隐式广播在后台可能不触发启动，换成显式或让接收方在前台再试即可验证。</p>
+<p><strong>问</strong>：跨应用共享数据为什么选提供器而不是文件？ <strong>答</strong>：提供器带 authority 与权限模型，系统侧可统一管理访问与进程拉起，比裸文件可控。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>广播收不到</td><td><code>grep -n &quot;getAllowImplicitBroadcasts&quot; frameworks/base/services/core/java/com/android/server/am/BroadcastController.java</code></td><td>白名单来源</td><td>改用显式广播</td></tr><tr><td>接收处理超时</td><td><code>grep -n &quot;BROADCAST_TIMEOUT&quot; frameworks/base/services/core/java/com/android/server/am/BroadcastQueueImpl.java</code></td><td>超时标识</td><td>移出耗时逻辑</td></tr><tr><td>首次查询很慢</td><td><code>grep -n &quot;class ContentProviderHelper&quot; frameworks/base/services/core/java/com/android/server/am/ContentProviderHelper.java</code></td><td>查找与拉起路径</td><td>预热或改用缓存</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：组件状态机（AND-P1-102）；进程拉起（AND-P1-101）；AMS 侧组件调度（AND-P2-201）；权限与 URI 授权（P9）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-102</code>。<strong>本篇后继</strong>：无卷内后继；被 <code>AND-P2-201</code> 与 P9 相关篇引用。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>接收器核心方法 2 个（<code>onReceive</code>、<code>goAsync</code>），锚点约 408/446 行。</li><li>提供器创建回调 <code>onCreate</code> 约 1492 行，<code>ContentProviderHelper</code> 约 110 行。</li><li>广播执行超时阈值随前台/后台与豁免不同，提供器首次冷启动开销随宿主进程大小变化，均无统一量级，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>广播经现代化队列投递，后台隐式广播受限</td><td>读者按本篇命令可复现</td></tr><tr><td>更早版本</td><td>早期隐式广播宽松，接收方更易被唤醒（据官方公开资料，本树仅含 android17-release，无法回溯核验）</td><td>旧代码迁移后可能收不到广播</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>broadcasts</code>、<code>content providers</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>BroadcastQueue</code>、<code>ContentProviderHelper</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/content/</code>、<code>frameworks/base/services/core/java/com/android/server/am/</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

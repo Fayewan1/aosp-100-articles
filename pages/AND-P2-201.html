@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AMS 与 Activity 启动：从 startActivity 到 attach</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>AMS 与 Activity 启动：从 startActivity 到 attach</h1>
+<div class="kv"><span>ID：AND-P2-201</span><span>卷：P2</span><span>章：2.2</span><span>难度：4</span><span>核验：2026-10-13</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/Activity.java ；frameworks/base/core/java/android/app/Instrumentation.java ；frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java ；frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java ；frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java ；frameworks/base/core/java/android/app/ActivityThread.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:-14px"><a href="#h12-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h13-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h14-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>startActivity()</code> 不是「把界面调起来」，而是一次<strong>跨进程异步请求</strong>。请求经 Binder 送进 system_server 的 <code>ActivityTaskManagerService</code>（ATMS，就是老 AMS 里被拆出来的那一半），在那里生成一条 <code>ActivityRecord</code>、塞进目标任务栈；随后 ATMS 反手用 Binder 回调<strong>应用进程</strong>，后者才在主线程上把 Activity 建出来。</p>
+<p>整条链是 <code>Activity.startActivity</code>(Activity.java:6496) → <code>Instrumentation.execStartActivity</code>(Instrumentation.java:1973) → <code>ATMS.startActivityAsUser</code>(ActivityTaskManagerService.java:1302) → <code>ActivityStarter.execute</code>(ActivityStarter.java:837) → <code>resumeFocusedTasksTopActivities</code>(ActivityStarter.java:2247) → <code>ClientLifecycleManager.scheduleTransaction</code>(ClientLifecycleManager.java:73) → 应用侧 <code>TransactionExecutor.execute</code>(TransactionExecutor.java:72) → <code>ActivityThread.handleLaunchActivity</code>(ActivityThread.java:4733)。</p>
+<p>有两个后果必须记住。其一，<code>startActivity</code> 返回 <code>START_SUCCESS</code> 只表示「system_server 收下了这个意图」，此刻目标 Activity 对象可能还没 <code>new</code> 出来。其二，Android 10 起后台启动被拦时，这个调用<strong>照样「成功」返回</strong>，只是没有任何界面——静默失败是这一层最坑的形态。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<ul><li><strong>建议先读</strong>：AND-P2-101（Binder 事务往返）——本篇的两次跨进程调用复用它讲的事务机制。读完本篇可接 AND-P2-202（WMS 与窗口层级：从 Token 到 Surface 分配）。</li><li><strong>涉及源码</strong>（行号基于本地 AOSP 检出：manifest 分支 <code>aosp/android17-release</code>，<code>frameworks/base</code> 仓 HEAD <code>94b4c163b7df</code>，2026-05-21）：</li></ul>
+<table><thead><tr><th>文件</th><th>关键区间</th><th>内容</th></tr></thead><tbody><tr><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td>6496–6523</td><td><code>startActivity</code> 客户端入口</td></tr><tr><td><code>frameworks/base/core/java/android/app/Instrumentation.java</code></td><td>1973–2025</td><td><code>execStartActivity</code>：跨进程前最后一次本进程处理</td></tr><tr><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></td><td>1289–1350</td><td><code>startActivityAsUser</code>：服务端总入口，取 <code>ActivityStarter</code> 并执行</td></tr><tr><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java</code></td><td>837–1057 / 1087–2274</td><td><code>execute</code> / <code>executeRequest</code>：意图解析、目标入栈、恢复栈顶</td></tr><tr><td><code>frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java</code></td><td>72–184</td><td>客户端事务执行器</td></tr><tr><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td>4414–4560 / 4733</td><td><code>performLaunchActivity</code>：反射建实例、<code>attach</code>、<code>onCreate</code></td></tr></tbody></table>
+<ul><li><strong>环境要求</strong>：一份 AOSP 源码树即可，不需要编译与真机（本篇验证方式＝静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>先看一个真实抱怨：「代码里明明 <code>startActivity</code> 成功返回了，界面却没起来，logcat 还什么错都没有。」</p>
+<p>把调用方的返回值打出来是 <code>START_SUCCESS</code>（0）。这不是 bug，是<strong>语义误读</strong>。<code>startActivity</code> 的返回值来自 ATMS，含义只有「意图已被受理」；而「界面起来」发生在那之后的一次<strong>反向</strong>跨进程回调里。两件事之间隔着：目标栈的处理、可能的重定向（<code>ActivityStarter.executeRequest</code> 里那几十个 <code>return START_*</code> 分支）、以及应用进程主线程的执行机会。</p>
+<p>在 Android 10 引入<strong>后台启动限制</strong>之后，这个误读的破坏力被放大了：当调用方进程处于后台、又没有豁免条件时，ATMS 会在 <code>ActivityStarter</code> 里拦下这次启动，日志里只留一条告警（下面是一例，<strong>措辞随版本略有差异</strong>）：</p>
+<p>图 1：后台启动被拦的日志片段</p>
+<pre><code>W ActivityTaskManager: Background activity launch blocked ...</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>调用方拿到的仍是一个「成功」的返回值。所以那条「没有报错却没界面」的现象，根源并不在客户端的 <code>startActivity</code>，而在服务端的准入判定。</p>
+<p>要能一眼看穿这类问题，得把「请求如何进 system_server、在哪里被解析成 ActivityRecord、界面又是在哪个回调里被真正创建」这条链走通。本篇就干这件事。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p>服务端的核心产物是 <strong>`ActivityRecord`（AR）</strong>——它是「一个 Activity 的服务端记账对象」，不是 Activity 实例本身。关键关系：</p>
+<p>图 2：Task 与 ActivityRecord 的结构</p>
+<pre><code>Task（一棵任务栈 / 界面返回栈）
+└─ ActivityRecord（一次启动的记账条目；本身就是一个 WindowToken，见 ActivityRecord.java:372）
+     ├─ mActivityComponent : 目标组件（包名+类名）
+     ├─ mState            : RESUMED/PAUSED/STOPPED…（服务端视角）
+     ├─ token             : 内部类 ActivityRecord.Token extends Binder（1787），客户端侧凭据
+     └─ mLaunchTime / mLastLaunchTime : 启动时刻（性能归因用）
+
+ActivityStarter.Request（一次 start 请求的可复用参数包）
+  intent / caller / resultTo / requestCode / startFlags / activityOptions …</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>客户端侧只有两样：</p>
+<p>图 3：ActivityThread 与 ClientTransaction 的协作</p>
+<pre><code>ActivityThread（应用进程主线程宿主）
+├─ mActivities : ActivityClientRecord 的映射（token → 记录）
+└─ mTransactionExecutor : 收到 ClientTransaction 后按序执行回调
+
+ClientTransaction（服务端下发的「一组生命周期动作」）
+  └─ LaunchActivityItem / ResumeActivityItem / …（每个对应一个客户端回调）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>要点：<strong>Activity 实例活在客户端，ActivityRecord 活在服务端</strong>，两者靠 token 对应——服务端是 <code>ActivityRecord.Token</code>（一个 Binder 对象，ActivityRecord.java:1787），客户端 <code>ActivityThread.ActivityClientRecord.token</code> 持有同一个 IBinder（ActivityThread.java:658）。你在代码里 <code>getSystemService</code> 拿到的多是服务端的代理，<code>this</code>（Activity）才是客户端实体。理解这条「双份记账」是读后面流程的前提。</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>一次 <code>startActivity</code> 的完整时序：</p>
+<p>图 4：startActivity 到 attach 的跨进程时序</p>
+<pre><code>调用方进程                     system_server（ATMS/ATMS 线程）        应用进程（主线程）
+─────────                      ──────────────────────────────         ─────────────────
+Activity.startActivity(intent)
+  └─ startActivityForResult(…)
+       └─ Instrumentation.execStartActivity
+            └─ ActivityTaskManager.getService()      ── binder ──▶
+                                        ATMS.startActivityAsUser (1302)
+                                          └─ obtainStarter(...) (1337)
+                                               └─ ActivityStarter.execute (837)
+                                                    └─ executeRequest (1087)
+                                                         ├─ 解析 Intent/权限/后台限制 ──【拦截点】
+                                                         └─ new ActivityRecord + 入 Task
+                                                    └─ resumeFocusedTasksTopActivities (2247)
+                                                         └─ ClientLifecycleManager.scheduleTransaction (73)
+                                                             │  IApplicationThread（binder 回调）
+                                                             ▼
+                                     ◀────────────────────────────
+                                                          ActivityThread 主线程取到 ClientTransaction
+                                                            └─ TransactionExecutor.execute (72)
+                                                                 └─ LaunchActivityItem.execute (216)
+                                                                      └─ handleLaunchActivity (4733)
+                                                                           └─ performLaunchActivity (4414)
+                                                                                ├─ 反射 new Activity
+                                                                                ├─ activity.attach(…) (4528)
+                                                                                └─ callActivityOnCreate (4557)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>四条最容易踩的失败/分支路径</strong>：</p>
+<ol><li><strong>后台启动限制</strong>（§3 那种静默失败）：<code>executeRequest</code> 里对 <code>BackgroundActivityStartController</code> 的判定不放行 ⇒ 直接返回某个 <code>START_*</code>/<code>START_CANCELED</code>，<strong>不生成 AR、不下发事务</strong>。调用方只看到返回值。</li><li><strong>缺少 `FLAG_ACTIVITY_NEW_TASK`</strong>：App 上下文（<code>Application</code>/<code>Service</code>）启动 Activity 必须带这个标志，否则抛 <code>AndroidRuntimeException: Calling startActivity() from outside of an Activity context requires the FLAG_ACTIVITY_NEW_TASK flag</code>。这一条发生在客户端、<code>Instrumentation</code> 之前，很好定位。</li><li><strong>组件不可达</strong>：目标未导出、未在 manifest 声明、或 <code>Intent</code> 无匹配 resolver ⇒ 服务端 <code>executeRequest</code> 返回 <code>START_CLASS_NOT_FOUND</code>/<code>START_NOT_ACTIVITY</code>，同样不产生界面。</li><li><strong>重定向/复用</strong>：<code>singleTop</code>/<code>singleTask</code>、<code>ALWAYS_FINISH</code>、<code>launchMode</code> 命中时，<code>ActivityStarter</code> 可能不新建 AR，而是 <code>deliverNewIntent</code> 复用旧实例——表现为「界面切了，但没走 <code>onCreate</code>」，这是被误判为「启动丢失」的高频来源。</li></ol>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p><strong>第一段：客户端出口</strong>（Activity.java:6496–6523，节选）</p>
+<pre><code class="lang-java">public void startActivity(Intent intent) {
+    this.startActivity(intent, null);
+}
+
+public void startActivity(Intent intent, @Nullable Bundle options) {
+    if (options != null) {
+        startActivityForResult(intent, -1, options);
+    } else {
+        // 注意：这里走的是 mInstrumentation，而不是直接调 ATMS
+        startActivityForResult(intent, -1);
+    }
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>Activity.startActivity</code> 最终汇入 <code>startActivityForResult</code>(Activity.java:6026，两参重载转发 6065 的三参版)，由 <code>mInstrumentation.execStartActivity(...)</code>(Activity.java:6070 的调用点) 发出。<strong>所有客户端启动都要过 Instrumentation</strong>——它是插桩/测试的钩子，也是「启动被包一层」的原因。</p>
+<p><strong>第二段：跨进程前最后一次本进程处理</strong>（Instrumentation.java:1973–2025，节选）</p>
+<pre><code class="lang-java">public ActivityResult execStartActivity(Context who, IBinder contextThread, IBinder token,
+        Activity target, Intent intent, int requestCode, Bundle options) {
+    ...
+    try {
+        intent.migrateExtraStreamToClipData(who);
+        intent.prepareToLeaveProcess(who);
+        int result = ActivityTaskManager.getService().startActivity(whoThread,
+                who.getOpPackageName(), who.getAttributionTag(), intent,
+                intent.resolveTypeIfNeeded(who.getContentResolver()), token,
+                target != null ? target.mEmbeddedID : null, requestCode, 0, null, options);
+        notifyStartActivityResult(result, options);   // ← 略：先回调启动结果
+        checkStartActivityResult(result, intent);      // ← 关键：客户端侧的结果校验
+    } catch (RemoteException e) {
+        throw new RuntimeException(&quot;Failure from system&quot;, e);
+    }
+    return null;
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>checkStartActivityResult(result, intent)</code> 是客户端<strong>唯一</strong>会「把异常抛给你」的地方：<code>START_CLASS_NOT_FOUND</code> 之类会在这里变成 <code>ActivityNotFoundException</code>。而<strong>后台启动被拦不会走到这个异常</strong>——它返回的是成功码，这正是静默失败的机理。</p>
+<p><strong>第三段：服务端总入口与执行</strong>（ActivityTaskManagerService.java:1302–1349，节选）</p>
+<pre><code class="lang-java">private int startActivityAsUser(IApplicationThread caller, String callingPackage, ...) {
+    mAmInternal.addCreatorToken(intent, callingPackage);
+    final int callingPid = Binder.getCallingPid();
+    final int callingUid = Binder.getCallingUid();
+    ...
+    userId = getActivityStartController().checkTargetUser(userId, validateIncomingUser, ...);
+
+    return getActivityStartController().obtainStarter(intent, &quot;startActivityAsUser&quot;)   // :1337
+            .setCaller(caller)
+            .setCallingPackage(callingPackage)
+            ...
+            .execute();                                                                // :1349
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>obtainStarter</code>(ActivityStartController.java:133) 从<strong>对象池</strong>里取一个 <code>ActivityStarter</code> 并灌入参数——这是为高并发启动做的复用，<code>ActivityStarter</code> 本身不是每次 new。随后 <code>.execute()</code>(ActivityStarter.java:837) 调 <code>executeRequest</code>(1087)，那才是真正「解析 + 入栈 + 恢复栈顶」的地方，<code>mLastStartReason = request.reason</code>(1091) 会把这次启动的原因记下来（<code>dumpsys activity starter</code> 里能看到，排障时非常有用）。</p>
+<p><strong>第四段：界面在客户端被创建</strong>（ActivityThread.java:4414–4560，节选）</p>
+<pre><code class="lang-java">private Activity performLaunchActivity(ActivityClientRecord r, Intent customIntent) {
+    ...
+    Activity activity = null;
+    try {
+        activity = mInstrumentation.newActivity(cl, component.getClassName(), r.intent);   // 反射 new
+        ...
+        activity.attach(activityBaseContext, this, getInstrumentation(), r.token,      // :4528
+                r.ident, app, r.intent, r.activityInfo, title, r.parent,
+                r.embeddedID, r.lastNonConfigurationInstances, config, ...);
+        ...
+        mInstrumentation.callActivityOnCreate(activity, r.state);                       // :4557
+    } catch (...) { ... }
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>注意执行顺序：<strong>先 `attach` 再 `onCreate`</strong>。<code>attach</code>(Activity.java:9201/9214) 里才把 <code>mWindow</code>、<code>mMainThread</code>、<code>mToken</code> 等注入进来——所以 <code>onCreate</code> 里能安全调 <code>getWindow()</code>，而从 <code>onCreate</code> 里再反查「谁启动了我」是可用的。反过来，任何在 <code>attach</code> 之前想碰 <code>Activity</code> 实例的代码（比如某些 hook 框架）都会踩空。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li><strong>与 Binder（AND-P2-101）</strong>：本篇的两次跨进程——客户端 <code>startActivity</code> 上行、ATMS <code>scheduleTransaction</code> 下行——都是普通同步 Binder 事务。上行会阻塞调用方线程直到 ATMS 返回；下行是 ATMS 主动发起（<code>IApplicationThread</code> 是 ATMS 持有的、指向应用进程的代理），所以它<strong>不占用调用方线程</strong>。</li><li><strong>与 WMS（AND-P2-202）</strong>：ATMS 只管「决定启动哪个 Activity、进哪个 Task」；真正的窗口创建、客户端 <code>addView</code> 的落地、层级与动画归 WMS。两者在 <code>system_server</code> 里同属窗口管理大模块，边界在 <code>ActivityRecord</code>/<code>WindowToken</code> 的分工。</li><li><strong>与 PMS（AND-P2-203）</strong>：<code>Intent</code> 解析（找目标组件）、导出性校验依赖 PMS 的包信息。</li><li><strong>与主线程/Looper（AND-P2-301）</strong>：<code>handleLaunchActivity</code> 及其后续回调全部在<strong>应用主线程</strong>上跑，由 <code>Looper</code> 驱动。这就是「Activity 启动慢」会拖垮整个 App 主线程的直接原因。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>客户端入口</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td><code>startActivity</code> (6496)</td><td>用户调用点，转 <code>startActivityForResult</code></td></tr><tr><td>客户端钩子</td><td><code>frameworks/base/core/java/android/app/Instrumentation.java</code></td><td><code>execStartActivity</code> (1973)</td><td>跨进程前最后处理、结果校验</td></tr><tr><td>服务端代理</td><td><code>frameworks/base/core/java/android/app/ActivityTaskManager.java</code></td><td><code>getService()</code></td><td>拿 ATMS 的 Binder 代理</td></tr><tr><td>服务端入口</td><td><code>.../server/wm/ActivityTaskManagerService.java</code></td><td><code>startActivityAsUser</code> (1302)</td><td>取 <code>ActivityStarter</code> 并 <code>execute</code> (1349)</td></tr><tr><td>启动器池</td><td><code>.../server/wm/ActivityStartController.java</code></td><td><code>obtainStarter</code> (133)</td><td>从对象池取 <code>ActivityStarter</code></td></tr><tr><td>启动决策</td><td><code>.../server/wm/ActivityStarter.java</code></td><td><code>execute</code> (837) / <code>executeRequest</code> (1087)</td><td>解析、入栈、恢复栈顶 (2247)</td></tr><tr><td>事务下发</td><td><code>.../server/wm/ClientLifecycleManager.java</code></td><td><code>scheduleTransaction</code> (73)</td><td>经 <code>IApplicationThread</code> 回调客户端</td></tr><tr><td>客户端执行</td><td><code>.../core/java/android/app/servertransaction/TransactionExecutor.java</code></td><td><code>execute</code> (72)</td><td>按序执行 <code>ClientTransactionItem</code></td></tr><tr><td>启动项</td><td><code>.../core/java/android/app/servertransaction/LaunchActivityItem.java</code></td><td><code>execute</code> (216)</td><td>调 <code>client.handleLaunchActivity</code></td></tr><tr><td>客户端落地</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>handleLaunchActivity</code> (4733) / <code>performLaunchActivity</code> (4414)</td><td>反射建实例、<code>attach</code> (4528)、<code>onCreate</code> (4557)</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<p><strong>验证方式：静态源码分析</strong>（下列命令在源码树根执行，输出应逐条对上文行号）。</p>
+<pre><code class="lang-bash"># 1) 客户端入口链（应命中 6496 / 1973 / 2017）
+grep -n &quot;public void startActivity(Intent intent)&quot; frameworks/base/core/java/android/app/Activity.java
+grep -n &quot;public ActivityResult execStartActivity(&quot; frameworks/base/core/java/android/app/Instrumentation.java
+grep -n &quot;ActivityTaskManager.getService().startActivity&quot; frameworks/base/core/java/android/app/Instrumentation.java
+
+# 2) 服务端入口与启动器（应命中 1302 / 1337 / 1349）
+sed -n '1302,1349p' frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
+grep -n &quot;ActivityStarter obtainStarter(&quot; frameworks/base/services/core/java/com/android/server/wm/ActivityStartController.java
+
+# 3) 启动决策与恢复栈顶（应命中 837 / 1087 / 2247）
+grep -n &quot;int execute()\|private int executeRequest(Request request)\|resumeFocusedTasksTopActivities(&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java
+
+# 4) 客户端落地（应命中 72 / 216 / 4733 / 4414 / 4528）
+grep -n &quot;public void execute(&quot; frameworks/base/core/java/android/app/servertransaction/TransactionExecutor.java
+grep -n &quot;public void execute(&quot; frameworks/base/core/java/android/app/servertransaction/LaunchActivityItem.java
+grep -n &quot;public Activity handleLaunchActivity(\|private Activity performLaunchActivity(\|activity.attach(&quot; \
+  frameworks/base/core/java/android/app/ActivityThread.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>怎么对</strong>：行号若漂移（换了分支），以 <code>grep -n &quot;obtainStarter\|performLaunchActivity&quot; …</code> 重新锚定函数首行，再按同样方法核对各段。本篇行号是「怎么找」的示范，不承诺跨版本恒等。</p>
+<p>运行期对照（不计入本篇验证方式，仅供建立体感）：</p>
+<pre><code class="lang-bash">adb shell am start -W -n com.example/.MainActivity   # -W 等启动完成并打印 ThisTime/TotalTime
+adb shell dumpsys activity starter                   # 看 mLastStartReason 等启动器状态
+adb shell dumpsys activity activities | grep -A3 &quot;mResumedActivity&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<p><strong>`startActivity` 返回 `START_SUCCESS` 不等于界面起来了。</strong> 返回值只代表 ATMS 受理，界面在那之后的反向回调（<code>scheduleTransaction</code>）里才创建。若要等待界面起来，不要轮询返回值，可用 <code>ActivityLifecycleCallbacks</code> 或 <code>onResume</code> 等回调。</p>
+<p><strong>后台启动被拦不会报错。</strong> Android 10+ 后台启动限制触发时，日志只有一条告警（措辞随版本略有差异，不宜按字符串硬匹配），调用方拿到的仍是「成功」码。这是最典型的静默失败；排查时先确认进程是否处于前台、有无前台服务或 <code>SYSTEM_ALERT_WINDOW</code> 等豁免。</p>
+<p><strong>`singleTop` 下再启动同一个 Activity，不一定走 `onCreate`。</strong> 若栈顶已是该 Activity，<code>ActivityStarter</code> 走 <code>deliverNewIntent</code> 复用实例，只回调 <code>onNewIntent</code>，不 <code>new</code> 也不 <code>onCreate</code>。把「没走 onCreate」当成启动失败是常见误判。</p>
+<p><strong>`attach` 严格早于 `onCreate`。</strong> <code>attach</code>(4528) 先把 <code>mWindow</code>、<code>mToken</code> 等注入，<code>onCreate</code>(4557) 里才拿得到。任何想在 <code>onCreate</code> 之前访问 Activity 内部成员的代码都会空指针。</p>
+<p><strong>面试高频：为什么 App 上下文启动 Activity 必须加 `FLAG_ACTIVITY_NEW_TASK`？</strong> 答：因为非 Activity 上下文没有所属 Task，Activity 是「长在」Task 上的；不给目标指定/新建 Task，服务端无法决定它进哪个返回栈。追问「加了之后 <code>onNewIntent</code> 会被调用吗」：取决于目标是否已有实例与 <code>launchMode</code>，<code>NEW_TASK</code> 本身不保证新建。</p>
+<p><strong>面试高频：ATMS 和 AMS 是什么关系？</strong> 答：Android 10（Q）把原 <code>ActivityManagerService</code> 里&quot;管 Activity/Task&quot;的部分拆成 <code>ActivityTaskManagerService</code>，<code>AMS</code> 保留进程/服务/内存管理，两者在 <code>system_server</code> 内互相持有引用（历史沿革，据官方资料，本树无法回溯验证）。今天你说「AMS 启动 Activity」多半指的是 ATMS。追问「为什么拆」：职责与线程模型解耦，ATMS 的部分路径可减少与 AMS 大锁的争用。</p>
+<h1 id="h12-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：驱动/事务底层（AND-P2-101）；窗口创建与层级（AND-P2-202，WMS 段）；IPC 线程池与主线程并发模型（AND-P2-301）；进程 fork 与 Zygote（AND-P2-401）；启动时序全景与开机性能（AND-P8-401/402）。</li><li><strong>本篇前置依赖</strong>：AND-P2-101（Binder 事务往返）。</li><li><strong>本篇后继</strong>：AND-P2-202（WMS 与窗口层级：从 Token 到 Surface 分配）→ AND-P2-301（并发模型）。</li></ul>
+<h1 id="h13-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>API 21 → 9</td><td>Activity 启动集中在 <code>ActivityManagerService</code></td><td>老资料里的 <code>AMS.startActivity</code> 指这一段</td></tr><tr><td><strong>Android 10（Q，API 29）</strong></td><td>Activity/Task 逻辑拆到 <code>ActivityTaskManagerService</code>；引入<strong>后台启动限制</strong></td><td>调用点从 <code>AMS</code> 变 <code>ATMS</code>；静默失败形态自此出现</td></tr><tr><td>Android 12（S）</td><td>后台启动限制进一步收紧（前台服务场景细化）</td><td>更多「返回成功但无界面」的工单</td></tr><tr><td><strong>本树（android17-release）</strong></td><td>客户端事务化：<code>ClientTransaction</code>/<code>LaunchActivityItem</code> 承载生命周期回调；<code>LaunchActivityItem.execute</code>(216) 调 <code>handleLaunchActivity</code></td><td>老版本里由 <code>ApplicationThread</code> 直接调 <code>handleLaunchActivity</code>，现走事务项分发</td></tr></tbody></table>
+<blockquote><p>各行「引入版本」本篇不断言精确 patch 号，用 <code>git log -L &lt;行号&gt;:&lt;文件&gt;</code> 对目标分支核验。</p></blockquote>
+<h1 id="h14-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li><code>android.app.Activity#startActivity</code> API 参考：developer.android.com/reference/android/app/Activity（长期稳定路径）</li><li>后台启动限制官方文档：source.android.com 站内检索 <code>background activity launch restrictions</code></li><li>本仓关键入口：<code>frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java</code>、<code>frameworks/base/core/java/android/app/servertransaction/</code></li><li>Gerrit 检索（不写死 CL 号）：在 android-review.googlesource.com 搜 <code>ActivityTaskManagerService startActivityAsUser</code> 或 <code>TransactionExecutor</code></li><li>承接篇：AND-P2-101（Binder 事务往返）、《Android 系统源码深探》类书籍的 Activity 启动章节（按你的版本对号）</li></ul>
+</article>
+<footer>android-100 · AND-P2-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

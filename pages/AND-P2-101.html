@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binder 事务的一次完整往返：transact 到 onTransact</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Binder 事务的一次完整往返：transact 到 onTransact</h1>
+<div class="kv"><span>ID：AND-P2-101</span><span>卷：P2</span><span>章：2.1</span><span>难度：4</span><span>核验：2026-10-12</span><span>锚点：android-17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/BpBinder.cpp ；frameworks/native/libs/binder/IPCThreadState.cpp ；frameworks/native/libs/binder/Binder.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:-14px"><a href="#h12-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h13-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h14-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一次 Binder 同步事务的完整路径是：<code>BpBinder::transact()</code> 把调用转交线程私有的 <code>IPCThreadState::transact()</code>，后者把 <code>binder_transaction_data</code> 写进 <code>mOut</code> 缓冲，由 <code>talkWithDriver()</code> 一次 <code>ioctl(BINDER_WRITE_READ)</code> 送进驱动；服务端进程的某个 Binder 线程被唤醒，驱动把同一份数据放进它的 <code>mIn</code>，<code>BBinder::transact()</code> 的 <code>default</code> 分支调 <code>onTransact()</code>，回复数据沿原路写回，调用方在 <code>waitForResponse()</code> 里收 <code>BR_REPLY</code> 后返回。<strong>oneway 调用与非 oneway 调用的唯一分叉点，在 `IPCThreadState::transact()` 里那个 `if ((flags &amp; TF_ONE_WAY) == 0)`。</strong> oneway 也要等 <code>BR_TRANSACTION_COMPLETE</code>（命令被驱动收下），但不等 reply。调用方看到 <code>DEAD_OBJECT</code> 时服务端进程已经死了，<code>BpBinder::mAlive</code> 会置 0 且永不复原。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<ul><li><strong>建议先读</strong>：无（本篇是 P2-2 的入口篇）。读完后建议接 AND-P2-102（oneway、死亡通知与线程池）。</li><li><strong>涉及源码</strong>（行号基于 frameworks/native 仓 <code>android17-release</code>，本地 HEAD <code>ae266dcb70</code>，2026-04-23）：</li></ul>
+<table><thead><tr><th>文件</th><th>关键区间</th><th>内容</th></tr></thead><tbody><tr><td><code>frameworks/native/libs/binder/BpBinder.cpp</code></td><td>394–446</td><td><code>BpBinder::transact</code>：代理侧总入口</td></tr><tr><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>921–996</td><td><code>IPCThreadState::transact</code>：oneway 分叉、等 reply</td></tr><tr><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>1365–1398</td><td><code>writeTransactionData</code>：事务数据的组装</td></tr><tr><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>734–783</td><td><code>getAndExecuteCommand</code>：服务端取命令、执行</td></tr><tr><td><code>frameworks/native/libs/binder/Binder.cpp</code></td><td>490–545</td><td><code>BBinder::transact</code>：服务端总入口，<code>default</code> 转 <code>onTransact</code></td></tr></tbody></table>
+<ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>。不需要编译，不需要真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>先看一个具体故障。App 主线程经 <code>ActivityManager</code> 客户端类发起 Binder 调用、查运行中的服务列表，偶发 ANR，堆栈卡在 native 的 <code>IPCThreadState::waitForResponse</code>。同时 logcat 里躺着一条来自服务端进程的告警：</p>
+<p>图 1：Binder 线程池饥饿告警日志</p>
+<pre><code>binder thread pool (16 threads) starved for 312 ms</code></pre>
+<p>这条告警出自 <code>IPCThreadState::getAndExecuteCommand()</code>（IPCThreadState.cpp:767–770）：服务端进程的 Binder 线程池满负荷超过 100 ms 时打印。调用方主线程发出的同步事务排进了驱动队列，但服务端没有空闲 Binder 线程去取——于是调用方阻塞、ANR。</p>
+<p>要读懂这个故障，得把「一次事务」在用户空间的完整走位看清楚：数据在哪只缓冲里，在哪一行发生 oneway 分叉，reply 从哪个 case 返回，线程池又在哪个环节被消耗。这篇就把这条链路一次走通。它也是后续所有 Binder 篇目（oneway、死亡通知、线程池策略、驱动侧）的公共底座。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p>事务在用户空间只涉及三样东西：</p>
+<p>图 2：事务在用户空间的三要素与 mOut/mIn 缓冲</p>
+<pre><code>调用方线程                         服务端进程
+─────────                         ────────
+IPCThreadState（线程私有单例）
+├─ mOut : Parcel   ──写命令/事务数据──▶  驱动 ──▶  目标线程 IPCThreadState.mIn
+└─ mIn  : Parcel   ◀──读 reply/命令────  驱动 ◀──  目标线程 mOut
+
+BpBinder（代理，调用方手里）
+├─ mHandle : 目标在调用方进程内的句柄
+└─ mAlive  : 目标是否还活着（DEAD_OBJECT 后置 0，不可复活）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>送给驱动的核心结构是内核 UAPI 的 <code>binder_transaction_data</code>（<code>kernel/common/include/uapi/linux/android/binder.h</code>，由驱动定义，用户态只组装不解释）：</p>
+<pre><code class="lang-c">binder_transaction_data tr;
+tr.target.handle = handle;              // 目标句柄（0＝目标为 context manager）
+tr.code         = code;                 // 事务码，如 PING_TRANSACTION
+tr.flags        = binderFlags;          // 含 TF_ONE_WAY / TF_ACCEPT_FDS 等
+tr.data_size    = data.ipcDataSize();   // Parcel 净荷字节数
+tr.data.ptr.buffer  = data.ipcData();   // 净荷地址
+tr.offsets_size     = ...;              // Parcel 内 Binder 对象偏移表</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>两个容易忽略的点：其一，<code>mOut</code>/<code>mIn</code> 是<strong>每线程一个</strong>（<code>IPCThreadState::self()</code> 按 TLS 取），所以两个线程同时发事务互不干扰；其二，Parcel 里若嵌了 Binder 对象，<code>offsets</code> 表会告诉驱动哪些位置需要按进程改写——这是「Binder 引用跨进程传递」的机制基础，本篇只用不展开。</p>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p>同步事务（非 oneway）的完整时序：</p>
+<p>图 3：一次同步事务的完整时序</p>
+<pre><code>调用方线程                     驱动              服务端进程 Binder 线程
+──────────                    ────              ─────────────────
+BpBinder::transact(code,data,&amp;reply,0)
+  │ mAlive? ──否──▶ 返回 DEAD_OBJECT（BpBinder.cpp:440-445）
+  │ Stability 校验失败 ──▶ 返回 BAD_TYPE（BpBinder.cpp:411-417）
+  ▼
+IPCThreadState::transact(handle,code,data,&amp;reply,flags)
+  │ flags |= TF_ACCEPT_FDS（IPCThreadState.cpp:929）
+  │ writeTransactionData(BC_TRANSACTION,…) → 写入 mOut（:941）
+  ▼
+talkWithDriver() ──ioctl(BINDER_WRITE_READ)──▶ 驱动
+  │                                              │ 选服务端进程、拷贝数据
+  │                                              ▼
+  │                              目标线程 getAndExecuteCommand()（:734）
+  │                                talkWithDriver() 取命令（:739）
+  │                                BR_TRANSACTION → 数据进 mIn
+  │                                executeCommand → BBinder::transact（Binder.cpp:490）
+  │                                  default: onTransact(code,data,reply,flags)（:541）
+  │                                              │ 业务执行，写 reply
+  │                        reply 走 mOut ◀───────┘
+  ▼                                              │
+waitForResponse(reply)（:967）                    │
+  │◀───── BR_REPLY ◀─────────────────────────────┘
+  ▼ 返回 status_t</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>三条失败/分支路径</strong>（排查时最常踩）：</p>
+<ol><li><strong>目标已死</strong>：<code>BpBinder::transact</code> 开头查 <code>mAlive</code>，为假直接返回 <code>DEAD_OBJECT</code> 不再下行（BpBinder.cpp:397–398, 445）；事务已发出后收到 <code>BR_DEAD_REPLY</code> 同样归 <code>DEAD_OBJECT</code>，并把 <code>mAlive</code> 置 0（BpBinder.cpp:440）——<strong>置 0 不可逆，此后该代理永久失效</strong>。</li><li><strong>嵌套事务（重入）</strong>：服务端线程正在处理事务时，调用方又来一个以它为目标的同步事务，会以 <code>BR_TRANSACTION</code> 出现在 <code>waitForResponse</code> 的循环里（IPCThreadState.cpp:1489；<code>waitForResponse</code> 自 1153 行起），由同一线程递归执行。设计上允许，但实现服务时必须为这种重入留好并发边界。</li><li><strong>线程池耗尽</strong>：驱动把事务排进目标队列，但目标进程没有空闲 Binder 线程执行 <code>getAndExecuteCommand</code>——就是 §3 那个 ANR 的形状。服务端可见 <code>starvation</code> 告警（:767–770），调用方线程只能持续阻塞等待。</li></ol>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p><strong>第一段：代理侧总入口</strong>（BpBinder.cpp:394–446，节选）</p>
+<pre><code class="lang-cpp">status_t BpBinder::transact(uint32_t code, const Parcel&amp; data,
+                            Parcel* reply, uint32_t flags) {
+    if (mAlive) {
+        bool privateVendor = flags &amp; FLAG_PRIVATE_VENDOR;
+        flags &amp;= ~static_cast&lt;uint32_t&gt;(FLAG_PRIVATE_VENDOR);   // 用户态标志不进内核
+        if (code &gt;= FIRST_CALL_TRANSACTION &amp;&amp; code &lt;= LAST_CALL_TRANSACTION) {
+            // Stability 校验：Vendor 稳定性等级不满足 → BAD_TYPE
+            if (!Stability::check(stability, required)) return BAD_TYPE;
+        }
+        status_t status;
+        if (isRpcBinder()) [[unlikely]] {
+            status = rpcSession()-&gt;transact(...);               // RPC Binder 旁路
+        } else {
+            status = IPCThreadState::self()-&gt;transact(
+                binderHandle(), code, data, reply, flags);      // 正统路径
+        }
+        if (status == DEAD_OBJECT) mAlive = 0;                  // 不可复活
+        return status;
+    }
+    return DEAD_OBJECT;                                         // 已知已死，直接返回
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>三个要点：<code>FLAG_PRIVATE_VENDOR</code> 是纯用户态标志，进内核前必须剥掉；<code>Stability::check</code> 是 VINTF/AIDL stability 体系加的用户事务准入门槛（详见 §9）；<code>IPCThreadState::self()</code> 取的是<strong>当前线程</strong>的状态对象——Binder 调用走的是调用方自己的线程，不占用任何全局资源。</p>
+<p><strong>第二段：oneway 分叉</strong>（IPCThreadState.cpp:921–996，节选）</p>
+<pre><code class="lang-cpp">status_t IPCThreadState::transact(int32_t handle, uint32_t code,
+                                  const Parcel&amp; data, Parcel* reply, uint32_t flags) {
+    flags |= TF_ACCEPT_FDS;                       // 默认允许传递 FD
+    err = writeTransactionData(BC_TRANSACTION, flags, handle, code, data, nullptr);
+    if (err != NO_ERROR) { if (reply) reply-&gt;setError(err); return err; }
+
+    if ((flags &amp; TF_ONE_WAY) == 0) {              // 同步：等 reply
+        if (reply) err = waitForResponse(reply);
+        else       err = waitForResponse(&amp;fakeReply);
+    } else {                                      // oneway：只等「命令被驱动收下」
+        err = waitForResponse(nullptr, nullptr);
+    }
+    return err;
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>注意 oneway 分支并非「不等任何东西」：它仍要等 <code>BR_TRANSACTION_COMPLETE</code>，即驱动确认命令已入队。它的语义是<strong>不保证服务端已执行、不保证执行成功</strong>——把「已入队」误当「已完成」是 oneway 使用事故的头号来源（详见 §7）。</p>
+<p><strong>第三段：事务数据组装</strong>（IPCThreadState.cpp:1365–1398，节选）</p>
+<pre><code class="lang-cpp">status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
+        int32_t handle, uint32_t code, const Parcel&amp; data, status_t* statusBuffer) {
+    binder_transaction_data tr;
+    tr.target.ptr = 0;                 // 不把未初始化的栈数据传给远端进程
+    tr.target.handle = handle;
+    tr.code = code;
+    tr.flags = binderFlags;
+    ...
+    tr.data_size = data.ipcDataSize();
+    tr.data.ptr.buffer = data.ipcData();
+    tr.offsets_size = data.ipcObjectsCount() * sizeof(binder_size_t);
+    tr.data.ptr.offsets = data.ipcObjects();
+    mOut.writeInt32(cmd);              // BC_TRANSACTION
+    mOut.write(&amp;tr, sizeof(tr));       // 随后是净荷（由 Parcel 布局承接）
+    return NO_ERROR;
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>tr.target.ptr = 0</code> 那行注释值得抄下来：「不要把未初始化的栈数据传给远端进程」——这是内核会读取的 UAPI 结构，栈上残留字节可能泄露到内核。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li><strong>与驱动侧（AND-P5-2 承接）</strong>：本篇到 <code>ioctl</code> 为止；驱动如何选目标进程、如何拷贝、binder 线程如何被唤醒，归 P5 内核卷。</li><li><strong>与 Java 层</strong>：<code>android.os.Binder.java</code> / <code>IBinder.java</code> 最终经 JNI 到 <code>android_os_BinderProxy_transact</code> → <code>BpBinder::transact</code>；Java 侧的 <code>transact()</code> 回调在服务端对应 <code>BBinder::onTransact</code>。本篇讲 native 主线，Java 侧只是薄封装。</li><li><strong>与 AIDL</strong>：<code>BnInterface::onTransact</code>（AIDL 生成）在 <code>BBinder::transact</code> 的 <code>default</code> 分支里被调，按 <code>code</code> 分发到具体方法。事务机制与接口描述语言无关。</li><li><strong>与 Native 侧服务（AND-P3-3 承接）</strong>：<code>libbinder_ndk</code> / <code>AParcel</code> 是同一机制的另一套 API 封装。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>应用/Native 调用方</td><td><code>frameworks/native/libs/binder/BpBinder.cpp</code></td><td><code>BpBinder::transact</code> (394)</td><td>代理入口、存活检查、Stability 校验</td></tr><tr><td>线程状态</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>IPCThreadState::transact</code> (921)</td><td>oneway 分叉、等 reply</td></tr><tr><td>命令组装</td><td>同上</td><td><code>writeTransactionData</code> (1365)</td><td><code>binder_transaction_data</code> 组装</td></tr><tr><td>驱动交互</td><td>同上</td><td><code>talkWithDriver</code> (739 调用点)</td><td><code>ioctl(BINDER_WRITE_READ)</code></td></tr><tr><td>服务端主循环</td><td>同上</td><td><code>getAndExecuteCommand</code> (734)</td><td>取命令、执行、线程池饥饿检测</td></tr><tr><td>服务端入口</td><td><code>frameworks/native/libs/binder/Binder.cpp</code></td><td><code>BBinder::transact</code> (490)</td><td><code>default</code> → <code>onTransact</code> (541)</td></tr><tr><td>内核 UAPI</td><td><code>kernel/common/include/uapi/linux/android/binder.h</code>（完整 AOSP 检出方有；<strong>本验证树未同步内核仓</strong>，结构定义以驱动仓库为准）</td><td><code>binder_transaction_data</code></td><td>驱动定义的结构</td></tr><tr><td>Java 侧入口</td><td><code>frameworks/base/core/java/android/os/Binder.java</code></td><td><code>Binder.transact</code> (JNI)</td><td>薄封装，最终回到 native</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<p><strong>验证方式：静态源码分析</strong>（本篇章选题卡口径；下列命令均在源码树根执行，输出可逐条对照本文行号）。</p>
+<p>前置条件：AOSP 源码树一份；<code>cd</code> 到树根。</p>
+<pre><code class="lang-bash"># 1) 入口链三连定位（应分别命中 394 / 921 / 490 行）
+grep -n &quot;status_t BpBinder::transact&quot; frameworks/native/libs/binder/BpBinder.cpp
+grep -n &quot;status_t IPCThreadState::transact&quot; frameworks/native/libs/binder/IPCThreadState.cpp
+grep -n &quot;status_t BBinder::transact&quot; frameworks/native/libs/binder/Binder.cpp
+
+# 2) oneway 分叉（应见 if ((flags &amp; TF_ONE_WAY) == 0) 两分支）
+sed -n '948,993p' frameworks/native/libs/binder/IPCThreadState.cpp
+
+# 3) 命令字节流向（应见 mOut.writeInt32(cmd) + mOut.write(&amp;tr, …)）
+sed -n '1365,1398p' frameworks/native/libs/binder/IPCThreadState.cpp
+
+# 4) 服务端 default 分支（应见 default: err = onTransact(...)）
+sed -n '536,543p' frameworks/native/libs/binder/Binder.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>输出怎么对</strong>：四条命令的行号应与 §2 表格一致；若行号漂移（版本差异），以 <code>grep -n &quot;TF_ONE_WAY&quot; …IPCThreadState.cpp</code> 重新锚定分叉点，再按同样方法核对 §4.3 各段——本篇的行号是「怎么找」的示范，不是跨版本承诺。</p>
+<p>变更史可用如下命令追：</p>
+<pre><code class="lang-bash">git log --oneline -5 -- frameworks/native/libs/binder/IPCThreadState.cpp
+git log -L 921,996:frameworks/native/libs/binder/IPCThreadState.cpp | head -60</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>再往前一步（不计入本篇验证方式，仅供建立体感）：<code>adb shell service check &lt;服务名&gt;</code> 走的是 <code>PING_TRANSACTION</code>（<code>BBinder::transact</code> 的内置 case，Binder.cpp:519）；<code>adb shell service call &lt;服务名&gt; &lt;事务码&gt; i32 &lt;n&gt;</code> 可手工发出一次同步事务并打印 reply Parcel。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<p><strong>误区一：oneway 就是「发完就不管」。</strong> 错。oneway 仍等 <code>BR_TRANSACTION_COMPLETE</code>（IPCThreadState.cpp:992）；且高频 oneway 会触发驱动的 spam 检测（<code>BR_ONEWAY_SPAM_SUSPECT</code>，IPCThreadState.cpp:1174）。它不保证的只有两件事：服务端是否已执行、是否执行成功。oneway 之后立刻读共享状态，是竞态 bug 的经典形状。</p>
+<p><strong>误区二：拿到 `DEAD_OBJECT` 重试一次就行。</strong> 错。<code>BpBinder::mAlive</code> 置 0 后该代理<strong>永久失效</strong>（BpBinder.cpp:440），重试同一个 <code>BpBinder</code> 毫无意义；正解是重新 <code>getService</code> 拿新代理，或走死亡通知重建。</p>
+<p><strong>误区三：Binder 调用会起新线程。</strong> 错。<code>IPCThreadState::self()</code> 是当前线程的 TLS 单例——同步事务<strong>占用调用方自己的线程</strong>。调用方是主线程，阻塞的就是主线程（§3 的 ANR 正是如此）。线程池是<strong>服务端</strong>的资源。</p>
+<p><strong>误区四：`transact` 返回 `OK` 等于业务成功。</strong> 错。<code>status_t</code> 只代表传输层结果；业务错误写在 reply Parcel 里（AIDL 的异常/状态码）。</p>
+<p><strong>面试高频：Binder 一次拷贝怎么做到的？</strong> 答：调用方数据在 <code>mOut</code>，<code>ioctl</code> 时驱动直接把数据拷进目标进程 <code>mIn</code>（mmap 映射区），用户态不经过内核中转缓冲——数据从调用方缓冲到目标缓冲只有驱动内一次搬运。追问「为什么还是比管道慢」：事务有目标查找、线程唤醒、Stability 校验等固定开销，小数据下延迟主要取决于调度而非拷贝。</p>
+<p><strong>面试高频：同步事务里服务端又反向调用调用方，会发生什么？</strong> 答：以 <code>BR_TRANSACTION</code> 出现在调用方 <code>waitForResponse</code> 循环里（IPCThreadState.cpp:1489），调用方线程递归处理。若双方互等对方 reply，死锁——所以「持锁跨进程同步调用」是明确的设计禁忌。</p>
+<h1 id="h12-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：驱动内部的目标查找、内存拷贝与线程唤醒（AND-P5-201/P5-202）；oneway/死亡通知的语义与用法（AND-P2-102）；线程池容量策略（AND-P2-301）；Native 侧服务写法（AND-P3-302）。</li><li><strong>本篇前置依赖</strong>：无。</li><li><strong>本篇后继</strong>：AND-P2-102 → AND-P2-301；P5 内核两篇可与本文并行阅读。</li></ul>
+<h1 id="h13-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>API 21 → android17-release</td><td>事务主干语义（<code>BC_TRANSACTION</code>/<code>BR_REPLY</code>/oneway 分叉/<code>mAlive</code> 不可复活）保持稳定</td><td>本篇核心结论适用于该区间主干</td></tr><tr><td>★ Stability 校验（BpBinder.cpp:404–418）</td><td>随 VINTF/AIDL stability 体系引入的用户事务准入门槛</td><td>跨 vendor/system 边界的用户事务可能因稳定性等级不符直接 <code>BAD_TYPE</code>；具体引入版本需按目标分支 <code>git log -L 394,446:BpBinder.cpp</code> 核验</td></tr><tr><td>★ RPC Binder 旁路（BpBinder.cpp:421 <code>isRpcBinder()</code>）</td><td>为虚拟化/跨 VM 场景引入的替代通道</td><td><code>isRpcBinder()</code> 为真时走 <code>rpcSession()-&gt;transact</code>，不经内核 binder 驱动；本篇不展开，引入版本需按分支核验</td></tr><tr><td>★ <code>BR_ONEWAY_SPAM_SUSPECT</code>（IPCThreadState.cpp:1174）</td><td>oneway 高频调用检测告警</td><td>高压 oneway 场景会在 logcat 见告警，属提示非错误</td></tr><tr><td>★ <code>kEnableKernelIpc</code> 构建期开关</td><td>可裁剪掉内核 IPC 通道</td><td>关闭时 <code>BpBinder::transact</code> 直接 <code>LOG_ALWAYS_FATAL</code>（BpBinder.cpp:426）</td></tr></tbody></table>
+<blockquote><p>★＝已在 <code>android17-release</code> 源码核实存在；各特性的<strong>引入版本</strong>本篇不断言，按需用 <code>git log -L</code> 对目标分支核验。</p></blockquote>
+<h1 id="h14-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li><code>android.os.IBinder</code> API 参考：developer.android.com/reference/android/os/IBinder（长期稳定路径）</li><li>本仓 Java 侧入口：<code>frameworks/base/core/java/android/os/IBinder.java</code>、<code>frameworks/base/core/java/android/os/Binder.java</code></li><li>内核侧实现：<code>kernel/common/drivers/android/binder.c</code>（P5-2 承接篇的前置阅读）</li><li>Gerrit 变更检索（不写死 CL 号，避免漂移）：在 android-review.googlesource.com 搜 <code>IPCThreadState transact</code> 或 <code>binder_write_read</code></li><li>AIDL 与 stability 体系：source.android.com 站内检索 <code>AIDL stability</code> / <code>VINTF</code></li></ul>
+</article>
+<footer>android-100 · AND-P2-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

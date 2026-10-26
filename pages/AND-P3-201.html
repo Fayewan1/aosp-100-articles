@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ART 类加载与 DEX/OAT：从 ClassLoader 到 AOT 编译</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>ART 类加载与 DEX/OAT：从 ClassLoader 到 AOT 编译</h1>
+<div class="kv"><span>ID：AND-P3-201</span><span>卷：P3</span><span>章：3.2</span><span>难度：4</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：art/libdexfile/dex/dex_file.h ；art/libdexfile/dex/standard_dex_file.cc ；art/runtime/class_linker.cc ；art/runtime/native/dalvik_system_DexFile.cc ；art/runtime/oat/oat.h ；art/runtime/oat/oat_file.h ；art/runtime/vdex_file.h ；art/libartbase/base/compiler_filter.h ；libcore/dalvik/src/main/java/dalvik/system/BaseDexClassLoader.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一个 Java 类在 ART 里的旅程分三段：<code>DEX</code> 文件提供 <code>class_def</code> 条目、<code>ClassLoader</code> 链把路径拆成 <code>DexFile</code> 并交给 <code>ClassLinker::FindClass</code>、OAT 文件（<code>OAT</code>）与验证结果容器（<code>VDEX</code>）提供已经验证或编译过的产物。<code>DEX</code> magic 是 4 字节 <code>{'d','e','x','\n'}</code>，当前最高格式版本 <code>041</code>，<code>036</code> 因历史 bug 被跳过。运行时打开一个 DEX 时，实际落点是 <code>OatFileManager::OpenDexFilesFromOat</code>，由它统一决定用哪个 <code>oat</code>/<code>vdex</code>。<code>dex2oat</code> 把 DEX 编到某种 <code>CompilerFilter::Filter</code> 档位，默认 <code>kSpeed</code>。<code>JIT</code> 与 profile 采集不在这里，见 AND-P3-203。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§4.1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P3-G01（P3 卷导读），本篇大量使用 ART 与 libcore 的仓内路径，导读给出目录分层。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>art/libdexfile/dex/dex_file.h</code></li><li><code>art/libdexfile/dex/standard_dex_file.cc</code></li><li><code>art/runtime/class_linker.cc</code></li><li><code>art/runtime/native/dalvik_system_DexFile.cc</code></li><li><code>art/runtime/oat/oat_file.h</code></li><li><code>art/runtime/vdex_file.h</code></li><li><code>art/libartbase/base/compiler_filter.h</code></li><li><code>libcore/dalvik/src/main/java/dalvik/system/BaseDexClassLoader.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>装完 APK 后，你在 <code>logcat</code> 里看到某个类抛 <code>ClassNotFoundException</code>，可 <code>unzip -l</code> 明明能看到 <code>classes.dex</code>。另一头，同一个 APK 在有的设备上首帧很快、在有的设备上卡一下，<code>/data/app</code> 下多出来的 <code>.oat</code>/<code>.vdex</code> 文件大小也不一样。这两类现象都指向同一条链路：路径怎么被拆成 <code>DexFile</code>、<code>DexFile</code> 怎么被打开成 <code>OAT</code>、<code>OAT</code> 里的代码按什么档位生成。把这条链路走一遍，很多「类找不到」和「首启变慢」的问题才有落点。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：<code>DEX</code> 是字节码容器；<code>ClassLoader</code> 链负责把路径字符串变成 <code>DexFile</code> 句柄；<code>VDEX</code> 存验证结果；<code>OAT</code> 存编译产物与镜像信息。<code>ClassLinker</code> 是最终把 <code>class_def</code> 变成 <code>mirror::Class</code> 的地方。</p>
+<p>图 1：从 APK 路径到已编译代码的四层</p>
+<pre><code>APK 内 classes.dex
+   |
+   v
+DexPathList -&gt; DexFile (Java) -&gt; DexFile_openDexFileNative
+   |
+   v
+OatFileManager::OpenDexFilesFromOat  --&gt;  选 oat / vdex
+   |
+   v
+ClassLinker::FindClass -&gt; DefineClass  --&gt;  mirror::Class</code></pre>
+<p>关系要点：<code>ClassLoader</code> 只管定位与句柄生命周期，不解析字节码；解析与链接在 <code>ClassLinker</code>；<code>OAT</code>/<code>VDEX</code> 是「提前算好的结果」，缺失时仍可回落到解释执行或 <code>JIT</code>。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>DEX 格式与版本。</strong> magic 为 <code>{'d','e','x','\n'}</code>（<code>art/libdexfile/dex/standard_dex_file.cc:26</code>），长度常量 <code>kDexMagicSize = 4</code>（<code>art/libdexfile/dex/dex_file.h:109</code>）。版本表在 <code>standard_dex_file.cc:27-41</code>：<code>035</code>、<code>037</code>、<code>038</code>、<code>039</code>、<code>040</code>、<code>041</code>；<code>041</code> 对应 Android 15（V）及以后；<code>036</code> 因旧 Dalvik 的实现缺陷被跳过。</p>
+<p><strong>OAT 与 VDEX 的 magic。</strong> <code>OAT</code> 为 <code>{'o','a','t','\n'}</code>（<code>art/runtime/oat/oat.h:49</code>）；<code>VDEX</code> 为 <code>{'v','d','e','x'}</code>，版本字符串 <code>027</code>（<code>art/runtime/vdex_file.h:123/128</code>）。两者都是容器，外层 head 里记录版本与偏移，内容分工不同。</p>
+<p><strong>编译档位。</strong> 枚举 <code>CompilerFilter::Filter</code>（<code>art/libartbase/base/compiler_filter.h:34-43</code>）按「验证强度 → 优化强度」排列：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>kAssumeVerified</code></td><td>假定已通过验证，不再做校验</td><td><code>compiler_filter.h:34-43</code></td></tr><tr><td><code>kVerify</code></td><td>只做验证，不生成优化代码</td><td><code>compiler_filter.h:34-43</code></td></tr><tr><td><code>kSpaceProfile</code></td><td>以省空间为主，参考 profile</td><td><code>compiler_filter.h:34-43</code></td></tr><tr><td><code>kSpace</code></td><td>以省空间为主</td><td><code>compiler_filter.h:34-43</code></td></tr><tr><td><code>kSpeedProfile</code></td><td>以速度为主，参考 profile</td><td><code>compiler_filter.h:34-43</code></td></tr><tr><td><code>kSpeed</code></td><td>以速度为主，默认档位</td><td><code>compiler_filter.h:34-43</code>（默认值 <code>:45</code>）</td></tr><tr><td><code>kEverythingProfile</code></td><td>全量优化，参考 profile</td><td><code>compiler_filter.h:34-43</code></td></tr><tr><td><code>kEverything</code></td><td>全量优化</td><td><code>compiler_filter.h:34-43</code></td></tr></tbody></table>
+<p>默认是 <code>kSpeed</code>（<code>compiler_filter.h:45</code>）。档位越高，编译耗时与产物越大，运行时越少跑解释器。</p>
+<p><strong>Java 侧装载链。</strong> <code>BaseDexClassLoader</code>（<code>libcore/dalvik/src/main/java/dalvik/system/BaseDexClassLoader.java:43</code>）持有一个 <code>DexPathList</code>（字段在 <code>:59</code>，构造在 <code>:160</code>）。<code>DexPathList</code>（<code>DexPathList.java:57</code>）用 <code>makePathElements</code>（<code>:486/496</code>）把 classpath 字符串拆成元素列表。真正的打开动作是 <code>DexFile.openDexFile</code>（<code>DexFile.java:403</code>）调用 <code>openDexFileNative</code>（<code>:477</code>）。</p>
+<p><strong>Native 落点。</strong> <code>DexFile_openDexFileNative</code>（<code>art/runtime/native/dalvik_system_DexFile.cc:368</code>）进入 <code>OatFileManager::OpenDexFilesFromOat</code>（<code>:308/394</code>），后者决定用哪个 <code>oat</code>/<code>vdex</code>（流程口径见 <code>:303-313</code>）。需要后台补验证时走 <code>RunBackgroundVerification</code>（<code>:419</code>）。</p>
+<p><strong>ClassLinker 两个入口。</strong> <code>ClassLinker::FindClass</code>（<code>art/runtime/class_linker.cc:3266/3277</code>）先经 <code>OatDexFile::FindClassDef</code> 定位 <code>class_def</code>（约 <code>:3243</code>），再由 <code>DefineClass</code>（调用点 <code>:3254</code>，定义 <code>:3505</code>）完成定义。</p>
+<p><strong>AOT 前端。</strong> <code>dex2oat</code> 的 <code>main</code> 在 <code>art/dex2oat/dex2oat.cc:3248</code>，命令行接受 <code>--compiler-filter=</code>（<code>:158</code>）。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某个 APK 的 <code>classes.dex</code> 头四字节为 <code>64 65 78 0a</code>，即 <code>{'d','e','x','\n'}</code>，第 8 字节版本为 <code>039</code>。应用启动时 <code>BaseDexClassLoader</code> 构造 <code>DexPathList</code>，<code>makePathElements</code> 把 APK 路径拆成元素，再经 <code>DexFile.openDexFile</code> → <code>openDexFileNative</code> 落到 <code>DexFile_openDexFileNative</code>。此处的 <code>OatFileManager::OpenDexFilesFromOat</code> 会先找对上号的 <code>oat</code>/<code>vdex</code>：找到就用其中已编译的代码与已验证结果，质量取决于当时的编译档位选择；找不到就回落到解释执行，并把验证任务交给 <code>RunBackgroundVerification</code>。应用首次调用 <code>Class.forName</code> 时，<code>ClassLinker::FindClass</code> 按上述 <code>dex_file</code> 定位 <code>class_def</code>，<code>DefineClass</code> 建出 <code>mirror::Class</code>。如果这个 DEX 的版本号比运行时支持的更高，<code>openDexFileNative</code> 阶段就会失败，表现为类找不到，而不是等到 <code>FindClass</code>。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>AND-P3-203 讲 <code>JIT</code> 热度与 profile 动态面：本篇只到「档位选择」，profile 怎么采、怎么影响下一次编译归 203。</li><li>AND-P3-202 讲堆与 GC：<code>mirror::Class</code> 分配在堆上，但回收策略不在此展开。</li><li>libbinder 侧 <code>Bn</code>/<code>Bp</code> 对应归 AND-P3-302。</li><li>内核侧 <code>dexopt</code> 调度与 <code>bg-dexopt</code> 服务只在 §8 点名，展开归 P5/P10。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>DEX magic 与长度</td><td><code>art/libdexfile/dex/dex_file.h</code></td><td><code>kDexMagicSize = 4</code></td><td>magic 长度常量</td></tr><tr><td>DEX magic 与版本表</td><td><code>art/libdexfile/dex/standard_dex_file.cc</code></td><td><code>{'d','e','x','\n'}</code>、版本 <code>035</code>–<code>041</code></td><td>版本识别入口</td></tr><tr><td>类查找与定义</td><td><code>art/runtime/class_linker.cc</code></td><td><code>FindClass</code>、<code>DefineClass</code></td><td>定位 <code>class_def</code> 后建类</td></tr><tr><td>Native 打开 DEX</td><td><code>art/runtime/native/dalvik_system_DexFile.cc</code></td><td><code>DexFile_openDexFileNative</code>、<code>OpenDexFilesFromOat</code></td><td><code>oat</code>/<code>vdex</code> 选择点</td></tr><tr><td>OAT 容器</td><td><code>art/runtime/oat/oat.h</code></td><td><code>{'o','a','t','\n'}</code>（magic 定义于此；容器类声明在 <code>oat_file.h</code>）</td><td>编译产物容器</td></tr><tr><td>VDEX 容器</td><td><code>art/runtime/vdex_file.h</code></td><td><code>{'v','d','e','x'}</code>、<code>027</code></td><td>验证结果容器</td></tr><tr><td>编译档位</td><td><code>art/libartbase/base/compiler_filter.h</code></td><td><code>CompilerFilter::Filter</code>、默认 <code>kSpeed</code></td><td>档位枚举与默认值</td></tr><tr><td>Java 装载链</td><td><code>libcore/dalvik/src/main/java/dalvik/system/BaseDexClassLoader.java</code></td><td><code>DexPathList</code></td><td>路径到元素的拆分</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：art:b753cf97923c</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C art rev-parse HEAD</code></pre>
+<p>期望输出 <code>b753cf97923c</code>，与锚点一致。</p>
+<pre><code class="lang-bash">sed -n '24,42p' art/libdexfile/dex/standard_dex_file.cc</code></pre>
+<p>期望看到 <code>{'d','e','x','\n'}</code> 与 <code>035</code>/<code>037</code>/<code>038</code>/<code>039</code>/<code>040</code>/<code>041</code> 的版本表。</p>
+<pre><code class="lang-bash">grep -n 'kDexMagicSize' art/libdexfile/dex/dex_file.h</code></pre>
+<p>期望命中 <code>kDexMagicSize = 4</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;oat\|vdex&quot; art/runtime/oat/oat.h art/runtime/vdex_file.h | grep -n &quot;027\|'o','a','t'&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>OAT</code> magic 与 <code>VDEX</code> 版本 <code>027</code> 各一处。</p>
+<pre><code class="lang-bash">sed -n '32,46p' art/libartbase/base/compiler_filter.h</code></pre>
+<p>期望看到 8 个 <code>k*</code> 档位与 <code>kSpeed</code> 默认值。</p>
+<pre><code class="lang-bash">grep -n 'OpenDexFilesFromOat\|RunBackgroundVerification' art/runtime/native/dalvik_system_DexFile.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中调用点与后台验证入口。</p>
+<pre><code class="lang-bash">grep -n 'compiler-filter' art/dex2oat/dex2oat.cc | head -3</code></pre>
+<p>期望看到 <code>--compiler-filter=</code> 选项解析。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<ul><li><strong>误区：`classes.dex` 存在就一定加载成功。</strong> 不一定。<code>openDexFileNative</code> 阶段会校验 magic 与版本，版本高于运行时支持范围就直接失败。</li><li><strong>误区：`OAT` 和 `VDEX` 是同一份文件的两个名字。</strong> 不是。<code>OAT</code> 承载编译产物与镜像信息，<code>VDEX</code> 承载验证结果，打开时由 <code>OatFileManager</code> 分别决定使用。</li><li><strong>误区：默认档位是最激进的优化档。</strong> 不是。默认是 <code>kSpeed</code>（<code>compiler_filter.h:45</code>），不是 <code>kEverything</code>。</li><li><strong>误区：`036` 只是没人用，其实运行时会接受。</strong> 版本表里根本没有 <code>036</code>，它因旧 Dalvik 的实现缺陷被跳过，解析器不会把它当合法版本。</li></ul>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：没有 <code>oat</code> 文件时应用还能跑吗？ <strong>答</strong>：能，回落到解释执行，必要时走 <code>RunBackgroundVerification</code> 补验证，后续再由 <code>dex2oat</code> 生成产物。 <strong>追问</strong>：那首次启动为什么还是会慢？ <strong>答</strong>：慢在解释执行与验证开销，不在类查找本身；编译档位与产物是否就绪决定了这段耗时。</p>
+<p><strong>问</strong>：<code>FindClass</code> 和 <code>DefineClass</code> 谁负责读 <code>class_def</code>？ <strong>答</strong>：<code>FindClass</code> 经 <code>dex_file</code> 定位 <code>class_def</code>，<code>DefineClass</code> 完成定义与链接。 <strong>追问</strong>：<code>DexFile</code> 句柄在这里起什么作用？ <strong>答</strong>：句柄决定「在哪个 DEX 里找」，<code>ClassLinker</code> 本身不打开文件。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>类找不到，但 APK 里确有 <code>classes.dex</code></td><td><code>unzip -p app.apk classes.dex | head -c 8 | xxd</code></td><td>前 4 字节是否 <code>64 65 78 0a</code>，第 8 字节版本号</td><td>版本高于支持范围则降 targetSdk 或换编译链</td></tr><tr><td>首启明显慢，后续正常</td><td><code>adb shell ls -l /data/app/*/*/oat/</code></td><td>是否有对应 <code>oat</code>/<code>vdex</code>，时间戳是否晚于安装</td><td>无产物时确认 <code>dex2oat</code> 是否被调用</td></tr><tr><td>同一 APK 在不同设备产物大小不同</td><td><code>unzip -l app.apk | grep dex</code></td><td>DEX 数量与大小</td><td>对比两设备的编译档位配置</td></tr><tr><td>怀疑 <code>OAT</code>/<code>VDEX</code> 版本不匹配</td><td><code>xxd -l 8 /data/app/*/*/oat/*/*.odex</code></td><td>头四字节是否为 <code>6f 61 74 0a</code>（命令中的文件名是设备上的历史产物名，非 OAT 格式别名）</td><td>版本不匹配则清理产物重编</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：<code>JIT</code> 与 profile 采集（AND-P3-203）；堆与 GC（AND-P3-202）；<code>libbinder</code> 的 <code>Bn</code>/<code>Bp</code>（AND-P3-302）；内核侧 <code>dexopt</code> 调度与 <code>bg-dexopt</code> 服务（P5/P10，只点名不展开）。</li><li><strong>本篇前置依赖</strong>：AND-P3-G01。</li><li><strong>本篇后继</strong>：AND-P3-203、AND-P3-202。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>DEX magic 长度 4 字节，来源：源码常量 <code>kDexMagicSize</code>。</li><li>DEX 版本最高 <code>041</code>，来源：源码版本表。</li><li><code>VDEX</code> 版本字符串 <code>027</code>，来源：源码常量。</li><li>编译档位共 8 个，来源：枚举定义。</li><li>单次 <code>dex2oat</code> 在具体设备上的耗时与产物大小：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>较早版本</td><td>DEX 版本表中没有 <code>041</code></td><td>只识别到更早的版本号，遇到 <code>041</code> 需升级运行时</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td>版本表含 <code>035</code>–<code>041</code>（跳过 <code>036</code>），默认档位 <code>kSpeed</code></td><td>解析器接受到 <code>041</code>；未指定档位时按 <code>kSpeed</code> 编译</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>dex format</code>、<code>dex2oat</code>、<code>compiler filter</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>CompilerFilter</code>、<code>OatFileManager</code>、<code>dex2oat</code>。</li><li>本仓关键路径：<code>art/runtime/native/dalvik_system_DexFile.cc</code>、<code>art/runtime/class_linker.cc</code>、<code>art/libdexfile/dex/standard_dex_file.cc</code>。</li><li>承接篇：AND-P3-203、AND-P3-202。</li></ul>
+</article>
+<footer>android-100 · AND-P3-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

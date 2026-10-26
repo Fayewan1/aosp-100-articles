@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模块与产品变体：product、flavor 与 A/B 分区</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>模块与产品变体：product、flavor 与 A/B 分区</h1>
+<div class="kv"><span>ID：AND-P11-201</span><span>卷：P11</span><span>章：11.2</span><span>难度：4</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/make/core/product_config.mk ；build/make/core/product.mk ；build/make/core/board_config.mk ；build/make/core/main.mk ；device/generic/goldfish/AndroidProducts.mk ；device/generic/goldfish/64bitonly/product/sdk_phone64_x86_64.mk ；device/generic/goldfish/board/BoardConfigCommon.mk ；system/fs/fs_mgr/liblp/builder.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>产品不是「一个目录 + 一个 makefile」，而是一条 <code>inherit-product</code> 展开链的终值：链上每层只往 <code>PRODUCT_*</code> 变量里叠加——单值变量本地显式赋值优先，列表变量追加——<code>BOARD_*</code> 走板级配置另一条求值路径，最后由构建系统一次性做一致性校验。变体（<code>user</code>/<code>userdebug</code>/<code>eng</code>）在 <code>main.mk</code> 只做合法性与默认值收敛，真正差异落在各模块自己的 <code>TARGET_BUILD_VARIANT</code> 判断上。A/B 由 <code>AB_OTA_UPDATER := true</code> 这一开关整体切换产物形态，动态分区由 <code>PRODUCT_USE_DYNAMIC_PARTITIONS := true</code> 触发超级分区布局生成。goldfish（本树参考设备）把 <code>AB_OTA_UPDATER</code> 显式设为 <code>none</code>——该开关在 <code>board_config.mk</code> :973–:974 的默认值是 <code>true</code>——是读反例的好样本。分区布局的实际落地在 <code>system/fs/fs_mgr/liblp</code>，本篇只到配置层，镜像与 OTA 产物交给 202。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读｜路径 C 只读 §4/§9</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P11-101</code>——Soong 模块解析与产品配置在同一构建里分属两层，先知道模块怎么被收集，再看产品怎么被继承，顺序不容易乱。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/make/core/product_config.mk</code></li><li><code>build/make/core/product.mk</code></li><li><code>build/make/core/board_config.mk</code></li><li><code>build/make/core/main.mk</code></li><li><code>device/generic/goldfish/AndroidProducts.mk</code></li><li><code>device/generic/goldfish/board/BoardConfigCommon.mk</code></li><li><code>device/generic/goldfish/64bitonly/product/sdk_phone64_x86_64.mk</code></li><li><code>system/fs/fs_mgr/liblp/builder.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在 <code>lunch</code> 列表里挑了一个产品，加了自己的板子目录，改完 <code>PRODUCT_NAME</code>，构建却报产品重名或 <code>PRODUCT_*</code> 冲突。换到另一台机器上同步同一棵树，同一个产品又变成 A/B 了，因为另一块板子的 <code>BoardConfigCommon.mk</code> 里多了一行。再往下走，<code>PRODUCT_USE_DYNAMIC_PARTITIONS</code> 打开后 super 分区镜像报和 <code>PRODUCT_BUILD_SUPER_EMPTY_IMAGE</code> 互相矛盾。这些现象的共性是：产品配置分散在 device 目录与 build 目录两侧，改一处看不出全貌。本篇把这条链的求值顺序、校验点和开关边界摆出来。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念，一条求值方向。</p>
+<p>产品（product）：由 <code>AndroidProducts.mk</code> 声明、被 <code>lunch</code> 选中的那份 makefile，它通过 <code>inherit-product</code> 把上游片段收进来。板级配置（board config）：<code>BoardConfig*.mk</code> 里的 <code>BOARD_*</code> 变量，与产品变量并行求值，两者不是继承关系。变体（variant）：<code>TARGET_BUILD_VARIANT</code> 的三档取值。分区形态：A/B 与动态分区两个正交开关，前者决定更新方式，后者决定分区容纳方式。</p>
+<p>图 1：产品配置从声明到校验的求值方向</p>
+<pre><code>AndroidProducts.mk 声明产品列表
+        |
+        v
+lunch 选定 -&gt; 产品 makefile 入口（PRODUCT_NAME）
+        |  inherit-product 逐层展开
+        v
+product_config.mk 汇总 PRODUCT_*
+board_config.mk 汇总 BOARD_*，交叉校验
+        |
+        v
+main.mk 收敛 TARGET_BUILD_VARIANT
+        |
+        v
+Makefile 按 AB_OTA_UPDATER 等开关切产物分支</code></pre>
+<p>关系要点：<code>PRODUCT_*</code> 分两类——单值变量（如 <code>PRODUCT_NAME</code>，<code>product.mk</code> :25 列入 <code>_product_single_value_vars</code>）本地显式赋值优先于继承值，列表变量（如 <code>PRODUCT_PACKAGES</code>）按继承链追加；<code>BOARD_*</code> 不参与 <code>inherit-product</code> 的继承展开，但「只在板级文件里累积」是错的：产品 makefile 先于板级文件被求值（<code>envsetup.mk</code> :351 → <code>product_config.mk</code> :234 → <code>node_fns.mk</code> :190，而 <code>board_config.mk</code> :254 才 include <code>BoardConfig.mk</code>），产品侧写下的 <code>BOARD_</code> 赋值会先落地，板级文件里的 <code>?=</code> 兜底反而覆盖不了它。两个域的交叉校验集中在 <code>board_config.mk</code>，这也是绝大多数「配置矛盾」报错的出处。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>三组同族符号必须先分清。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>PRODUCT_USE_DYNAMIC_PARTITIONS</code></td><td>打开动态分区；未显式设 <code>PRODUCT_BUILD_SUPER_PARTITION</code> 时回落为其值（<code>product_config.mk</code> :519-521）</td><td>产品 makefile 设值，<code>build/make/core/board_config.mk</code> 校验</td></tr><tr><td><code>PRODUCT_BUILD_SUPER_EMPTY_IMAGE</code></td><td>是否产出空的 super 镜像</td><td><code>build/make/core/board_config.mk</code></td></tr><tr><td><code>PRODUCT_NAME</code></td><td>产品标识，lunch 目标名与产物命名的基础</td><td>产品 makefile</td></tr><tr><td><code>PRODUCT_MODEL</code></td><td>面向用户的机型字符串</td><td>产品 makefile</td></tr><tr><td><code>BOARD_VNDK_VERSION</code></td><td>供应商接口版本口径，参与交叉校验</td><td><code>build/make/core/board_config.mk</code></td></tr><tr><td><code>BOARD_EMULATOR_DYNAMIC_PARTITIONS_PARTITION_LIST</code></td><td>模拟器动态分区列表</td><td><code>device/generic/goldfish/board/BoardConfigCommon.mk</code></td></tr><tr><td><code>BOARD_SUPER_PARTITION_SIZE</code></td><td>超级分区容量上界</td><td><code>build/make/core/board_config.mk</code></td></tr><tr><td><code>AB_OTA_UPDATER</code></td><td>A/B 更新方式总开关；未设置时默认 <code>true</code></td><td><code>build/make/core/board_config.mk</code> :973-974（默认值）、<code>build/make/core/Makefile</code> :6246（消费）</td></tr><tr><td><code>TARGET_BUILD_VARIANT</code></td><td>变体名，取值受限</td><td><code>build/make/core/main.mk</code></td></tr><tr><td><code>INTERNAL_VALID_VARIANTS</code></td><td>合法变体白名单</td><td><code>build/make/core/main.mk</code></td></tr></tbody></table>
+<p>配置规模先给个量级感：<code>product_config.mk</code> 共 764 行，<code>PRODUCT_</code> 赋值行 54 处；<code>board_config.mk</code> 共 1119 行，<code>BOARD_</code> 赋值行 36 处；<code>product.mk</code> 共 683 行。计数口径为按单前缀分别统计——<code>grep -cP '^\s*PRODUCT_[A-Z_]+\s*:?(\+|\?)?=' product_config.mk</code> 与 <code>grep -cP '^\s*BOARD_[A-Z_]+\s*:?(\+|\?)?=' board_config.mk</code>，可原样复现；若把两个前缀并成一条正则去跑 <code>board_config.mk</code>，会连它的 7 处 <code>PRODUCT_</code> 行一起计入，得 43。函数落点：<code>inherit-product</code> 定义在 <code>build/make/core/product.mk</code> 的 532 行，<code>inherit-product-if-exists</code> 定义在 579 行。后者的语义差一层——文件不存在时不报错，这让不同分支的树可以共用同一份上游产品文件。</p>
+<p>变体的收敛做三件事。<code>main.mk</code> 102 行定义 <code>INTERNAL_VALID_VARIANTS := user userdebug eng</code>；103 行起的过滤分支对非法值直接 <code>$(error stopping)</code>（:110）；:131-147 还有一层集中分派——<code>tags_to_install</code> 在 :131 置空后按变体累加（userdebug 得 <code>debug</code>（:135）、eng 得 <code>debug eng</code>（:139）），:146-147 在 <code>SANITIZE_TARGET</code> 含 <code>address</code> 且已含 <code>debug</code> 时再加 <code>asan</code>；它决定带标签模块是否被装上。此外 :151-157 的 <code>java_coverage</code> 与 :174 的 <code>sdk</code> 还有两个分支。变体的其余行为仍在各模块自己的 <code>TARGET_BUILD_VARIANT</code> 判断里。另有两处更早的拦截：<code>envsetup.mk</code> :83-84 在变体为空时回落到 <code>eng</code>，:350-356 对非法值先报 <code>bad TARGET_BUILD_VARIANT</code>。这意味着「userdebug 和 user 差在哪」不是某一份文件能回答的，要靠 grep <code>TARGET_BUILD_VARIANT</code> 去看具体模块。</p>
+<p>A/B 是整体切换。<code>build/make/core/Makefile</code> 6246 行 <code>ifeq ($(AB_OTA_UPDATER),true)</code> 是首个产物组织分支，:6358 另有非 A/B 分支，:6370/:6395/:6977 还有多处消费——但都只在 A/B 树上走，非 A/B 走另一套产物组织。这个开关的取值不止两档。<code>board_config.mk</code> :988 只判 <code>ifneq ($(AB_OTA_UPDATER),true)</code>：<code>none</code> 与其他非 <code>true</code> 取值一律落到非 A/B（空值到不了这里，:973-:974 已先置 <code>true</code>），goldfish 取的 <code>none</code> 就是 <code>false</code> 之外的第三档。</p>
+<p>它在 <code>Makefile</code> 里的消费点全集是 :6246、:6358、:6370、:6395、:6404-:6405（<code>AB_OTA_PARTITIONS</code> 守卫 error）、:6977、:7599；其中 :6358 单独判 <code>false</code> 才构建静态 <code>updater</code>。</p>
+<p>系统留的共存口在 <code>board_config.mk</code>：:973–:974 在未设置时默认取 <code>true</code>，:976 把它列入 <code>.KATI_READONLY</code>（此后不可再改，故赋值须早于板级配置求值）；:985-992 的 <code>TARGET_OTA_ALLOW_NON_AB</code> 在开关非 true 或 <code>PRODUCT_OTA_FORCE_NON_AB_PACKAGE</code> 为 true 时置真，允许 A/B 与非 A/B 配置并存。</p>
+<p>动态分区的校验是一棵小树，不是双向报错。外层守卫在 <code>board_config.mk</code> :663 <code>ifeq (true,$(PRODUCT_BUILD_SUPER_PARTITION))</code>——未显式设这个开关时，它回落成 <code>PRODUCT_USE_DYNAMIC_PARTITIONS</code> 的值（<code>product_config.mk</code> :519-521）。:664–:669 是一支：动态分区打开且 <code>BOARD_SUPER_PARTITION_SIZE</code> 非空时，:667 置 <code>BUILDING_SUPER_EMPTY_IMAGE := true</code>；<strong>容量为空时不报错</strong>，只是不置位。:670–:678 是另一支：只有显式设了 <code>PRODUCT_BUILD_SUPER_EMPTY_IMAGE=true</code>，才要求动态分区必须同开（:672）且容量必须非空（:675），两条各一条 <code>$(error ...)</code>。:679–:680 还有一层：外层守卫不成立而空镜像开关为真同样报错。</p>
+<p><code>BOARD_VNDK_VERSION</code> 的校验点在 <code>board_config.mk</code> 1019 行，注释即 <code># Check BOARD_VNDK_VERSION</code>。链接期支撑在 <code>system/core/libvndksupport/linker.cpp</code>，共 85 行。</p>
+<p>设备侧声明落在 <code>device/generic/goldfish/manifest.xml</code>，首行为 <code>&lt;manifest version=&quot;1.0&quot; type=&quot;device&quot; target-level=&quot;8&quot;&gt;</code>。这是 VINTF 设备侧声明的位置，与产品配置是两套东西：产品配置决定构建什么，manifest 声明运行时接口契约。</p>
+<p>分区布局的实际实现已经不在 <code>system/core</code>。本树 <code>system/fs/fs_mgr/</code>（manifest 项目 <code>platform/system/fs/fs_mgr</code>）是 fs_mgr 的新家，<code>system/core/fs_mgr</code> 未检出。规模：<code>liblp/builder.cpp</code> 1277 行、<code>images.cpp</code> 534 行、<code>super_layout_builder.cpp</code> 246 行、<code>reader.cpp</code> 499 行、<code>writer.cpp</code> 411 行；<code>libsnapshot/snapshot.cpp</code> 4923 行、<code>snapshotctl.cpp</code> 1146 行；<code>fs_mgr.cpp</code> 2513 行。<code>libsnapshot</code> 的体量说明虚拟 A/B 与快照逻辑本身是重活，配置层那两行开关只是入口。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>走 goldfish 的 64 位 x86_64 产品。<code>device/generic/goldfish/AndroidProducts.mk</code> 声明 12 个产品，<code>sdk_phone64_x86_64</code> 是其中之一。</p>
+<p>它的入口文件是 <code>device/generic/goldfish/64bitonly/product/sdk_phone64_x86_64.mk</code>。三处继承按行序发生：</p>
+<p>21 行 <code>$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)</code>，从 build 树拿 64 位基础；31 行 <code>$(call inherit-product, device/generic/goldfish/board/emu64x/details.mk)</code>，接板级细节；32 行 <code>$(call inherit-product, device/generic/goldfish/product/phone.mk)</code>，接手机形态的上游片段。随后 35 行 <code>PRODUCT_NAME := sdk_phone64_x86_64</code>，37 行 <code>PRODUCT_MODEL := Android SDK built for x86_64</code>。</p>
+<p>图 2：<code>sdk_phone64_x86_64</code> 的继承展开</p>
+<pre><code>core_64_bit_only.mk  (build 树)
+        |
+        +-- emu64x/details.mk  (板级细节)
+        |
+        +-- phone.mk  (产品形态)
+                |
+                v
+   PRODUCT_NAME / PRODUCT_MODEL 收口</code></pre>
+<p>位置是惯例而非机制：<code>PRODUCT_NAME</code> 是单值变量（<code>product.mk</code> :25），<code>node_fns.mk</code> :150-165 的继承展开对单值变量执行「本地显式优先」——本层显式设了值，继承来的同名列就不再生效，放前放后都能覆盖上游。goldfish 把四个 <code>PRODUCT_</code> 赋值（<code>PRODUCT_BRAND</code> :34、<code>PRODUCT_NAME</code> :35、<code>PRODUCT_DEVICE</code> :36、<code>PRODUCT_MODEL</code> :37）连续放在继承之后，与产品配置的阅读顺序一致。「改了产品名却仍是旧名」要查的是 <code>lunch</code> 选中的产品与 <code>AndroidProducts.mk</code> 的指向，不是赋值行序。</p>
+<p>配套目录规模：<code>device/generic/goldfish/product/</code> 有 11 个文件（<code>base_phone.mk</code>、<code>phone.mk</code>、<code>tablet.mk</code>、<code>generic.mk</code>、<code>versions.mk</code> 等），<code>device/generic/goldfish/board/</code> 有 12 个条目（<code>BoardConfigCommon.mk</code>、<code>emu64x</code>、<code>emu64a</code>、<code>fstab</code>、<code>kernel</code> 等）。产品形态与板级形态各占一侧，互不继承。</p>
+<p>再看这台设备的两个分区开关，它们不在同一个文件里：<code>AB_OTA_UPDATER := none</code> 在 <code>device/generic/goldfish/board/BoardConfigCommon.mk</code> 39 行，是显式关 A/B（系统默认值是 <code>true</code>）；<code>PRODUCT_USE_DYNAMIC_PARTITIONS := true</code> 在产品文件 16 行（<code>64bitonly/product/sdk_phone64_x86_64.mk</code>），与 <code>BoardConfigCommon.mk</code> 51 行的 <code>BOARD_EMULATOR_DYNAMIC_PARTITIONS_PARTITION_LIST</code>、73 行默认 8 GiB 的 <code>BOARD_EMULATOR_DYNAMIC_PARTITIONS_SIZE</code> 是同一套开关下的参数化——产品文件 :18 用 <code>?=</code> 先把容量置成 1800 MiB，变量从此非空，<code>BoardConfigCommon.mk</code> :73 的 <code>?= 8589934592</code>（8 GiB）兜底随即失效（属弱赋值先占，不是强覆盖）；同一文件 :48 的 <code>BOARD_SUPER_PARTITION_SIZE ?= 8598323200</code>（8 GiB + 8 MiB）同理被 :19 的 <code>:=</code> 抢先。:19 据此推出 <code>BOARD_SUPER_PARTITION_SIZE</code>（再 +8 MiB）。模拟器变量不是另一条路径。</p>
+<p>图 3：两个开关的四种组合</p>
+<pre><code>AB_OTA_UPDATER      PRODUCT_USE_DYNAMIC_PARTITIONS   形态
+false               false                            单槽 + 物理分区
+false               true                             单槽 + 超级分区
+true                false                            A/B + 物理分区
+true                true                             A/B + 超级分区</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>表格只是组合枚举，不代表任意组合都被推荐；实际能否构建通过取决于 <code>board_config.mk</code> 的交叉校验是否报错。凡涉及实际分区镜像尺寸与槽位冗余比例，未在本树构建验证。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P11-101</code> 讲 Soong 模块解析，回答「一个模块怎么被找到、属性怎么求值」；本篇回答「产品变量怎么继承、分区形态怎么定」，两者在同一构建入口下分工。</p>
+<p><code>AND-P11-202</code> 接走本篇之后的一切：镜像格式、OTA 包生成、<code>payload</code> 与 <code>target files</code> 的组织。本篇讲到 <code>AB_OTA_UPDATER</code> 开关的分支位置为止。</p>
+<p><code>AND-P5-101</code> 给内核侧背景（GKI、defconfig 与模块化），本篇不碰内核镜像的产出过程。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>产品变量汇总</td><td><code>build/make/core/product_config.mk</code></td><td>764 行，<code>PRODUCT_</code> 赋值行 54 处</td><td>继承链终值的落点</td></tr><tr><td>继承函数定义</td><td><code>build/make/core/product.mk</code></td><td><code>inherit-product</code> :532、<code>inherit-product-if-exists</code> :579</td><td>683 行；后者文件缺失不报错</td></tr><tr><td>板级汇总与交叉校验</td><td><code>build/make/core/board_config.mk</code></td><td>1119 行，<code>BOARD_</code> 赋值行 36 处；动态分区校验 :663–:680；<code>BOARD_VNDK_VERSION</code> 校验 :1019</td><td>绝大多数配置矛盾在此报错</td></tr><tr><td>变体收敛</td><td><code>build/make/core/main.mk</code></td><td><code>INTERNAL_VALID_VARIANTS</code> :102，非法变体报错 :103–:110</td><td>不做行为分派</td></tr><tr><td>产品声明</td><td><code>device/generic/goldfish/AndroidProducts.mk</code></td><td>声明 12 个产品</td><td>lunch 可见范围</td></tr><tr><td>继承实例</td><td><code>device/generic/goldfish/64bitonly/product/sdk_phone64_x86_64.mk</code></td><td>继承 :21/:31/:32；<code>PRODUCT_NAME</code> :35、<code>PRODUCT_MODEL</code> :37</td><td>顺序敏感的样本</td></tr><tr><td>开关默认值</td><td><code>device/generic/goldfish/board/BoardConfigCommon.mk</code></td><td><code>AB_OTA_UPDATER := none</code> :39；动态分区列表 :51、容量 :73</td><td>参考设备非 A/B</td></tr><tr><td>超级分区布局</td><td><code>system/fs/fs_mgr/liblp/builder.cpp</code></td><td>1277 行</td><td>布局落地实现，非配置层</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/make:5ce6f787337d</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 两个汇总文件的规模与赋值行计数
+wc -l build/make/core/product_config.mk build/make/core/board_config.mk build/make/core/product.mk
+grep -cP '^\s*PRODUCT_[A-Z_]+\s*:?(\+|\?)?=' build/make/core/product_config.mk
+grep -cP '^\s*BOARD_[A-Z_]+\s*:?(\+|\?)?=' build/make/core/board_config.mk
+# 期望：764 / 1119 / 683；54；36</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash"># 2. 继承函数落点
+grep -n 'define inherit-product' build/make/core/product.mk
+# 期望：inherit-product 在 532，inherit-product-if-exists 在 579</code></pre>
+<pre><code class="lang-bash"># 3. 合法变体与报错位置
+sed -n '100,111p' build/make/core/main.mk
+# 期望：INTERNAL_VALID_VARIANTS := user userdebug eng，随后 $(error stopping)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash"># 4. 动态分区校验树
+sed -n '660,680p' build/make/core/board_config.mk
+# 期望：663 外层守卫 PRODUCT_BUILD_SUPER_PARTITION；665-667 动态分区开且容量非空时置 BUILDING_SUPER_EMPTY_IMAGE；672/675 两条 $(error ...) 只在 PRODUCT_BUILD_SUPER_EMPTY_IMAGE=true 时到达</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash"># 5. A/B 开关分支与参考设备默认值
+grep -n 'ifeq ($(AB_OTA_UPDATER),true)' build/make/core/Makefile
+grep -n 'AB_OTA_UPDATER' device/generic/goldfish/board/BoardConfigCommon.mk
+# 期望：前者命中 6246/6370/6395/6977 四行（首个为 6246）；后者命中 39，值为 none</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash"># 6. 继承实例
+sed -n '21,37p' device/generic/goldfish/64bitonly/product/sdk_phone64_x86_64.mk
+# 期望：三处 inherit-product，随后 PRODUCT_NAME 与 PRODUCT_MODEL</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash"># 7. fs_mgr 新家与布局实现体量
+ls -d system/fs/fs_mgr system/core/fs_mgr 2&gt;&amp;1
+wc -l system/fs/fs_mgr/liblp/builder.cpp system/fs/fs_mgr/libsnapshot/snapshot.cpp
+# 期望：前者存在，system/core/fs_mgr 报无此目录；1277 / 4923</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：改 `PRODUCT_NAME` 就能重命名产品。</strong> 名字要落在对的文件里。<code>sdk_phone64_x86_64.mk</code> 把 <code>PRODUCT_NAME</code> 放在三处继承之后（35 行）是惯例写法；单值变量的本地显式赋值本来就更优先（<code>product.mk</code> :25 列入单值表，<code>node_fns.mk</code> :150-165 的展开规则），不是「不放后面就会被盖掉」。改了没生效，先查 <code>lunch</code> 选中的产品是不是这一份。</p>
+<p><strong>误区二：`inherit-product-if-exists` 只是容错写法，等价于先判断文件存在。</strong> 它的实际效果是让同一份上游产品文件在不同分支的树上共用——分支没有那个文件时不中断求值。这属于契约差异，不是风格选择：用 <code>inherit-product</code> 引用可能缺失的文件，配置阶段就会失败。</p>
+<p><strong>误区三：`user` 与 `userdebug` 的差异写在某个配置中心文件里。</strong> <code>main.mk</code> 确实做了一层集中分派：:131 起用 <code>tags_to_install</code> 按变体累加标签（userdebug 得 <code>debug</code>（:135）、eng 得 <code>debug eng</code>（:139），<code>SANITIZE_TARGET</code> 含 <code>address</code> 时再加 <code>asan</code>（:146-147））。但这层只决定带标签的模块是否被装上，变体的其余行为仍是各模块自己对 <code>TARGET_BUILD_VARIANT</code> 的判断叠加出来的，所以没有任何一处能完整列出差异。</p>
+<p><strong>误区四（看起来对其实是错的）：goldfish 既然支持动态分区，那它就是 A/B 设备。</strong> 两个开关正交。<code>BoardConfigCommon.mk</code> 39 行是 <code>AB_OTA_UPDATER := none</code>，参考设备显式关 A/B；它的动态分区由产品文件 16 行的 <code>PRODUCT_USE_DYNAMIC_PARTITIONS := true</code> 打开，<code>BOARD_EMULATOR_DYNAMIC_PARTITIONS_*</code> 是同一开关下的容量与列表参数，不是互斥的另一支。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么我把 <code>AB_OTA_UPDATER := true</code> 加到产品 makefile 里没生效？ <strong>答</strong>：<code>BOARD_*</code> 与 <code>PRODUCT_*</code> 是两个域，但这个开关两侧都能赋：<code>aosp_arm64.mk</code> :58、<code>aosp_x86_64.mk</code> :60 就是在产品 makefile 里写 <code>AB_OTA_UPDATER := true</code> 的。容易踩空的是<strong>未赋值时的默认方向</strong>——<code>board_config.mk</code> :973–:974 只在值为空时置 <code>true</code>，:976 随即把它列入 <code>.KATI_READONLY</code>，所以赋值必须发生在板级配置求值之前；产品侧写了，板级那句默认就不会生效。它不参与 <code>inherit-product</code> 的继承展开，这点是真的。 <strong>追问</strong>：那放 <code>BoardConfigCommon.mk</code> 就够了吗？ <strong>答</strong>：取值到位之后仍要过 <code>board_config.mk</code> 的交叉校验。开关本身通过不代表分区布局能生成，super 分区容量与列表还各有约束。</p>
+<p><strong>问</strong>：打开 <code>PRODUCT_USE_DYNAMIC_PARTITIONS</code> 为什么报错说 <code>BOARD_SUPER_PARTITION_SIZE</code> 未定义？ <strong>答</strong>：那条报错在 <code>board_config.mk</code> :675，前提是显式设了 <code>PRODUCT_BUILD_SUPER_EMPTY_IMAGE=true</code>——此时容量必须给出。没设这个开关时，容量为空不报错，只是 <code>BUILDING_SUPER_EMPTY_IMAGE</code> 不置位（:666–:667）。 <strong>追问</strong>：那「设了空镜像开关却没开动态分区」呢？ <strong>答</strong>：那是 :672 的另一条 <code>$(error ...)</code>。两条报错文案不同，按行号即可定位。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>lunch 列表里找不到自己的产品</td><td><code>grep -n 'PRODUCT_MAKEFILES' device/generic/goldfish/AndroidProducts.mk</code></td><td>自己的产品 mk 是否列在 <code>PRODUCT_MAKEFILES</code> 里</td><td>未收录则补声明；已收录则查产品 mk 内 <code>PRODUCT_NAME</code> 是否被继承覆盖</td></tr><tr><td>构建报变体非法</td><td><code>sed -n '350,356p' build/make/core/envsetup.mk</code>（更早命中）与 <code>sed -n '100,111p' build/make/core/main.mk</code></td><td><code>envsetup.mk</code> :352-355 先报 <code>bad TARGET_BUILD_VARIANT</code>，<code>main.mk</code> :102 白名单仅 <code>user userdebug eng</code></td><td>校正 <code>TARGET_BUILD_VARIANT</code> 拼写与大小写；空值时按 <code>envsetup.mk</code> :83-84 回落 <code>eng</code></td></tr><tr><td>动态分区相关 <code>$(error ...)</code></td><td><code>sed -n '660,680p' build/make/core/board_config.mk</code></td><td>报错落在 672 还是 675</td><td>落在 672 补开动态分区，落在 675 补 <code>BOARD_SUPER_PARTITION_SIZE</code></td></tr><tr><td>以为设备是 A/B 但产物是单槽</td><td><code>grep -rn 'AB_OTA_UPDATER' device/generic/goldfish/board/</code></td><td>是否被赋成 <code>none</code></td><td>改板级取值，并复核 <code>Makefile</code> 6246 分支是否走到</td></tr><tr><td>找不到 fs_mgr 源码</td><td><code>ls -d system/fs/fs_mgr system/core/fs_mgr 2&gt;&amp;1</code></td><td><code>system/core/fs_mgr</code> 是否报无此目录</td><td>转到 <code>system/fs/fs_mgr/</code> 继续看 <code>liblp</code> 与 <code>libsnapshot</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Soong 模块解析与属性求值（<code>AND-P11-101</code>）；镜像格式、OTA 包与增量更新产物（<code>AND-P11-202</code>）；内核构建与配置（<code>AND-P5-101</code>）；<code>liblp</code> 与 <code>libsnapshot</code> 的内部算法，本篇只给规模与位置。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P11-101</code>、<code>AND-P5-101</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P11-202</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>产品配置三个文件的规模为 764 / 683 / 1119 行（源码常量，<code>wc -l</code> 口径，2026-10-23 于 <code>android17-release</code> 静态核）。</li><li>goldfish 声明 12 个产品；<code>product/</code> 目录 11 个文件、<code>board/</code> 目录 12 个条目（目录清单口径）。</li><li>模拟器动态分区容量默认 <code>8589934592</code>，即 8 GiB 口径（源码常量，<code>?=</code> 弱赋值）。</li><li><code>libsnapshot/snapshot.cpp</code> 4923 行、<code>liblp/builder.cpp</code> 1277 行（源码常量）。构建耗时与镜像体积暂无实测，列为待补；本机 32GB 内存，整包构建不可行，凡涉及实际分区镜像处未在本树构建验证。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期 Android（A/B 引入前）</td><td>无 <code>AB_OTA_UPDATER</code> 分支，更新靠 recovery 整包</td><td>分区形态只有单槽一种；本篇不复述具体版本号</td></tr><tr><td>android17-release（本树实测）</td><td><code>AB_OTA_UPDATER</code> 分支在 <code>Makefile</code> 6246 起多处；动态分区校验在 <code>board_config.mk</code> 663–680；fs_mgr 位于 <code>system/fs/fs_mgr/</code>，<code>system/core/fs_mgr</code> 未检出</td><td>按本篇路径与行号可直接核验；<code>system/core/fs_mgr</code> 口径只适用于较早的树</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>build variants</code>；source.android.com 站内检索 <code>dynamic partitions</code>；source.android.com 站内检索 <code>A/B updates</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>inherit-product</code>、<code>BOARD_SUPER_PARTITION_SIZE</code>、<code>AB_OTA_UPDATER</code>。</li><li>本仓关键路径：<code>build/make/core/board_config.mk</code>（交叉校验集中地）、<code>device/generic/goldfish/board/BoardConfigCommon.mk</code>（开关默认值样本）、<code>system/fs/fs_mgr/liblp/</code>（布局实现）。</li><li>承接篇：<code>AND-P11-101</code>、<code>AND-P11-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

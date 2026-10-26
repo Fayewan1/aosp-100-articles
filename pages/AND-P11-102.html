@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Make 到 Bazel：构建系统的演进与选型</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Make 到 Bazel：构建系统的演进与选型</h1>
+<div class="kv"><span>ID：AND-P11-102</span><span>卷：P11</span><span>章：11.1</span><span>难度：3</span><span>核验：2026-10-23</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/make/envsetup.sh ；build/make/core/Makefile ；build/make/core/main.mk ；build/soong/ui/build/kati.go ；build/soong/soong_ui.bash ；build/release/flag_declarations/RELEASE_USE_RKATI.textproto</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 构建不是从 Make 直接跳到 Bazel，中间插着一层 kati：Make 的 <code>Android.mk</code> 由 kati 翻译成 ninja，才交给 ninja 执行。本树 <code>build/envsetup.sh</code> 是符号链接，入口 <code>make()</code> 先看树顶有没有 <code>build/soong/soong_ui.bash</code>：有、且参数不带 <code>-C</code> 前缀时走 <code>--make-mode</code>，否则（脚本缺失或带了 <code>-C</code>）回退到 <code>command make</code>（<code>get_make_command</code> :1016-1030）。<code>m</code>/<code>mm</code>/<code>mmm</code> 在 <code>envsetup.sh</code> 里没有定义（:1174-1180 还显式 <code>unset</code>），模块组构建只剩 <code>tapas()</code> 与 <code>banchan()</code>；另有三个脚本各定义了一个同名内部辅助 <code>m()</code>，与这两个入口不是一回事。ckati 是本树默认，rkati 是 Rust 重写版且 <code>bool_value: false</code> 默认关闭——这个默认不是靠 flag 语义推断的：<code>config.KatiBin()</code>（<code>config.go</code> :2035-2043）在 <code>useRkati</code> 为假时直接返回 <code>prebuilts/build-tools/&lt;host&gt;/bin/ckati</code>。平台构建规则仓 <code>build/bazel</code> 未收录进本树 manifest（1087 个项目），本篇不给该目录下任何路径与符号；但本树并非没有 Bazel 可核面——<code>trusty/WORKSPACE.bazel</code> 与 <code>trusty/.bazelrc</code> 是两条 linkfile 的落点（源在 <code>trusty/host/common/bazel/</code>，default.xml :1100-1101）、<code>prebuilts/bazel/common</code>（default.xml :883）含 <code>bazel-complete.bash</code> 与 <code>release_bazel.py</code>、<code>external/</code> 下大量第三方仓自带 <code>BUILD.bazel</code>（顶层 32 个仓、递归上千个文件，此处仅举 <code>abseil-cpp</code>、<code>antlr</code>、<code>brotli</code>、<code>cpu_features</code>、<code>cpuinfo</code>、<code>bazelbuild-remote-apis</code> 六例）、<code>build/pesto</code>（default.xml :24）的 <code>experiments/prepare_bazel_test_env/</code> 下是 <code>data/templates/build/bazel/rules/*.template</code>（含 <code>BUILD.bazel.template</code>）与 <code>data/static/build/bazel/rules/*.sh</code> 这类模板与静态数据，<code>build/make/tools/rbcrun</code>（Roboleaf）是另一处——三者都是测试/实验侧，同样不是可直接消费的平台构建规则。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P11-101</code>（Soong 构建体系：从 Android.bp 到 ninja）——它讲 Soong 主线，本篇只放三条路线的位置关系，先有主线再谈选型不会错位。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>build/make/envsetup.sh</code></li><li><code>build/make/core/Makefile</code></li><li><code>build/make/core/main.mk</code></li><li><code>build/soong/ui/build/kati.go</code></li><li><code>build/soong/soong_ui.bash</code></li><li><code>build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git</code>/<code>grep</code>。不需要构建，不需要真机。本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在树顶敲 <code>make</code>，以为它在跑 GNU make，其实大概率没跑——构建流程先被 <code>get_make_command()</code> 劫持到了 <code>soong_ui.bash --make-mode</code>。想看哪个模块被谁构建，<code>Android.mk</code> 里的依赖关系却查不到，因为 kati 已经把它转成了 ninja 文件。这时有人告诉你「以后要迁 Bazel」，你需要的不是口号，而是三条路线各自持有什么。本篇要回答的是：Make/kati、Soong、Bazel 在「谁持有构建逻辑、谁做依赖求解、谁生成执行图」这三层上分别占哪一格。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三条路线不是替代关系的三个时间点，而是构建流程上三个不同位置的分层：</p>
+<p>图 1：三条路线在构建流程中的位置</p>
+<pre><code>  Android.mk ──kati──┐
+                     ├─→ ninja 文件 ─→ ninja 执行 ─→ 镜像
+  Android.bp ─Soong──┘
+                      
+  Bazel 目标（本树未收录）：自带依赖求解与执行图</code></pre>
+<p>Make 路线持有「构建逻辑」，<code>Android.mk</code> 用 make 语法写规则；kati 做的是翻译，把 make 语义转成 ninja 的显式图。Soong 路线持有「构建逻辑 + 依赖求解」，<code>Android.bp</code> 是声明式描述，求解在 Soong 内部完成，最终同样落到 ninja。Bazel 路线的定位是自带求解与执行图，理论上不需要经 kati 或 Soong 兜一层；本树未收录平台构建规则仓 <code>build/bazel</code>，这一句只能按官方文档口径说——Bazel 在本树的可核面是 trusty、prebuilts 与 external 三处，都不是平台构建规则本身。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>三条路线的对比按三层判据展开。前两层是本树可核的，第三层只有两侧可核。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>runKatiBuild</code></td><td>驱动 kati 把 Makefile 转成 ninja 的入口</td><td><code>build/soong/ui/build/kati.go</code>（:239）</td></tr><tr><td><code>get_make_command</code></td><td>判定走 <code>--make-mode</code> 还是 <code>command make</code>；参数带 <code>-C</code> 前缀时强制后者</td><td><code>build/make/envsetup.sh</code>（:1016-1030）</td></tr><tr><td><code>make()</code></td><td>构建入口函数</td><td><code>build/make/envsetup.sh</code>（:1033）</td></tr><tr><td><code>RELEASE_USE_RKATI</code></td><td>ckati/rkati 切换的发布标志</td><td><code>build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></td></tr><tr><td><code>tapas()</code></td><td>模块组构建入口</td><td><code>build/make/envsetup.sh</code>（:674）</td></tr><tr><td><code>banchan()</code></td><td>模块组构建入口</td><td><code>build/make/envsetup.sh</code>（:747）</td></tr></tbody></table>
+<p><strong>谁持有构建逻辑。</strong> Make 侧持有方是 <code>build/make/core/</code> 顶层的 113 个 <code>.mk</code> 文件（递归含子目录一共 148 个），主 <code>Makefile</code> 8229 行。Soong 侧持有方是 <code>Android.bp</code> 与 Go 侧配置代码，<code>build/soong/Android.bp</code> 359 行，<code>build/soong/ui/build/config.go</code> 2325 行。量级差异不说明优劣，只说明粒度：make 语法把规则与控制流混在一处，<code>.bp</code> 把规则拆成声明。</p>
+<p><strong>谁做依赖求解。</strong> Make 侧的求解被切成两段：kati 负责 make 语义到 ninja 图的转换，ninja 负责按图执行。<code>runKatiBuild</code>（:239）就是这段的驱动。Soong 侧在自身内部完成模块依赖求解，产物仍是 ninja。Bazel 按官方文档口径把求解收在自己手里，不借道 kati。</p>
+<p><strong>谁生成执行图。</strong> 三条路线最终都产出执行图供 ninja 或自身执行器消费。区别在于图的来源：Make 侧靠 kati 转译，Soong 侧靠自身求解，Bazel 侧靠自身分析。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>在树顶执行 <code>make</code>，实际发生的是：</p>
+<ol><li><code>build/envsetup.sh</code>（1210 行，指向 <code>make/envsetup.sh</code> 的符号链接）被 source。</li><li><code>make()</code>（:1033）调用 <code>get_make_command()</code>（:1016）。</li><li>树顶检测到 <code>build/soong/soong_ui.bash</code> 且参数不带 <code>-C</code> 前缀，返回 <code>--make-mode</code>；带 <code>-C</code> 时仍返回 <code>command make</code>（:1021-1025）。</li><li>后续 Makefile 处理中，<code>build/make/core/Makefile</code>（8229 行）里 <code>systemimage</code> 在 :947 只是「为 all 目标占位」的空桩（:944-945 的注释即说明此意，无依赖无配方），真正的规则在 :3910 <code>systemimage: $(INSTALLED_SYSTEMIMAGE_TARGET)</code>；<code>main.mk</code> 1951 行、<code>config.mk</code> 1420 行、<code>product.mk</code> 683 行参与配置展开。</li><li>需要构建 <code>Android.mk</code> 描述的模块时，<code>runKatiBuild</code>（:239）驱动预编译的 <code>ckati</code>（<code>prebuilts/build-tools/linux-x86/bin/ckati</code>），因为它默认开启——<code>RELEASE_USE_RKATI</code> 的 <code>bool_value: false</code>。</li></ol>
+<p>这条链说明一件事：本树的 <code>make</code> 命令已经不再是「GNU make 跑 Makefile」，而是「Soong 的统一入口按需调 kati」。<code>m</code>/<code>mm</code>/<code>mmm</code> 消失、模块组构建改用 <code>tapas()</code>（:674）与 <code>banchan()</code>（:747），是同一件事的另一面。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置 <code>AND-P11-101</code> 讲 Soong 主线（<code>Android.bp</code> 到 ninja 的完整链路），本篇不重复其内部机制，只把它当作三条路线中的一格。</li><li>本篇与 <code>AND-P11-101</code> 的分界线：101 讲「Soong 怎么工作」，本篇讲「Make、Soong、Bazel 各占哪一格、怎么选」。</li><li>Bazel 侧的实测面归属后续补写，本篇只给演进位置与官方文档口径，不给 <code>build/bazel</code> 下任何路径、文件名与符号。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>构建入口</td><td><code>build/make/envsetup.sh</code></td><td><code>make()</code>、<code>get_make_command()</code>、<code>tapas()</code>、<code>banchan()</code>、<code>lunch()</code>、<code>croot()</code>、<code>flashall()</code>、<code>fastboot()</code></td><td>1210 行，指向 <code>make/envsetup.sh</code> 的符号链接</td></tr><tr><td>Make 主规则</td><td><code>build/make/core/Makefile</code></td><td><code>systemimage</code> 空桩 :947、实规则 :3910</td><td>8229 行</td></tr><tr><td>Make 配置骨架</td><td><code>build/make/core/main.mk</code></td><td>配置展开与目标汇总</td><td>1951 行</td></tr><tr><td>kati 驱动</td><td><code>build/soong/ui/build/kati.go</code></td><td><code>runKatiBuild</code>（:239）</td><td>把 Makefile 转成 ninja</td></tr><tr><td>Soong 统一入口</td><td><code>build/soong/soong_ui.bash</code></td><td><code>--make-mode</code> 分发</td><td>树顶存在即走 Soong 入口</td></tr><tr><td>ckati/rkati 开关</td><td><code>build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></td><td><code>RELEASE_USE_RKATI</code></td><td><code>bool_value: false</code>、<code>workflow: LAUNCH</code></td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/soong:6722dd8833db</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C build/soong rev-parse HEAD</code></pre>
+<p>期望输出 <code>6722dd8833db</code>，对上 §6 锚点行。</p>
+<pre><code class="lang-bash">ls -l build/envsetup.sh &amp;&amp; wc -l build/envsetup.sh</code></pre>
+<p>期望显示它是指向 <code>make/envsetup.sh</code> 的符号链接，且行数为 1210。</p>
+<pre><code class="lang-bash">grep -n 'get_make_command\|^function make()\|soong_ui.bash' build/envsetup.sh</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :1016 的 <code>get_make_command()</code>、:1033 的 <code>make()</code>，以及 <code>soong_ui.bash</code> 与 <code>--make-mode</code> 的判定分支。</p>
+<pre><code class="lang-bash">ls build/make/core/*.mk | wc -l</code></pre>
+<p>期望 <code>113</code>（仅顶层；递归含子目录一共 148 个，见 §4.2 口径）。</p>
+<pre><code class="lang-bash">wc -l build/make/core/Makefile build/make/core/main.mk build/make/core/config.mk build/make/core/product.mk</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次为 8229、1951、1420、683，对上 §4.3 的规模数据。</p>
+<pre><code class="lang-bash">grep -n 'runKatiBuild' build/soong/ui/build/kati.go</code></pre>
+<p>期望命中 :239，对上 §4.2 表格。</p>
+<pre><code class="lang-bash">grep -n 'bool_value\|description\|workflow' build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 description 为 <code>Use rkati instead of ckati, a rust rewrite</code>，<code>bool_value: false</code>，<code>workflow: LAUNCH</code>。</p>
+<pre><code class="lang-bash">ls build/bazel 2&gt;&amp;1; grep -c '&lt;project' .repo/manifests/default.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前者报无此目录，后者给出 1087 的项目计数口径，对上 §1 的 manifest 断言。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：敲 `make` 就是在跑 GNU make。</strong> 本树基本不是。<code>get_make_command()</code>（:1016-1030）先查树顶有没有 <code>build/soong/soong_ui.bash</code>：有、且参数不带 <code>-C</code> 前缀时返回带 <code>--make-mode</code> 的命令；<code>command make</code> 是回退分支（脚本缺失或带了 <code>-C</code>）。</p>
+<p><strong>误区二：`Android.mk` 由 GNU make 直接执行。</strong> 看起来对其实是错的。<code>Android.mk</code> 的语义由 kati 解析，<code>runKatiBuild</code>（:239）把它转成 ninja，执行的是 ninja 而非 make。kati 可执行文件是预编译二进制 <code>prebuilts/build-tools/linux-x86/bin/ckati</code> 与 <code>rkati</code>，<code>build/make/kati</code> 源码目录在本树未检出。</p>
+<p><strong>误区三：`m`/`mm`/`mmm` 只是换了名字还留着。</strong> 本树未检出这三个命令，<code>envsetup.sh</code> :1174-1180 还显式 <code>unset m</code>/<code>mm</code>/<code>mma</code>/<code>mmm</code>/<code>mmma</code>。模块组构建用 <code>tapas()</code>（:674）与 <code>banchan()</code>（:747）。写脚本时继续调 <code>m</code> 会直接失败。</p>
+<p><strong>误区四：rkati 已经取代 ckati。</strong> <code>RELEASE_USE_RKATI</code> 的 <code>bool_value: false</code>、<code>workflow: LAUNCH</code>。描述是 <code>Use rkati instead of ckati, a rust rewrite</code>——重写版存在，默认关闭。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：三条路线里，Bazel 到底处在哪一层？<strong>答</strong>：按官方文档口径，它自带依赖求解与执行图生成，不依赖 kati 转译，也不依赖 Soong 求解。<strong>追问</strong>：那本树怎么看它的实现？<strong>答</strong>：平台构建规则仓 <code>build/bazel</code> 未收录进本树 manifest（本树工作区亦未检出该目录），本篇不给该目录下任何路径与符号。但 Bazel 在本树不是全无可核：<code>trusty/WORKSPACE.bazel</code> 的头两行注释就在讨论 ninja 的 <code>toplevel_output_directories</code>，是三条路线关系的一处现成旁证；<code>build/pesto</code> 那套则是测试侧的 Bazel 实验环境，里面是 <code>data/templates/build/bazel/rules/*.template</code> 与 <code>data/static/build/bazel/rules/*.sh</code> 这类模板与静态数据。</p>
+<p><strong>问</strong>：选型该看什么判据？<strong>答</strong>：看三层——谁持有构建逻辑、谁做依赖求解、谁生成执行图。三层归属一致的系统迁移成本最低。<strong>追问</strong>：为什么不用「哪个快」来选？<strong>答</strong>：本篇未做任何整包构建实测（本机 32GB 内存不可行），不给实测数字。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td><code>m</code> 报 command not found</td><td><code>grep -n '^function \(m|mm|mmm\)()' build/envsetup.sh</code></td><td>无输出即确认本树未检出该定义</td><td>改用 <code>tapas()</code>/<code>banchan()</code>，查 :674 与 :747</td></tr><tr><td>不确定 <code>make</code> 走了哪条路</td><td><code>grep -n 'soong_ui.bash|command make' build/envsetup.sh</code></td><td>:1016 附近的判定分支</td><td>比对树顶 <code>build/soong/soong_ui.bash</code> 是否存在</td></tr><tr><td>找不到 <code>Android.mk</code> 对应的 ninja 图</td><td><code>grep -n 'runKatiBuild' build/soong/ui/build/kati.go</code></td><td>:239 的驱动逻辑</td><td>查 <code>prebuilts/build-tools/linux-x86/bin/ckati</code> 是否就位</td></tr><tr><td>想确认 rkati 是否已启用</td><td><code>grep -n 'bool_value' build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code></td><td><code>false</code> 即默认 ckati</td><td>不要按 rkati 行为写脚本</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Soong 内部机制（见 <code>AND-P11-101</code>）；<code>build/bazel</code> 下的任何路径、文件与符号（本树未收录，暂无对应篇）；OTA 与镜像产物生成流程（见本卷相关篇）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P11-101</code>。</li><li><strong>本篇后继</strong>：本卷构建生态后续篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>build/make/core/</code> 顶层 <code>.mk</code> 文件 113 个（递归含子目录 148 个）——源码计数，口径为 2026-10-23 于 android17-release 静态核。</li><li><code>build/make/core/Makefile</code> 8229 行、<code>main.mk</code> 1951 行、<code>config.mk</code> 1420 行、<code>product.mk</code> 683 行——源码常量，同上口径。</li><li><code>build/soong/Android.bp</code> 359 行、<code>build/soong/ui/build/config.go</code> 2325 行——源码常量，作为 Soong 侧对比面。</li><li>manifest 共 1087 个项目，未收录 <code>build/bazel</code>（平台构建规则仓）；<code>prebuilts/bazel/common</code>（:883）、<code>build/pesto</code>（:24）与 trusty 的两条 bazel linkfile（:1100-1101）收录在内——manifest 元数据。</li><li>三条路线的构建耗时与镜像体积：暂无实测，列为待补。本机 32GB 内存，整包构建不可行。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本（含独立 <code>m</code>/<code>mm</code>/<code>mmm</code> 入口的树）</td><td>模块组构建由 <code>m</code>/<code>mm</code>/<code>mmm</code> 承担</td><td>迁移到本树后旧脚本直接失败，需改 <code>tapas()</code>/<code>banchan()</code>；本树具体删除版本本篇不断言</td></tr><tr><td>android17-release（本树实测状态）</td><td><code>build/envsetup.sh</code> 为符号链接，1210 行；<code>make()</code> :1033 在检测到 <code>soong_ui.bash</code> 时走 <code>--make-mode</code>，否则 <code>command make</code>；<code>m</code>/<code>mm</code>/<code>mmm</code> 在 <code>envsetup.sh</code> 未定义（:1174-1180 显式 <code>unset</code>）；<code>RELEASE_USE_RKATI</code> 为 <code>false</code>；manifest 未收录 <code>build/bazel</code>，但收录 <code>prebuilts/bazel/common</code>、<code>build/pesto</code> 与 trusty 的两条 bazel linkfile</td><td>入口已被 Soong 收口，Make 侧通过 kati 参与；Bazel 的平台构建规则仓无本树可核面，可核的是 trusty、prebuilts、external 与 pesto 四处</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>soong</code>、<code>kati</code>、<code>bazel</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>RELEASE_USE_RKATI</code>、<code>runKatiBuild</code>、<code>envsetup</code>。</li><li>本仓关键路径：<code>build/make/envsetup.sh</code>、<code>build/soong/ui/build/kati.go</code>、<code>build/release/flag_declarations/RELEASE_USE_RKATI.textproto</code>。</li><li>承接篇：<code>AND-P11-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P11-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

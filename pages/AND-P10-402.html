@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>atrace/perfetto 全景：从 trace 到问题定位</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>atrace/perfetto 全景：从 trace 到问题定位</h1>
+<div class="kv"><span>ID：AND-P10-402</span><span>卷：P10</span><span>章：10.4</span><span>难度：4</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/cmds/atrace/atrace.cpp ；frameworks/native/cmds/atrace/atrace.rc ；frameworks/base/core/java/android/os/Trace.java ；system/core/libcutils/include/cutils/trace.h ；external/perfetto/src/perfetto_cmd/perfetto_cmd.cc ；external/perfetto/src/tracing/internal/tracing_muxer_impl.cc</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>atrace 是采集器，perfetto 是采集框架加产物格式，两者不是二选一。atrace 沿 <code>ATRACE_TAG_*</code> 标签在 <code>trace_marker</code> 上打点，并把内核侧的调度、中断、频率等通过 ftrace 事件并入同一份 trace。perfetto 的 <code>traced_probes</code> 侧加载配置、调用 atrace 的类别开关，把结果写成 perfetto 格式；<code>perfetto_cmd</code> 只负责传配置与设定产物。产物统一用 trace processor 的 shell 做查询入口。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P6-301</code>——先建立「一次卡顿/一次冷启动的时间花在哪」的观测直觉，本篇只讲采集链路与产物口径。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/cmds/atrace/atrace.cpp</code></li><li><code>frameworks/native/cmds/atrace/atrace.rc</code></li><li><code>frameworks/base/core/java/android/os/Trace.java</code></li><li><code>system/core/libcutils/include/cutils/trace.h</code></li><li><code>external/perfetto/src/perfetto_cmd/perfetto_cmd.cc</code></li><li><code>external/perfetto/src/traced/probes/ftrace/atrace_wrapper.cc</code></li><li><code>external/perfetto/src/tracing/internal/tracing_muxer_impl.cc</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你已经知道要抓 trace，于是在命令行敲下 atrace 的时长参数，抓回来一份文件，打开看到一屏彩色条块，却不知道哪个类别是自己要的。换 perfetto 抓，配置模板一大堆，<code>data_sources</code> 里又冒出 <code>linux.ftrace</code>、<code>track_event</code> 这些名字，不确定和 atrace 的 <code>gfx</code>、<code>input</code> 是不是一回事。</p>
+<p>更常见的是抓完发现想要的区间没覆盖到：不知道打点默认是关的，也不知道内核侧事件需要额外的 rc 权限。本篇只解决一件事：trace 从打点到落盘这一段，各方分别负责什么。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：打点标签、采集类别、采集后端、产物格式。</p>
+<p>打点标签决定「有没有这条记录」，采集类别决定「这次抓不抓这一类记录」，采集后端决定「记录往哪写」，产物格式决定「下游怎么读」。打点标签在进程内，采集类别与采集后端在系统侧，产物格式由消费侧工具约定。</p>
+<p>图 1：打点、类别、后端、产物的关系</p>
+<pre><code>门禁一（进程内）            门禁二（系统侧）
+ATRACE_TAG 开关   --&gt;   atrace 类别开关 / perfetto 配置
+      |                          |
+      +------ 两侧都为开，区间才出现 ------+
+      |                          |
+应用/系统进程            系统侧
+  ATRACE_BEGIN  -&gt;  trace_marker
+  ATRACE_END    -&gt;  trace_marker
+  内核 ftrace 事件（独立一路，与 ATRACE_BEGIN/END 无产出关系）  -&gt;  perfetto 配置
+                                        |
+                                    产物 trace
+                                        |
+                                 trace processor</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键点在于两条路径上都存在「开关」，且它们是前置门禁而非 <code>trace_marker</code> 的下游处理环节：进程内的 <code>ATRACE_TAG</code> 编译期/运行期开关（门禁一）决定打点写不写，采集侧的类别开关（门禁二，图 1 中 <code>atrace</code> 类别开关与 <code>perfetto</code> 配置那一列）决定记录抓不抓。任一为关，区间就不出现。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>Java 侧打点在 <code>Trace.java</code>，<code>beginSection</code> 在 :511、<code>endSection</code> 在 :527，<code>isEnabled()</code> 在 :495。<code>TRACE_TAG_*</code> 自 :52 起，<code>TRACE_TAG_NEVER</code>=0、<code>TRACE_TAG_ALWAYS</code>=<code>1L &lt;&lt; 0</code>、<code>TRACE_TAG_GRAPHICS</code>=<code>1L &lt;&lt; 1</code>、<code>TRACE_TAG_INPUT</code>=<code>1L &lt;&lt; 2</code>、<code>TRACE_TAG_VIEW</code>=<code>1L &lt;&lt; 3</code>、<code>TRACE_TAG_WEBVIEW</code>=<code>1L &lt;&lt; 4</code>。<code>isEnabled()</code> 是廉价判断，可以在热路径前做一次门禁。</p>
+<p>Native 侧在 <code>cutils/trace.h</code>，共 325 行，位定义与 Java 侧对齐：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>ATRACE_TAG_NEVER</code></td><td>值 0，永不上报</td><td><code>system/core/libcutils/include/cutils/trace.h</code>:50</td></tr><tr><td><code>ATRACE_TAG_ALWAYS</code></td><td><code>(1&lt;&lt;0)</code>，始终上报</td><td>同上 :51</td></tr><tr><td><code>ATRACE_TAG_GRAPHICS</code></td><td><code>(1&lt;&lt;1)</code>，对应 atrace 的 <code>gfx</code></td><td>同上 :52</td></tr><tr><td><code>ATRACE_TAG_INPUT</code></td><td><code>(1&lt;&lt;2)</code>，对应 <code>input</code></td><td>同上 :53</td></tr></tbody></table>
+<p>未定义 <code>ATRACE_TAG</code> 时默认 <code>ATRACE_TAG_NEVER</code>（:86–:87）；定义值越界则 <code>#error</code>（:88–:89）。这条是编译期契约：漏定义等于静默关闭，不会报错。</p>
+<p>atrace 侧，<code>atrace.cpp</code> 共 1481 行，<code>k_categories[]</code> 自 :102 起共 46 个类别（:253 收尾），<code>g_categoryEnables[arraysize(k_categories)]</code> 在 :296。帮助文本 <code>--list_categories</code> 在 :1112，长选项表自 :1280 起（:1285 为表内 <code>list_categories</code> 条目），处理分支 :1362。</p>
+<p>46 个类别按启用通道分四类，不是二分：</p>
+<ul><li>**仅带 <code>ATRACE_TAG_*</code> 标签（24 个）**：<code>input</code> :106、<code>view</code> :107、<code>webview</code> :108、<code>wm</code> :109、<code>am</code> :110、<code>sm</code> :111、<code>audio</code> :112、<code>video</code> :113、<code>camera</code> :114、<code>hal</code> :115、<code>res</code> :116、<code>dalvik</code> :117、<code>rs</code> :118、<code>bionic</code> :119、<code>power</code> :120、<code>pm</code> :121、<code>ss</code> :122、<code>database</code> :123、<code>network</code> :124、<code>adb</code> :125、<code>vibrator</code> :126、<code>aidl</code> :127、<code>nnapi</code> :128、<code>rro</code> :129。</li><li><strong>标签与 sysfs 兼有（2 个）</strong>：<code>gfx</code>（:103，<code>ATRACE_TAG_GRAPHICS</code>，另带唯一 sysfile <code>events/gpu_mem/gpu_mem_total/enable</code>（:104））、<code>thermal</code>（:249，<code>ATRACE_TAG_THERMAL</code>，另带 <code>thermal_temperature</code> 与 <code>cdev_update</code>）。这两类必须两侧都开才完整。</li><li><strong>标签为 0、纯走 sysfs（19 个）</strong>：<code>sched</code> :131、<code>irq</code> :144、<code>irqoff</code> :148、<code>preemptoff</code> :152、<code>i2c</code> :156、<code>freq</code> :167、<code>membus</code> :181、<code>idle</code> :184、<code>disk</code> :187、<code>mmc</code> :202、<code>load</code> :205、<code>sync</code> :208、<code>workq</code> :216、<code>memreclaim</code> :219、<code>regulators</code> :226、<code>binder_driver</code> :229、<code>binder_lock</code> :235、<code>pagecache</code> :240、<code>memory</code> :243。</li><li><strong>属性特判（1 个）</strong>：<code>core_services</code> :130——标签为 0、sysfile 表为空 <code>{ }</code>，既不走 <code>ATRACE_TAG</code> 也不走 sysfs；它的启用通道是 <code>ro.atrace.core.services</code> 属性（<code>isCategorySupported</code> 在 <code>atrace.cpp</code> :447-448 对它单独返回属性非空判定），启用时把属性值并入 app 包名列表（:818）。所以「<code>core_services</code> 是 sysfs 类」不成立，选它看不到内核事件，它管的是应用侧 core service 打点。</li></ul>
+<p>前三类合计 24+2+19 = 45，再加上属性特判的 <code>core_services</code> 一项，共 46。<code>--list_categories</code> 里它们并列显示，但启用机制不同，这也是「选了 <code>sched</code> 却看不到调度事件」「只开了 <code>gfx</code> 却缺 GPU 内存项」的常见原因。另外，设备上 <code>--list_categories</code> 还会附加 VENDOR/HAL 条目（<code>atrace.cpp</code> :1080–:1085），且只打印 <code>isCategorySupported</code> 为真的项，因此不同设备的列表可能多于本树的 46 项；本篇的 46 是编译期表项数口径。</p>
+<p>权限与缓冲在 <code>atrace.rc</code>（共 573 行）：<code>on late-init</code>（:3）里执行 <code>chmod 0222 /sys/kernel/debug/tracing/trace_marker</code>（:6）与 <code>/sys/kernel/tracing/</code> 下同名文件（:7），<code>write /proc/sys/kernel/sched_schedstats 1</code>（:10），<code>buffer_size_kb</code> 的权限放开在 :18–:19。<code>trace_marker</code> 的 <code>0222</code> 是写权限，意味着采集侧只管写，读走 ftrace 的 <code>trace</code> 节点。</p>
+<p>perfetto 侧，<code>perfetto_cmd.cc</code> 共 1814 行，主要开关：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>--background</code>/<code>-d</code></td><td>后台采集，命令立即返回</td><td><code>perfetto_cmd.cc</code>:143</td></tr><tr><td><code>--background-wait</code>/<code>-D</code></td><td>后台采集并等待，说明写等待上限 30s</td><td>同上 :147</td></tr><tr><td><code>--config</code>/<code>-c</code></td><td>指定配置（文本或二进制）；<strong>与轻量标志组互斥</strong>——<code>ATRACE_CAT</code> 属 :181 起「Light configuration flags: (only when NOT using -c/--config)」那一组（:188），用了 <code>-c/--config</code> 就不能再靠它传类别</td><td>同上 :164、:181/:188</td></tr><tr><td><code>--out</code>/<code>-o</code></td><td>产物路径</td><td>同上 :165</td></tr><tr><td><code>--txt</code></td><td>文本配置，注释标 <code>Not for production use</code></td><td>同上 :170</td></tr><tr><td><code>--time</code>/<code>-t</code></td><td>采集时长，默认 10s</td><td>同上 :182</td></tr><tr><td><code>--query</code>/<code>--query-raw</code></td><td>查询 tracing service 运行态（非产物）；后者为 raw proto 字节</td><td>同上 :172、:175</td></tr></tbody></table>
+<p><code>--time</code> 默认 10s 是命令行常量，不是任何机型上的实测抓取耗时。<code>--txt</code> 带 <code>Not for production use</code> 注释这一条要留意：它便于试验配置，但不是稳定接口。</p>
+<p>实际执行 <code>exec /system/bin/atrace</code> 的是 <code>external/perfetto/src/traced/probes/ftrace/atrace_wrapper.cc</code>:94 的 <code>execv</code>（唯一 exec 点）；:126 那处 <code>/system/bin/atrace</code> 位于 20s 超时分支（:114）内，只用于拼错误消息（:130），不是执行点。<code>ftrace_data_source.cc</code>:39 另以 Subprocess 调 <code>--list_categories</code>；<code>perfetto_cmd</code> 侧只传配置。</p>
+<p>后端选择在 <code>tracing_muxer_impl.cc</code>（共 2825 行）。<code>BackendTypePriority</code>（:145）区分 <code>kSystemBackend</code>（:147）与 <code>kInProcessBackend</code>（:149）。数据源注册入口是 <code>TracingMuxerImpl::RegisterDataSource</code>（:1101）。同一进程里的多个客户端共享一个 muxer，由它决定这次采集落到系统后端还是进程内后端。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>想看一次界面操作的区间是否落进 trace。Java 侧在操作前后调 <code>beginSection</code>/<code>endSection</code>（<code>Trace.java</code>:511、:527），它们走的是 <code>TRACE_TAG_APP</code> = <code>1L &lt;&lt; 12</code>（<code>Trace.java</code>:80；门禁判断 :512、native 写出 :516），不是 <code>TRACE_TAG_GRAPHICS</code>。抓应用自写区间要用 <code>atrace -a &lt;包名&gt;</code>（<code>atrace.cpp</code>:1303 收进 <code>g_debugAppCmdLine</code>，经 :813 并入包名列表，再写 <code>debug.atrace.app_N</code> 系列属性，:70/:71）或 <code>perfetto --app</code>（<code>perfetto_cmd.cc</code>:186）；<code>gfx</code> 类别（<code>atrace.cpp</code>:103，<code>ATRACE_TAG_GRAPHICS</code>）管的是图形管线那条轨，与应用自写区间不是同一回事。内核对 <code>trace_marker</code> 的写权限已由 <code>atrace.rc</code>:6 放开。</p>
+<p>任一条件不满足，区间或 GPU 内存项就会缺失。注意这里没有任何实测数字：标签位、类别名、权限模式都是源码常量与文件内容，不构成对某台设备行为的断言。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>前置：<code>AND-P6-301</code>，负责「时间花在哪」的观测直觉。</li><li>边界：<code>AND-P6-201</code> 负责 SurfaceFlinger 合成 trace 的解读；<code>AND-P10-403</code> 负责各域归因方法；<code>AND-P10-201</code> 负责另一类观测口径。</li><li>本篇只交付采集链路与产物口径，不交付任何具体卡顿的判读结论。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>atrace 类别表</td><td><code>frameworks/native/cmds/atrace/atrace.cpp</code></td><td><code>k_categories[]</code>、<code>g_categoryEnables</code></td><td>46 个类别与启用位</td></tr><tr><td>atrace 侧权限</td><td><code>frameworks/native/cmds/atrace/atrace.rc</code></td><td><code>trace_marker</code> 的 chmod、<code>sched_schedstats</code></td><td>决定能否写标记与调度统计</td></tr><tr><td>Java 打点</td><td><code>frameworks/base/core/java/android/os/Trace.java</code></td><td><code>beginSection</code>、<code>isEnabled</code>、<code>TRACE_TAG_*</code></td><td>应用层区间</td></tr><tr><td>Native 打点</td><td><code>system/core/libcutils/include/cutils/trace.h</code></td><td><code>ATRACE_TAG_*</code>、<code>#error</code> 分支</td><td>编译期门禁</td></tr><tr><td>perfetto 命令行</td><td><code>external/perfetto/src/perfetto_cmd/perfetto_cmd.cc</code></td><td><code>--config</code>、<code>--time</code>、<code>--txt</code></td><td>采集入口与开关</td></tr><tr><td>atrace 调用点</td><td><code>external/perfetto/src/traced/probes/ftrace/atrace_wrapper.cc</code></td><td><code>exec /system/bin/atrace</code></td><td>类别开关的实际调用者</td></tr><tr><td>后端与数据源</td><td><code>external/perfetto/src/tracing/internal/tracing_muxer_impl.cc</code></td><td><code>BackendTypePriority</code>、<code>RegisterDataSource</code></td><td>系统后端与进程内后端的分流</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：<code>external/perfetto</code>:ece669757380</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git -C external/perfetto rev-parse HEAD</code></pre>
+<p>期望输出以 <code>ece669757380</code> 开头，对上锚点行。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/cmds/atrace/atrace.cpp</code></pre>
+<p>期望 1481。</p>
+<pre><code class="lang-bash">sed -n '102p;253p;296p;1112p;1280p;1362p' frameworks/native/cmds/atrace/atrace.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次命中 <code>k_categories[]</code> 起始、数组收尾 <code>};</code>、<code>g_categoryEnables</code>、<code>--list_categories</code> 的帮助文本、长选项表起始、处理分支。</p>
+<pre><code class="lang-bash">awk 'NR&gt;=101 &amp;&amp; NR&lt;=253 &amp;&amp; /^    \{/' frameworks/native/cmds/atrace/atrace.cpp | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 46，即 24 个纯标签类 + <code>gfx</code> + <code>thermal</code> + 19 个纯 sysfs 类 + <code>core_services</code>（属性特判，第四种通道）；类别名逐条核对 §4.2 的清单。</p>
+<pre><code class="lang-bash">sed -n '50,53p;86,89p' system/core/libcutils/include/cutils/trace.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>ATRACE_TAG_NEVER</code>=0、<code>ATRACE_TAG_ALWAYS</code>=<code>(1&lt;&lt;0)</code>、<code>ATRACE_TAG_GRAPHICS</code>=<code>(1&lt;&lt;1)</code>、<code>ATRACE_TAG_INPUT</code>=<code>(1&lt;&lt;2)</code>，以及默认 <code>ATRACE_TAG_NEVER</code> 与 <code>#error</code> 分支。</p>
+<pre><code class="lang-bash">sed -n '511p;527p;495p' frameworks/base/core/java/android/os/Trace.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>beginSection</code>、<code>endSection</code>、<code>isEnabled()</code>。</p>
+<pre><code class="lang-bash">sed -n '143p;147p;164p;170p;182p' external/perfetto/src/perfetto_cmd/perfetto_cmd.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>--background</code>、<code>--background-wait</code>、<code>--config</code>、<code>--txt</code>、<code>--time</code>，其中 <code>--txt</code> 行带 <code>Not for production use</code> 注释。</p>
+<pre><code class="lang-bash">sed -n '94p' external/perfetto/src/traced/probes/ftrace/atrace_wrapper.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>exec /system/bin/atrace</code> 的调用路径。</p>
+<pre><code class="lang-bash">sed -n '145,150p' external/perfetto/src/tracing/internal/tracing_muxer_impl.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>BackendTypePriority</code> 与 <code>kSystemBackend</code>、<code>kInProcessBackend</code> 两个优先级项。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：atrace 和 perfetto 是两代工具，新版本只用后者。</strong> 纠正：atrace 是 perfetto 之前就存在的采集器，perfetto 的 <code>traced_probes</code> 会 <code>exec</code> 它并复用它的类别开关（<code>atrace_wrapper.cc</code>:94）。本树里 <code>atrace.cpp</code> 仍在维护，<code>k_categories[]</code> 有 46 个类别。</p>
+<p><strong>误区二：`gfx` 和 `sched` 是同一类开关。</strong> 纠正：<code>sched</code>（:131）标签为 0、纯走 sysfs；<code>gfx</code>（:103）是<strong>双通道</strong>，既靠 <code>ATRACE_TAG_GRAPHICS</code>（<code>trace.h</code>:52）的进程内标签位，也带自己的 sysfile 项，两侧都要开。所以「开了 <code>gfx</code> 就全都有」和「<code>gfx</code> 与 <code>sched</code> 同机制」都不成立。</p>
+<p><strong>误区三（看着对其实不对）：打点代码写进函数里，trace 里就一定有区间。</strong> 纠正：未定义 <code>ATRACE_TAG</code> 时默认是 <code>ATRACE_TAG_NEVER</code>（<code>trace.h</code>:86–:87），编译通过、运行不报错、产物为空。这是静默失败，靠读代码发现不了，要看编译宏。</p>
+<p><strong>误区四：`--txt` 既然能用就用于生产脚本。</strong> 纠正：该选项在 <code>perfetto_cmd.cc</code>:170 的注释里明确标了 <code>Not for production use</code>。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：抓 trace 时长默认多少？ <strong>答</strong>：<code>perfetto_cmd</code> 的 <code>--time</code>/<code>-t</code>（:182）默认 10s。这是源码常量值，不是任何设备上的实测。 <strong>追问</strong>：后台采集会让命令一直阻塞吗？ <strong>答</strong>：<code>--background</code>/<code>-d</code>（:143）直接返回，<code>--background-wait</code>/<code>-D</code>（:147）等待，说明里写明等待上限 30s。</p>
+<p><strong>问</strong>：perfetto 的数据源和我写的 <code>ATRACE_BEGIN</code> 是什么关系？ <strong>答</strong>：数据源由 <code>TracingMuxerImpl::RegisterDataSource</code>（:1101）注册，后端由 <code>BackendTypePriority</code>（:145）在系统后端与进程内后端间分流；打点标签决定记录是否产生，数据源决定记录被谁收走。 <strong>追问</strong>：分不清该看哪一层怎么办？ <strong>答</strong>：先确认类别是否启用、标签是否定义；两层都通再看后端选择。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>产物里完全没有自写区间</td><td><code>grep -rn 'ATRACE_TAG' &lt;你的模块目录&gt;</code></td><td>是否定义了 <code>ATRACE_TAG</code>、是否等于 <code>ATRACE_TAG_NEVER</code></td><td>补定义或改用 <code>ATRACE_TAG_ALWAYS</code></td></tr><tr><td>选了类别但对应事件缺失</td><td><code>grep -n 'ATRACE_TAG|nullptr' frameworks/native/cmds/atrace/atrace.cpp</code></td><td>该类别的标签是否为空（走 sysfs）；<code>gfx</code>/<code>thermal</code> 是否两侧都开；<code>core_services</code> 看属性而非 sysfs</td><td>按 §4.2 四类清单区分启用机制</td></tr><tr><td>写入报权限错误</td><td><code>grep -n 'trace_marker|buffer_size_kb' frameworks/native/cmds/atrace/atrace.rc</code></td><td><code>chmod 0222</code> 与 <code>:18–:19</code> 是否覆盖该路径</td><td>核对 <code>/sys/kernel/tracing/</code> 与 <code>/sys/kernel/debug/tracing/</code></td></tr><tr><td>后台采集没等到结果</td><td><code>grep -n 'background-wait|30s' external/perfetto/src/perfetto_cmd/perfetto_cmd.cc</code></td><td>等待上限说明</td><td>调小时长或改用前台</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：合成 trace 判读见 <code>AND-P6-201</code>；各域归因见 <code>AND-P10-403</code>；trace processor SQL 语法只给入口，不展开。</li><li><strong>本篇前置依赖</strong>：<code>AND-P6-301</code>。</li><li><strong>本篇后继</strong>：<code>AND-P10-403</code>、<code>AND-P10-201</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>atrace 类别数 46（24 纯标签 + 2 双通道 + 19 纯 sysfs + 1 属性特判 <code>core_services</code>），来源为 <code>k_categories[]</code> 自 <code>atrace.cpp</code>:102 起至 :253 的数组内容。</li><li><code>perfetto_cmd --time</code> 默认 10s，来源为源码常量注释（:182）。</li><li><code>--background-wait</code> 等待上限 30s，来源为 <code>perfetto_cmd.cc</code>:147 的选项说明。</li><li><code>trace_marker</code> 权限模式 <code>0222</code>，来源为 <code>atrace.rc</code>:6–:7 的 chmod 参数。</li><li>一次采集的实际产物大小与丢事件情况：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本（atrace 独占采集）</td><td>systrace 作为 atrace 的上层封装与历史别名曾存在（无官方出处链接，按社区共识口径表述；实现在 <code>external/chromium-trace</code>（<code>systrace.py</code> 与其 <code>catapult/systrace/systrace/tracing_agents/</code> 均在本树），不在本篇可核验面内，待补 commit 或归档页链接）</td><td>老脚本里的 systrace 调用最终落到 atrace 类别开关</td></tr><tr><td><code>android17-release</code>（本树静态核对状态）</td><td>atrace 与 perfetto 并存，<code>k_categories[]</code> 46 个类别、分四类启用通道（24 纯标签 + 2 双通道 + 19 纯 sysfs + 1 属性特判），perfetto 侧提供命令行配置与 trace processor</td><td>采集与产物分析分离，产物可统一查询</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>atrace</code>、<code>perfetto</code>、<code>systrace</code>；developer.android.com 站内检索 <code>trace</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>atrace</code>、<code>perfetto_cmd</code>、<code>tracing_muxer</code>、<code>atrace_wrapper</code>。</li><li>本仓关键路径：<code>frameworks/native/cmds/atrace/atrace.cpp</code>、<code>external/perfetto/src/perfetto_cmd/perfetto_cmd.cc</code>、<code>system/core/libcutils/include/cutils/trace.h</code>。</li><li>承接篇：<code>AND-P10-403</code>、<code>AND-P6-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

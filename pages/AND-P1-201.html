@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activity 启动模式与任务栈：launchMode 的真实语义</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Activity 启动模式与任务栈：launchMode 的真实语义</h1>
+<div class="kv"><span>ID：AND-P1-201</span><span>卷：P1</span><span>章：1.2</span><span>难度：3</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java ；frameworks/base/services/core/java/com/android/server/wm/Task.java ；frameworks/base/services/core/java/com/android/server/wm/ActivityRecord.java ；frameworks/base/core/java/android/content/pm/ActivityInfo.java ；frameworks/base/services/core/java/com/android/server/wm/LaunchParamsController.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>launchMode</code> 与 Intent 标志共同决定「这次启动是复用已有实例还是新建一个」以及「放进哪个任务栈」。判定发生在系统服务侧：<code>ActivityStarter</code> 先由 <code>computeLaunchingTaskFlags</code> 拼出任务相关标志，再由 <code>resolveReusableTask</code> 与 <code>computeTargetTask</code> 决定复用还是新建、归入哪个任务，复用时的清栈顶由 <code>complyActivityFlags</code> 执行。四档启动模式各有确切取值，<code>singleTask</code> 与 <code>singleInstance</code> 的差别不在「是否单例」，而在「是否独占一个任务栈」。任务栈本身是一组有序的 Activity 记录，不是抽象概念。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.2、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-102（组件状态机）、AND-P0-401（术语基准）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/Task.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/ActivityRecord.java</code></li><li><code>frameworks/base/core/java/android/content/pm/ActivityInfo.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/LaunchParamsController.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep；带 V3 档的可选实验需要模拟器或真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p><code>launchMode</code> 是应用开发者最常被问倒的一块。常见的三种误判是：把 <code>singleTask</code> 当成「全局只有一个实例」；以为 <code>singleTop</code> 会阻止重复创建；以为设了 <code>singleInstance</code> 就不会再有别的 Activity 出现在同一任务里。这些误判在排查「返回键行为不对」「Activity 被意外清掉」时会把方向带偏。这一篇把判定逻辑落到具体代码，而不是停在口诀。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个对象：任务（Task，一组按顺序排列的记录）、记录（ActivityRecord，每个 Activity 实例在系统侧的登记项）、启动模式（launchMode，写在清单里的复用策略）。</p>
+<p>图 1：任务栈与启动模式的判定对象</p>
+<pre><code>  Task ──包含──▶ ActivityRecord ──按序──▶ 栈顶
+   ▲
+   └─ launchMode 与 Intent 标志决定新记录落在哪个 Task</code></pre>
+<p>关键点：决定权在系统侧。应用只是提供意图与声明，栈的形态由 <code>ActivityStarter</code> 判定。</p>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>两种模式在任务结构上的差别如下：</p>
+<p>图 2：singleTask 与 singleInstance 的栈形态差别</p>
+<pre><code>  singleTask：    Task T1 = [ A ][ B ]     再次启动 B ⇒ 清顶后复用
+  singleInstance：Task T2 = [ B ] 独占     其它记录回到别的 Task</code></pre>
+<p>启动一次 Activity 时，<code>startActivityUnchecked</code> 依次做几件事。先由 <code>computeLaunchingTaskFlags</code>（约 3026 行）拼出任务相关的标志——它只负责 flag，不负责挑任务。接着由 <code>resolveReusableTask</code>（约 3130 行）在已有任务里找可复用的任务，找不到时才由 <code>computeTargetTask</code>（约 2306 行）决定新建或归入哪个任务。真正的复用判定落在 <code>complyActivityFlags</code>（约 2657 行）：若目标任务的栈顶就是同一条记录且模式为 <code>singleTop</code>，则复用；若是 <code>singleTask</code> 或 <code>singleInstance</code>，则在目标任务里查找已有记录，找到则以 <code>performClearTop</code>（约 2686 行）清掉其上的记录并复用，找不到才新建。对于复用的情况，系统调 <code>deliverNewIntent</code> 把新意图送到已有实例，这正是 <code>onNewIntent</code> 的来源。</p>
+<p>任务创建与窗口参数的计算交给 <code>Task</code> 与 <code>LaunchParamsController</code>：前者登记任务属性，后者依据当前布局与来源窗口算出新记录应有的位置与尺寸。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>设 A 为入口（标准模式），B 声明为 <code>singleTask</code>。用户在 A 里启动 B，得到任务 T1（含 A、B）。若 B 内再启动 C，C 进 T1 栈顶。此时再次启动 B：<code>ActivityStarter</code> 在 T1 中找到已有 B，清掉其上的 C 并复用 B，同时把新意图交给 B 的 <code>onNewIntent</code>。用户按返回键看到的是 A，因为 C 已被清掉。</p>
+<p>若把 B 改为 <code>singleInstance</code>，B 会独占一个任务 T2，C 则回到另一个任务。此时「返回」的落点与前者完全不同。这就是两种模式的分水岭：是否需要独占任务。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>单个组件的状态机见 AND-P1-102；AMS 侧完整的启动编排与跨进程下发见 AND-P2-201；View 层级与窗口 Token 的建立见 AND-P1-202；任务在系统中的层级与显示关系归 AND-P2-202 与 AND-P6-302。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>启动主流程</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java</code></td><td><code>startActivityUnchecked</code>（约 1770 行）</td><td>复用与建栈的总判定</td></tr><tr><td>任务标志</td><td>同上</td><td><code>computeLaunchingTaskFlags</code>（约 3026 行）</td><td>只拼任务相关 flag，不挑任务</td></tr><tr><td>复用判定</td><td>同上</td><td><code>resolveReusableTask</code>（约 3130 行）</td><td>在已有任务里找可复用者</td></tr><tr><td>目标任务</td><td>同上</td><td><code>computeTargetTask</code>（约 2306 行）</td><td>无可复用时决定新建或归入</td></tr><tr><td>复用与清顶</td><td>同上</td><td><code>complyActivityFlags</code>（约 2657 行；清顶经 <code>performClearTop</code> 约 2686 行）</td><td>执行复用、清栈顶与 <code>onNewIntent</code></td></tr><tr><td>复用意图</td><td>同上</td><td><code>deliverNewIntent</code>（约 3348 行）</td><td>触达已有实例的 onNewIntent</td></tr><tr><td>任务对象</td><td><code>frameworks/base/services/core/java/com/android/server/wm/Task.java</code></td><td><code>Task</code></td><td>任务属性与记录序列</td></tr><tr><td>记录对象</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityRecord.java</code></td><td><code>ActivityRecord</code></td><td>单个实例的系统侧登记项</td></tr><tr><td>模式取值</td><td><code>frameworks/base/core/java/android/content/pm/ActivityInfo.java</code></td><td><code>LAUNCH_*</code>（约 82–102 行）</td><td>五档常量定义</td></tr><tr><td>布局计算</td><td><code>frameworks/base/services/core/java/com/android/server/wm/LaunchParamsController.java</code></td><td><code>calculate</code></td><td>新记录的位置与尺寸</td></tr></tbody></table>
+<p>启动模式的五档取值同族集中如下：</p>
+<table><thead><tr><th>常量</th><th>值</th><th>语义</th><th>出处</th></tr></thead><tbody><tr><td><code>LAUNCH_MULTIPLE</code></td><td>0</td><td>标准模式，每次新建</td><td><code>ActivityInfo.java</code> 约 82 行</td></tr><tr><td><code>LAUNCH_SINGLE_TOP</code></td><td>1</td><td>栈顶同实例则复用</td><td>约 87 行</td></tr><tr><td><code>LAUNCH_SINGLE_TASK</code></td><td>2</td><td>任务内单实例并清顶</td><td>约 92 行</td></tr><tr><td><code>LAUNCH_SINGLE_INSTANCE</code></td><td>3</td><td>独占一个任务</td><td>约 97 行</td></tr><tr><td><code>LAUNCH_SINGLE_INSTANCE_PER_TASK</code></td><td>4</td><td>每个任务内独占单实例</td><td>约 102 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析（含可选运行时观察）。静态命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 五档启动模式常量
+grep -n &quot;public static final int LAUNCH_&quot; \
+  frameworks/base/core/java/android/content/pm/ActivityInfo.java
+# 期望：命中 0/1/2/3/4 五个常量（约 82–102 行）
+
+# 2. 启动判定主流程、任务标志与复用判定
+grep -n &quot;private int startActivityUnchecked\|private void computeLaunchingTaskFlags\|private Task resolveReusableTask\|private void complyActivityFlags&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java
+# 期望：命中约 1770（startActivityUnchecked）/ 3026（computeLaunchingTaskFlags）
+#       / 3130（resolveReusableTask）/ 2657（complyActivityFlags）行
+
+# 3. 复用时的意图下发
+grep -n &quot;private void deliverNewIntent&quot; \
+  frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java
+# 期望：命中约 3348 行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>可选运行时观察（V3，需模拟器，包名与 Activity 换成实际值）：</p>
+<pre><code class="lang-bash">adb shell dumpsys activity activities | grep -A2 &quot;Task{&quot;
+# 期望：可见各 Task 及其栈内记录的先后顺序
+
+adb shell am start -n &lt;package&gt;/&lt;activity&gt;
+# 期望：再次启动 singleTask 组件时，栈中不出现重复记录</code></pre>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 `singleTask` 就是全局单例。</strong> 它的准确语义是「在所在任务内单实例，并把其上的记录清掉」，任务可以有多个，实例也可以存在于不同用户或显示设备上。</p>
+<p><strong>误区二：以为 `singleTop` 是防止重复创建的总开关。</strong> 它只在目标已是栈顶时复用；若目标在栈中间，仍会新建。</p>
+<p><strong>误区三（看起来对其实是错的）：以为 `singleInstance` 与 `singleTask` 只差一个「独占」的说法。</strong> 差别是结构性的：前者独占任务，后者与其他记录共处一个任务，返回落点因此不同。</p>
+<p><strong>误区四：以为复用实例不会走任何回调。</strong> 复用会走 <code>onNewIntent</code>，随后仍可能伴随状态迁移（见 AND-P1-102）。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么设了 <code>singleTask</code> 还会出现新实例？ <strong>答</strong>：若启动时带的标志要求另起任务，且目标任务不在同一显示或用户下，系统仍可能新建。判定见 <code>resolveReusableTask</code> 与 <code>computeTargetTask</code>，复用与清顶落在 <code>complyActivityFlags</code>。</p>
+<p><strong>追问</strong>：怎么确认实际落到了哪个任务？ <strong>答</strong>：用 <code>dumpsys activity activities</code> 看记录归属，别只看清单声明。</p>
+<p><strong>问</strong>：<code>onNewIntent</code> 什么时候必须调用 <code>setIntent</code>？ <strong>答</strong>：当后续逻辑依赖 <code>getIntent()</code> 拿到最新意图时。复用路径下旧意图仍在，若不更新会读到上一次的值。</p>
+<p><strong>追问</strong>：这是框架行为还是应用约定？ <strong>答</strong>：框架不会自动替换，属应用侧约定，需自行处理。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>Activity 重复创建</td><td><code>grep -n &quot;complyActivityFlags&quot; frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java</code></td><td>复用与清顶判定</td><td>检查 launchMode 与 Intent 标志</td></tr><tr><td>返回键落点异常</td><td><code>adb shell dumpsys activity activities</code></td><td>记录栈序</td><td>核对是否配置了独占任务模式</td></tr><tr><td>意图没更新</td><td><code>grep -n &quot;deliverNewIntent&quot; frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java</code></td><td>复用路径</td><td>应用侧 <code>setIntent</code></td></tr><tr><td>单例组件仍多实例</td><td><code>grep -n &quot;LAUNCH_SINGLE&quot; frameworks/base/core/java/android/content/pm/ActivityInfo.java</code></td><td>模式取值</td><td>核对用户与显示设备维度</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：单个组件状态机（AND-P1-102）；AMS 启动编排与跨进程下发（AND-P2-201）；窗口与任务显示（AND-P2-202、AND-P6-302）；组件生命周期回调序列（AND-P1-102）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-102</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P1-202</code>（同一章内）与 <code>AND-P2-201</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>启动模式常量共 5 档，取值 0–4，口径为 <code>ActivityInfo.java</code> 约 82–102 行，2026-10-14 实测。</li><li>任务标志入口 <code>computeLaunchingTaskFlags</code> 位于约 3026 行；复用判定 <code>complyActivityFlags</code> 约 2657 行、<code>resolveReusableTask</code> 约 3130 行、<code>computeTargetTask</code> 约 2306 行。口径均为该文件符号位置，2026-10-14 实测。</li><li>复用意图下发 <code>deliverNewIntent</code> 位于约 3348 行，口径同上。</li><li>任务内可容纳的记录数没有硬上限常量，受系统内存与最近任务策略共同约束，属策略性边界，具体阈值暂无定值，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>判定集中在 <code>ActivityStarter</code>，模式含 5 档</td><td>读者按本篇命令可复现</td></tr><tr><td>更早版本</td><td>早期多任务与分屏模型更简单，判定逻辑的落点类可能不同（据官方公开资料，本树仅含 android17-release，无法回溯核验）</td><td>按符号重锚，注意模式档位差异</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>launch modes</code>、<code>tasks and back stack</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ActivityStarter</code>、<code>TaskFragment</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/services/core/java/com/android/server/wm/</code>。</li><li>承接篇：<code>AND-P1-102</code>、<code>AND-P2-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

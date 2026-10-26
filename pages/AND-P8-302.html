@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zygote 的类共享与 USAP：App 进程为什么启动得快</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Zygote 的类共享与 USAP：App 进程为什么启动得快</h1>
+<div class="kv"><span>ID：AND-P8-302</span><span>卷：P8</span><span>章：8.3</span><span>难度：4</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/com/android/internal/os/ZygoteServer.java ；frameworks/base/core/java/com/android/internal/os/Zygote.java ；frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java ；frameworks/base/boot/preloaded-classes</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>App 进程启动快，靠两件事：fork 前已有一大块共享资产，fork 后不重复付账；fork 本身被 USAP 池提前做掉，请求到来只剩换名字与交棒。</p>
+<p>共享资产来自 <code>ZygoteInit.preloadClasses()</code> 读 <code>/system/etc/preloaded-classes</code>、<code>Resources.preloadResources()</code> 与 <code>System.loadLibrary(&quot;android&quot;)</code>，它们把类和资源压进 Zygote 堆，后续 fork 出的进程以写时复制（copy-on-write，COW）共享。</p>
+<p>USAP 池把这笔账再往前推一步：空闲时预先 fork 出若干「未具名进程」，请求到达时直接取用。<code>ZygoteServer.fillUsapPool()</code> 决定补多少，<code>setUsapPoolStatus()</code> 决定开关。</p>
+<p>代价是常驻内存与池维护开销，因此池有上限、有低位阈值、有延迟补池。这一组的量纲全在 <code>ZygoteServer.java</code> 的字段与常量里。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P8-301</code>。301 讲 Zygote 进程自身如何被拉起，本篇从「Zygote 已就绪」处接着讲 fork 前的资产与池机制。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java</code></li><li><code>frameworks/base/boot/preloaded-classes</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>冷启动 App 时，第一个 Activity 出现的延迟通常只有几百毫秒量级，但一个全新进程要装载的类成千上万。这笔账如果每次真付，界面根本来不及。</p>
+<p>另一个常见困惑：既然 Zygote 已经共享了类，为什么还要养一批「空闲进程」？多出来的进程不占内存吗？</p>
+<p>两个问题的答案在同一个设计里：把「fork 之前的准备」做足，把「fork 这个动作」提前做掉。理解了共享资产的映射方式与池的补货策略，两件事就同时解释清楚了。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念：<strong>预加载资产</strong>（Zygote 堆里的类与资源）、<strong>COW 共享</strong>（fork 后不复制页表内容，只在写入时才分裂）、<strong>USAP 池</strong>（预先 fork 好、尚未具名的进程队列）。</p>
+<pre><code>Zygote 进程堆（预加载类/资源/库）
+        │  fork（页表只读共享）
+        ├──────────────► App 进程（请求时 fork）
+        └──────────────► USAP 池（空闲时 fork）
+                              │  请求到达
+                              └────► App 进程（改名接管）</code></pre>
+<p>图 1：Zygote 堆经 fork 共享到 App 进程与 USAP 池</p>
+<p>USAP 是「未专用应用进程」（Unspecialized App Process）。它已被 fork，但还没被指派给某个 App 的包名与 uid。请求来时，池里取一个，走 specialize 流程变成正式的 App 进程。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>池的行为由 <code>ZygoteServer.java</code> 里一组同前缀字段描述。字段本身只声明状态，填充是「构造时首次、运行期按间隔重取」两段：构造器经 <code>:168</code> 调一次 <code>fetchUsapPoolPolicyProps()</code>；运行期还有两条刷新路径——<code>fetchUsapPoolPolicyPropsIfUnfetched()</code>（<code>:295-300</code>）在 <code>fillUsapPool</code> 开头 <code>:316</code> 调，保证首次用到前一定已取过；<code>fetchUsapPoolPolicyPropsWithMinInterval()</code>（<code>:284-293</code>）在 <code>:404</code> 按 <code>PROPERTY_CHECK_INTERVAL</code> 节流重取，让改配置不必重启 Zygote 就能生效。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>mUsapPoolSupported</code></td><td>系统是否支持 USAP 池</td><td><code>ZygoteServer.java</code>:63</td></tr><tr><td><code>mUsapPoolEnabled</code></td><td>当前池是否打开</td><td><code>ZygoteServer.java</code>:72</td></tr><tr><td><code>mUsapPoolSocket</code></td><td>池用的 Unix 域套接字</td><td><code>ZygoteServer.java</code>:82</td></tr><tr><td><code>mUsapPoolEventFD</code></td><td>池事件通知的文件描述符</td><td><code>ZygoteServer.java</code>:88</td></tr><tr><td><code>mUsapPoolSizeMax</code></td><td>池容量上限</td><td><code>ZygoteServer.java</code>:107</td></tr><tr><td><code>mUsapPoolSizeMin</code></td><td>池容量下限</td><td><code>ZygoteServer.java</code>:112</td></tr><tr><td><code>mUsapPoolRefillThreshold</code></td><td>触发补池的低位阈值</td><td><code>ZygoteServer.java</code>:118</td></tr><tr><td><code>mUsapPoolRefillDelayMs</code></td><td>延迟补池的等待毫秒数</td><td><code>ZygoteServer.java</code>:124</td></tr></tbody></table>
+<p>构造入口 <code>ZygoteServer(boolean isPrimaryZygote)</code>（<code>:152</code>）内部取 <code>Zygote.getUsapPoolEventFD()</code>，再调 <code>fetchUsapPoolPolicyProps()</code>（<code>:168</code>）。阈值从配置取，取的值按三级优先级回落。一级是 DeviceConfig：<code>ZygoteConfig.getInt</code>（<code>:93-100</code>）先读 <code>getDeviceConfig(name)</code>（<code>:81-88</code>，即 <code>persist.device_config.&lt;DeviceConfig.NAMESPACE_RUNTIME_NATIVE&gt;.&lt;name&gt;</code>）。二级是系统属性 <code>dalvik.vm.&lt;name&gt;</code>（<code>PROPERTY_PREFIX_SYSTEM</code>，<code>:79</code>/<code>:99</code>）。三级才是兜底常量：<code>USAP_POOL_REFILL_THRESHOLD_DEFAULT = 1</code>（<code>ZygoteConfig.java:44</code>）、<code>USAP_POOL_SIZE_MAX_DEFAULT = 3</code>（:51）与 <code>USAP_POOL_SIZE_MAX_LIMIT = 100</code>（:57）、<code>USAP_POOL_SIZE_MIN_DEFAULT = 1</code>（:64）、<code>USAP_POOL_REFILL_DELAY_MS_DEFAULT = 3000</code>（:76）。</p>
+<p>落到字段上是三处赋值：<code>mUsapPoolSizeMin</code> 在 <code>:253-257</code> 取值并做 <code>Integer.max(..., USAP_POOL_SIZE_MIN_LIMIT)</code> 下限抬升（注意与 max 的 <code>Integer.min</code> 封顶方向相反）；<code>mUsapPoolRefillThreshold</code> 在 <code>:259-263</code> 取值并做 <code>Integer.min(..., mUsapPoolSizeMax)</code> 封顶；<code>mUsapPoolRefillDelayMs</code> 在 <code>:265</code> 取延迟。<code>:276</code> 的 <code>mUsapPoolSizeMax / 2</code> 不属于这条回落链——它是 <code>:270</code> 的校验 <code>mUsapPoolSizeMin &gt;= mUsapPoolSizeMax</code> 失败后，连同 min/max 一起恢复默认值时才连带出现的一行。</p>
+<p>补池逻辑在 <code>fillUsapPool(int[] sessionSocketRawFDs, boolean isPriorityRefill)</code>（<code>:312</code>）。两种情况要补的数量不同：优先级补池只补到下限，表达式为 <code>numUsapsToSpawn = mUsapPoolSizeMin - usapPoolCount</code>（<code>:323</code>）；延迟补池补到上限，表达式为 <code>mUsapPoolSizeMax - usapPoolCount</code>（<code>:329</code>）。真正 fork 由 <code>Zygote.forkUsap(mUsapPoolSocket, sessionSocketRawFDs, isPriorityRefill)</code>（<code>:341</code>）完成。</p>
+<p>开关走 <code>setUsapPoolStatus(boolean newStatus, LocalSocket sessionSocket)</code>（<code>:362</code>），<code>mUsapPoolEnabled</code> 在 <code>:373</code> 落值。启用分支（<code>:375-376</code>）以 <code>isPriorityRefill=false</code> 调 <code>fillUsapPool</code>，把池补到上限；禁用分支（<code>:377-379</code>）调 <code>Zygote.emptyUsapPool()</code> 清空池，已 fork 的空闲进程一并回收。两条分支合起来才是「开关」的完整语义。</p>
+<p><code>Zygote.java</code> 提供跨进程侧接口：<code>getUsapPoolCount()</code>（<code>:646</code>，最终下落 <code>nativeGetUsapPoolCount()</code> 在 <code>:650</code>）、<code>emptyUsapPool()</code>（<code>:615</code>）、<code>forkUsap(...)</code>（<code>:677</code>）、<code>getUsapPipeFDs()</code>（<code>:981</code>）。</p>
+<p>共享资产的来源在 <code>ZygoteInit.java</code>。<code>preloadClasses()</code>（<code>:291</code>）读路径常量（<code>:112</code>）指向的 <code>/system/etc/preloaded-classes</code>；仓库里的清单是 <code>frameworks/base/boot/preloaded-classes</code>，共 15205 行。每预加载一个类打一个 trace 点：<code>Trace.traceBegin(Trace.TRACE_TAG_DALVIK, line)</code>（<code>ZygoteInit.java</code>:338）。资源经 <code>Resources.preloadResources()</code>、库经 <code>System.loadLibrary(&quot;android&quot;)</code> 一并进入 Zygote 堆。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>设某设备池上限为 10、下限为 3、阈值取默认 1，事件到达时池内剩 4 个。判定顺序决定走哪条分支：</p>
+<ul><li>先看优先级条件 <code>usapPoolCount &lt; mUsapPoolSizeMin</code>（<code>:627</code>）：4 ≥ 3，不成立，优先级补池在这组参数下不可达。判据是<strong>下限</strong>，不是阈值。</li><li>于是落到 <code>:630</code> 的延迟条件 <code>mUsapPoolSizeMax - usapPoolCount &gt;= mUsapPoolRefillThreshold</code>：10 − 4 = 6 ≥ 1，成立，但这里只是把 <code>mUsapPoolRefillTriggerTimestamp</code> 记成当前时刻（<code>:632</code>），动作<strong>还没</strong>变成 DELAYED——<code>:637</code> 的 <code>if (mUsapPoolRefillAction != NONE)</code> 此刻不成立，循环直接进下一次 poll。</li><li>真正的 DELAYED 在计时器侧置位：<code>:459-482</code> 用 <code>mUsapPoolRefillDelayMs</code> 算出本次 <code>pollTimeoutMs</code>，等到期（<code>:464-470</code>，置 <code>pollTimeoutMs = 0</code> 并设 DELAYED）或 poll 返回 0（<code>:491-498</code>，同样设 DELAYED）才轮得到补池。所以从「判定该补」到「真的 fork」隔着 <code>mUsapPoolRefillDelayMs</code> 这一段窗口。</li><li>补池量按 <code>:329</code> 的 <code>mUsapPoolSizeMax - usapPoolCount</code> 算，即 10 − 4 = 6。</li></ul>
+<p>换一组参数才看得到优先级分支：若下限是 5、池内仍剩 4 个，则 4 &lt; 5 成立，动作置为 IMMEDIATE（<code>:629</code>），补池量按 <code>:323</code> 的 <code>mUsapPoolSizeMin - usapPoolCount</code> 算，即 5 − 4 = 1，只补到下限。优先级补池只补到下限，剩下的缺口由收尾逻辑接上：<code>:648</code> 返回后若 <code>isPriorityRefill</code> 为真且 <code>fillUsapPool</code> 没返回命令，<code>:652-655</code> 会把 <code>mUsapPoolRefillTriggerTimestamp</code> 记成当前时刻，安排一次延迟补池，按 <code>:329</code> 的 <code>mUsapPoolSizeMax - usapPoolCount</code> 补到上限。若池内数量已不低于下限，<code>mUsapPoolSizeMin - usapPoolCount</code> 的结果会是负数，<code>:339</code> 的 <code>while (--numUsapsToSpawn &gt;= 0)</code> 循环体一次都不会进入，等于不补。</p>
+<p>数量算出来后调 <code>Zygote.forkUsap(...)</code> 逐个 fork。每个新 USAP 只做 fork 与套接字准备，不做 specialize；类与资源页仍在 COW 共享，物理内存增量只有页表与进程结构。这就是池内进程内存增量有限的原因。</p>
+<p>请求真正到来时，池取一个，<code>getUsapPoolCount()</code> 随之下降。何时再触发补池，由上面两条表达式与阈值共同决定。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P8-301</code> 讲 Zygote 进程自身怎么被拉起、<code>ZygoteInit</code> 的主流程；本篇从「堆已备好」处接手，不重复启动链路。</li><li><code>AND-P1-101</code> 讲 App 进程 fork 之后的 specialize 细节（包名、uid、capability 落地）；本篇止于「取到进程」这一刻。</li><li>其余系统服务的启动顺序编排在 P8 卷后续篇目，与池机制是并列关系，不是上下游。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>池状态与策略</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></td><td><code>mUsapPool*</code> 字段、<code>fetchUsapPoolPolicyProps()</code>、<code>fillUsapPool()</code>、<code>setUsapPoolStatus()</code></td><td>池的开关、容量、补池全部在此</td></tr><tr><td>池的跨进程接口</td><td><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td><code>forkUsap()</code>、<code>getUsapPoolCount()</code>、<code>emptyUsapPool()</code>、<code>getUsapPipeFDs()</code></td><td>Java 层到 native 侧的桥</td></tr><tr><td>预加载资产</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>preloadClasses()</code>、资源与库预加载、每类 trace</td><td>共享堆的内容来源</td></tr><tr><td>连接处理</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java</code></td><td>会话套接字上的请求处理</td><td>请求与池取用的交汇点</td></tr><tr><td>预加载清单</td><td><code>frameworks/base/boot/preloaded-classes</code></td><td>类名逐行列举，文件共 15205 行</td><td>决定预加载多少类；其中 23 行是注释/空行，被 <code>ZygoteInit.java:331-336</code> 跳过，实际类条目 15182 条</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; wc -l core/java/com/android/internal/os/ZygoteServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 659，对上 <code>ZygoteServer.java</code> 的总行数。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; wc -l core/java/com/android/internal/os/Zygote.java boot/preloaded-classes</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别为 1514 与 15205，对上 <code>Zygote.java</code> 总行数与预加载清单行数。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; grep -n &quot;mUsapPoolSizeMax\|mUsapPoolSizeMin\|mUsapPoolRefillThreshold&quot; core/java/com/android/internal/os/ZygoteServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在 107、112、118 行看到字段声明，并在 :259（阈值赋值，含 min 封顶）与 :265（延迟取值）看到配置读取，:276 附近是校验失败时的回落赋值。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; grep -n &quot;forkUsap\|emptyUsapPool\|getUsapPoolCount&quot; core/java/com/android/internal/os/Zygote.java core/java/com/android/internal/os/ZygoteServer.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>Zygote.java</code> 侧出现 615、646、677，<code>ZygoteServer.java</code> 侧出现 341。</p>
+<pre><code class="lang-bash">cd frameworks/base &amp;&amp; grep -n &quot;preloaded-classes\|TRACE_TAG_DALVIK&quot; core/java/com/android/internal/os/ZygoteInit.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到路径常量与 <code>preloadClasses()</code> 相关的行，以及 <code>:338</code> 处 <code>Trace.traceBegin</code> 的调用形态。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>「USAP 池里的进程占的内存等于同等数量的 App 进程」</strong>。错。USAP 刚 fork 完，页与 Zygote 只读共享，尚未做 specialize，也没有加载应用自身代码与堆。物理内存增量集中在页表与内核进程结构。</p>
+<p><strong>「池越大启动越快，所以把上限调大就行」</strong>。错。上限由 <code>mUsapPoolSizeMax</code> 控制，但补池要消耗 CPU 与内存；<code>mUsapPoolRefillDelayMs</code> 就是为此存在的延迟补池的延迟窗。不加权衡地放大只是把启动延迟换成常驻开销。</p>
+<p><strong>「类共享让 App 进程的代码段也变成共享的」</strong>——看起来对，实则范围有限。共享的是 fork 时已在 Zygote 堆内的页；应用自己的代码与资源不在其中，仍要走各自的装载路径。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>mUsapPoolRefillThreshold</code> 为什么可以是一个固定值？ <strong>答</strong>：代码里首选从设备属性 <code>usap_refill_threshold</code> 读取，取不到时由 <code>ZygoteConfig.USAP_POOL_REFILL_THRESHOLD_DEFAULT</code>（默认 1，<code>ZygoteConfig.java:44</code>）兜底，保证任何设备都有可用默认值；另有一处 <code>mUsapPoolSizeMax / 2</code>（<code>:276</code>）是 min/max 校验失败（<code>mUsapPoolSizeMin &gt;= mUsapPoolSizeMax</code>，<code>:270</code>）后恢复默认值时的连带赋值，不是常规兜底路径。 <strong>追问</strong>：那它和 <code>mUsapPoolSizeMin</code> 会冲突吗？ <strong>答</strong>：不冲突，但分工要分清。阈值只参与延迟补池的触发判定（<code>:630</code> 的 <code>max - count &gt;= threshold</code>）；下限管两件事——优先级补池的触发时机（<code>:627</code> 的 <code>count &lt; min</code>）与优先级补池的目标量（<code>:323</code>）。把优先级补池的触发也算到阈值头上，就会写出 <code>count ≥ min</code> 却「被判为需要保底」这种不存在的路径。</p>
+<p><strong>问</strong>：优先级补池和延迟补池的差别只在数量上吗？ <strong>答</strong>：不只。表达式不同：前者 <code>mUsapPoolSizeMin - usapPoolCount</code>（<code>:323</code>），后者 <code>mUsapPoolSizeMax - usapPoolCount</code>（<code>:329</code>），同一个 <code>fillUsapPool()</code> 用 <code>isPriorityRefill</code> 分支切换。触发时机也不同：优先级在 <code>:629</code> 当场置 IMMEDIATE，本轮就补；延迟分支在 <code>:632</code> 只记时间戳，要等 <code>mUsapPoolRefillDelayMs</code> 到期（<code>:464-470</code>）或 poll 超时返回 0（<code>:491-498</code>）才在 <code>:470</code>/<code>:498</code> 置 DELAYED。</p>
+<p><strong>追问</strong>：如果 <code>usapPoolCount</code> 已超过下限，优先级补池会怎样？ <strong>答</strong>：表达式结果为负，即不补（<code>while (--numUsapsToSpawn &gt;= 0)</code> 不进循环）。这正是 §4.3 例子里出现的情形。</p>
+<p><strong>问</strong>：优先级补池之后还会再触发延迟补池吗？ <strong>答</strong>：会。优先级只补到下限，<code>:648</code> 返回后若 <code>isPriorityRefill</code> 为真且没有命令要返回，<code>:652-655</code> 会记时间戳安排一次延迟补池，按 <code>:329</code> 的表达式补到上限——所以一次池空事件通常表现为「先补到下限、再补到上限」两段。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑池没打开</td><td><code>adb shell getprop | grep -i usap</code></td><td>是否有 USAP 相关属性及取值</td><td>按属性名回查 <code>setUsapPoolStatus()</code> 的调用点</td></tr><tr><td>怀疑预加载清单缺项</td><td><code>wc -l frameworks/base/boot/preloaded-classes</code></td><td>行数是否与 15205 一致</td><td>比对设备上的 <code>/system/etc/preloaded-classes</code></td></tr><tr><td>怀疑补池没被触发</td><td><code>grep -n &quot;fillUsapPool&quot; frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></td><td>调用点与传参</td><td>结合 <code>mUsapPoolRefillDelayMs</code> 判断是否还在延迟补池的延迟窗内</td></tr><tr><td>怀疑池被清空</td><td><code>grep -n &quot;emptyUsapPool&quot; frameworks/base/core/java/com/android/internal/os/ZygoteServer.java frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td>触发清空的路径</td><td>检查是否走过 <code>setUsapPoolStatus()</code> 的禁用分支</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Zygote 自身的启动链路见 <code>AND-P8-301</code>；fork 后的 specialize 细节见 <code>AND-P1-101</code>；system_server 内服务注册顺序不在本篇范围。</li><li><strong>本篇前置依赖</strong>：<code>AND-P8-301</code>。</li><li><strong>本篇后继</strong>：P8 卷中讲系统服务编排的篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>预加载清单<strong>文件行数</strong> 15205，其中注释与空行 23 行（<code>grep -vc '^#'</code> 一类口径实测），扣掉后被 <code>preloadClasses</code> 实际加载的类条目是 15182 条——行数不等于类数，引用时要说清是哪个（口径：2026-10-19 于 <code>android17-release</code> 实测）。</li><li><code>ZygoteServer.java</code> 总行数 659、<code>Zygote.java</code> 总行数 1514（口径：同上，<code>wc -l</code> 实测）。</li><li>池上限、下限、阈值、延迟可由设备属性覆盖；代码侧缺省兜底值为 max=3、min=1、threshold=1、delay=3000ms、max_limit=100（<code>ZygoteConfig.java:44</code>/<code>:51</code>/<code>:57</code>/<code>:64</code>/<code>:76</code>）。设备实际生效值按本卷 V1 验证档口径不强制实测，列为待补。</li><li>预加载占用的堆大小与单类平均装载耗时：代码中无常量，需真机 trace，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td><code>ZygoteServer.java</code> 共 659 行，池字段分布在 63–124 行区间，<code>fillUsapPool()</code> 在 <code>:312</code>，<code>setUsapPoolStatus()</code> 在 <code>:362</code></td><td>本篇全部符号与行号以本树为准</td></tr><tr><td>更早的主线版本</td><td>池字段命名与补池分支形态可能不同，本篇不断言具体差异</td><td>跨版本 grep 时以符号名为锚，不要以行号为准</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>Zygote</code>、<code>preloaded-classes</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>UsapPool</code>、<code>forkUsap</code>、<code>fillUsapPool</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code>、<code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code>、<code>frameworks/base/boot/preloaded-classes</code>。</li><li>承接篇：<code>AND-P8-301</code>、<code>AND-P1-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P8-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信任根与启动链验证：从 Bootloader 到 TEE</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>信任根与启动链验证：从 Bootloader 到 TEE</h1>
+<div class="kv"><span>ID：AND-P9-102</span><span>卷：P9</span><span>章：9.1</span><span>难度：4</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：external/avb/libavb/avb_slot_verify.c ；external/avb/libavb/avb_footer.h ；external/avb/libavb/avb_version.h ；external/avb/libavb/avb_mldsa.c ；external/avb/Android.bp ；external/avb/Android.bp ；hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/IKeyMintDevice.aidl ；hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl ；hardware/interfaces/keymaster/4.1/IKeymasterDevice.hal ；hardware/interfaces/gatekeeper/aidl/android/hardware/gatekeeper/IGatekeeper.aidl ；trusty/user/app</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 的信任根是一条逐段签名的链：Bootloader（引导加载程序，下文本树内只谈它向下的接口契约）验 <code>vbmeta</code>，<code>avb_slot_verify</code> 验各分区，启动后系统侧的 Keystore 2 与 KeyMint 才把密钥绑定到已验证的状态。<code>external/avb</code> 当前版本 <code>AVB_VERSION_MAJOR 1</code>、<code>AVB_VERSION_MINOR 4</code>、<code>AVB_VERSION_SUB 0</code>，已经在算法枚举里列出了 <code>AVB_ALGORITHM_TYPE_MLDSA65</code>/<code>AVB_ALGORITHM_TYPE_MLDSA87</code>。AVB 只回答「镜像是否被授权」，不回答「密钥存在哪」；后者由 <code>SecurityLevel.aidl</code> 的 <code>SOFTWARE</code>/<code>TRUSTED_ENVIRONMENT</code>/<code>STRONGBOX</code>/<code>KEYSTORE</code> 四个等级刻画。TEE 侧的应用清单是接口口径，不是实现证据：<code>trusty/user/app/</code> 下十个应用只说明「哪些能力被期望跑在 TEE 里」。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P8-101</code>。AVB 的校验结果怎么变成挂载决策在那里展开，本篇只引用结论，不重复 <code>libfs_avb</code> 的内部路径。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>external/avb/libavb/avb_slot_verify.c</code></li><li><code>external/avb/libavb/avb_footer.h</code></li><li><code>external/avb/libavb/avb_version.h</code></li><li><code>external/avb/libavb/avb_mldsa.c</code></li><li><code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/IKeyMintDevice.aidl</code></li><li><code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></li><li><code>hardware/interfaces/keymaster/4.1/IKeymasterDevice.hal</code></li><li><code>hardware/interfaces/gatekeeper/aidl/android/hardware/gatekeeper/IGatekeeper.aidl</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个人拿到 <code>avbtool verify_image</code> 的输出「OK」，却说不清这是谁验的、验完谁信。另一个人翻到 <code>avb_slot_verify</code>，看见返回 <code>AvbSlotVerifyResult</code>，却不知道这个结果最终拦住了哪一步。还有人把「密钥在 TEE 里」当成事实，去 TEE 源码找算法实现，结果只找到一份应用清单。这三种困惑指向同一件事：启动链的每一段都有自己的接口契约，混淆段与段，就会把「已验证」误读成「已保护」。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念按启动顺序排：信任根（bootloader 内的公钥）、<code>vbmeta</code> 镜像（承载各分区哈希与签名）、AVB 校验（<code>avb_slot_verify</code> 在 <code>external/avb/libavb/avb_slot_verify.c</code>）、密钥服务等级（<code>SecurityLevel.aidl</code>）。前三者决定「系统镜像是否可信」，第四者决定「可信之后密钥放在哪一档硬件里」。</p>
+<p>图 1：从信任根到密钥等级的逐段依赖</p>
+<pre><code>信任根(bootloader 内公钥)
+        |
+        v
+  vbmeta + footer(&quot;AVBf&quot;)
+        |
+        v
+  avb_slot_verify -&gt; AvbSlotVerifyResult
+        |
+        v
+  libfs_avb 转成挂载决策(见 AND-P8-101)
+        |
+        v
+  Keystore 2 -&gt; KeyMint(SOFTWARE/TEE/StrongBox)</code></pre>
+<p>每一段只对上一段负责。AVB 校验失败时，后续段没有输入；AVB 校验通过也不代表密钥一定在 <code>STRONGBOX</code>，那要看 <code>SecurityLevel.aidl</code> 里设备自报的等级。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>external/avb</code> 的符号命名规则很统一：<code>AVB_</code> 前缀贯穿版本号、魔数、算法枚举与返回类型。同族常量集中看下面这张表。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>AVB_VERSION_MAJOR</code> / <code>AVB_VERSION_MINOR</code> / <code>AVB_VERSION_SUB</code></td><td>库版本 1.4.0</td><td><code>external/avb/libavb/avb_version.h:39-41</code></td></tr><tr><td><code>AVB_FOOTER_MAGIC</code></td><td>footer 魔数 <code>&quot;AVBf&quot;</code>，长度 4</td><td><code>external/avb/libavb/avb_footer.h:39</code>（:40 为长度 4）</td></tr><tr><td><code>AVB_ALGORITHM_TYPE_MLDSA65</code> / <code>AVB_ALGORITHM_TYPE_MLDSA87</code></td><td>后量子签名算法类型</td><td>枚举声明 <code>external/avb/libavb/avb_crypto.h:120-121</code>（经 <code>libavb.h:35</code> 纳入公共头）；使用点见 <code>avb_cmdline.c:312-313</code>、<code>avb_crypto.c:42-43</code>、<code>avb_mldsa.c:62/65/132/135</code>、<code>avb_vbmeta_image.c:275-276</code>、<code>boringssl/mldsa.c</code></td></tr></tbody></table>
+<p>整槽校验的对外入口只有一个：<code>AvbSlotVerifyResult avb_slot_verify(AvbOps* ops, ...)</code>，位于 <code>external/avb/libavb/avb_slot_verify.c:1417</code>，该文件共 1819 行。返回类型是枚举而非布尔，这个设计说明失败原因要传出去——调用方拿到的是「哪一段没过」，不是一个笼统的 false。注意「唯一」限定在<strong>整槽</strong>这一层：<code>avb_vbmeta_image.h:286</code> 还开放了 <code>avb_vbmeta_image_verify()</code>，它只验 vbmeta 数据本身（头文件注释就写着「you are likely looking for avb_slot_verify()」），不是分区完整性校验的入口。</p>
+<p>后量子这条线要分三层看，不能只说「实现在 <code>avb_mldsa.c</code>」。第一层是枚举：<code>AVB_ALGORITHM_TYPE_MLDSA65</code>/<code>_MLDSA87</code> 声明在 <code>avb_crypto.h:120-121</code>，随 <code>libavb.h</code> 公开导出。第二层是分发：<code>external/avb/libavb/avb_mldsa.c</code>（155 行）做的是公钥头校验与长度校验，转发分两处——prehash 初始化在 :104 转给 <code>avb_mldsa_prehash_init_impl</code>，验签本体 <code>avb_mldsa_verify_message_representative</code> 定义在 :112、在 :148 转给 <code>avb_mldsa_verify_message_representative_impl</code>。第三层才是实现，而且有两套后端：<code>boringssl/mldsa.c:110</code>（BoringSSL 实现）与 <code>crypto/mldsa_impl.c:61</code>（备用桩，:74 直接打 <code>ML-DSA verification not implemented.</code> 后返回 false）。本树 libavb 的默认构建链的是 BoringSSL 后端——<code>external/avb/Android.bp:150-158</code> 的 <code>libavb_base_defaults</code> 与 <code>:259-263</code> 的 <code>libavb_user</code> 都带 <code>avb_crypto_ops_impl_boringssl</code>；<code>crypto/</code> 这套桩只有 host 测试 target <code>libavb_host_unittest_crypto</code>（<code>:400-404</code>）才链接，是显式选择的备选而非默认。算法枚举存在不等于设备必然启用它，启用与否既看 <code>vbmeta</code> 里的算法字段，也看链接的是哪个后端。</p>
+<p>密钥侧的等级枚举在 <code>SecurityLevel.aidl</code>：<code>SOFTWARE</code>=0、<code>TRUSTED_ENVIRONMENT</code>=1、<code>STRONGBOX</code>=2、<code>KEYSTORE</code>=100。数值不是连续的，<code>KEYSTORE</code>=100 明显与前三者不在一个区间，含义是「软件层 Keystore 2 抽象」而非另一种硬件。该文件注释把 <code>TRUSTED_ENVIRONMENT</code> 绑定到 CDD 9.11.1 [C-1-2]，把 <code>STRONGBOX</code> 绑定到 CDD 9.11.2——等级不是自封的，是合规项。</p>
+<p>接口规模可以当作复杂度指标：<code>IKeyMintDevice.aidl</code> 共 1005 行，<code>IGatekeeper.aidl</code> 共 154 行，旧代 <code>hardware/interfaces/keymaster/4.1/IKeymasterDevice.hal</code> 共 80 行，且 HIDL 4.0/4.1 两代接口与该文件并列存在。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设一台设备开机，bootloader 调用 <code>avb_slot_verify</code>；footer 的读取与 <code>AVB_FOOTER_MAGIC</code> 校验是它<strong>内部</strong>的步骤——<code>avb_slot_verify.c:1520</code> 调 <code>load_and_verify_vbmeta</code>，后者在 :660-690 读分区尾部 footer 并调 <code>avb_footer_validate_and_byteswap</code> 做字节序与魔数校验。bootloader 拿到的是 <code>AvbSlotVerifyResult</code>。bootloader 侧的行为本树不可核（红线一），这里只讲 libavb 的接口契约。结果交给 <code>libfs_avb</code>（<code>system/fs/fs_mgr/libfs_avb/fs_avb.cpp</code> 共 606 行）转成「这个分区挂只读还是拒绝挂载」。</p>
+<p>系统起来后，应用请求一把硬件密钥。<code>IKeyMintDevice.aidl</code> 里查询到的安全等级可能是 <code>TRUSTED_ENVIRONMENT</code>。此时判断路径是：AVB 说明了镜像可信，<code>SecurityLevel.aidl</code> 说明了密钥运算发生在哪一档环境。两件事互不替代——AVB 通过而等级是 <code>SOFTWARE</code> 是允许的组合，只是密钥保护强度不同。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P8-101</code> 负责 <code>libfs_avb</code> 的挂载细节，本篇只引用它的结论。<code>AND-P9-202</code> 处理应用沙箱与 SELinux 域，那发生在 AVB 之后、属于运行时隔离，不是启动链验签。<code>AND-P9-201</code> 处理权限授予路径。本篇边界止于「镜像验完、等级报出」这一点，往后的密钥使用行为不在本篇。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>AVB 校验入口</td><td><code>external/avb/libavb/avb_slot_verify.c</code></td><td><code>avb_slot_verify</code>，1819 行</td><td>唯一对外校验函数</td></tr><tr><td>footer 识别</td><td><code>external/avb/libavb/avb_footer.h</code></td><td><code>AVB_FOOTER_MAGIC</code></td><td>魔数 <code>&quot;AVBf&quot;</code></td></tr><tr><td>库版本</td><td><code>external/avb/libavb/avb_version.h</code></td><td><code>AVB_VERSION_MAJOR</code> 等</td><td>1.4.0</td></tr><tr><td>后量子分发</td><td><code>external/avb/libavb/avb_mldsa.c</code></td><td>155 行</td><td>公钥头校验与分发，验签转 <code>_impl</code></td></tr><tr><td>后量子后端</td><td><code>boringssl/mldsa.c</code> / <code>crypto/mldsa_impl.c</code></td><td>BoringSSL 实现（默认链接）/ 备用桩（返回 false，仅 host 测试链接）</td><td>真正实现所在，见 §4.2</td></tr><tr><td>KeyMint 主接口</td><td><code>hardware/interfaces/security/keymint/aidl/.../IKeyMintDevice.aidl</code></td><td>1005 行</td><td>密钥操作契约</td></tr><tr><td>安全等级</td><td><code>hardware/interfaces/security/keymint/aidl/.../SecurityLevel.aidl</code></td><td>四个等级枚举</td><td>绑定 CDD 条款</td></tr><tr><td>旧代 Keymaster</td><td><code>hardware/interfaces/keymaster/4.1/IKeymasterDevice.hal</code></td><td>80 行</td><td>与 HIDL 4.0 并列</td></tr><tr><td>TEE 应用清单</td><td><code>trusty/user/app</code></td><td>十个应用目录</td><td>接口口径，非实现</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：external/avb:ba2dec4b035b</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C external/avb rev-parse HEAD</code></pre>
+<p>期望输出 <code>ba2dec4b035b</code> 开头，对上锚点。</p>
+<pre><code class="lang-bash">sed -n '39,41p' external/avb/libavb/avb_version.h</code></pre>
+<p>期望看到三个 <code>#define</code>，值为 <code>1</code>、<code>4</code>、<code>0</code>，对应 1.4.0。</p>
+<pre><code class="lang-bash">grep -n 'AVB_FOOTER_MAGIC' external/avb/libavb/avb_footer.h</code></pre>
+<p>期望在 :39 命中定义行，:40 为长度 4。</p>
+<pre><code class="lang-bash">grep -n 'avb_slot_verify' external/avb/libavb/avb_slot_verify.c | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :1417 的函数定义，头文件声明另计。</p>
+<pre><code class="lang-bash">wc -l external/avb/libavb/avb_slot_verify.c external/avb/libavb/avb_mldsa.c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别为 1819 与 155。</p>
+<pre><code class="lang-bash">grep -rn 'AVB_ALGORITHM_TYPE_MLDSA' external/avb/libavb/</code></pre>
+<p>期望命中六个文件：枚举声明在 <code>avb_crypto.h:120-121</code>，使用点分布在 <code>avb_cmdline.c:312-313</code>、<code>avb_crypto.c:42-43</code>、<code>avb_mldsa.c:62/65/132/135</code>、<code>avb_vbmeta_image.c:275-276</code>、<code>boringssl/mldsa.c</code>。另可看后端差异：</p>
+<pre><code class="lang-bash">grep -n 'not implemented' external/avb/libavb/crypto/mldsa_impl.c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望在 :41、:57、:74 命中——备用桩实现直接返回 false。</p>
+<pre><code class="lang-bash">grep -n 'SOFTWARE\|TRUSTED_ENVIRONMENT\|STRONGBOX\|KEYSTORE' \
+  hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到四个枚举值与 0/1/2/100 的赋值。</p>
+<pre><code class="lang-bash">ls trusty/user/app</code></pre>
+<p>期望列出 authmgr、avb、cast-auth、confirmationui、gatekeeper、keymaster、keymint、sample、secretkeeper、storage 十个目录。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：AVB 校验通过就说明密钥受硬件保护。</strong> 错。AVB 只证明镜像被授权，密钥落在哪一档由 <code>SecurityLevel.aidl</code> 的枚举说明，<code>SOFTWARE</code> 是合法返回值。</p>
+<p><strong>误区二：`SecurityLevel.aidl` 只有三个等级。</strong> 漏了 <code>KEYSTORE</code>=100。它跳出了 0/1/2 的连续区间，语义不是更强的硬件，而是软件层的 Keystore 2。</p>
+<p><strong>误区三：`external/avb` 里有 MLDSA 枚举，就代表设备在用后量子签名。</strong> 看起来对其实是错的。枚举存在只说明库声明了这种算法；是否启用要看两件事——<code>vbmeta</code> 里的算法字段，以及链接的是哪个后端（本树默认链 BoringSSL；<code>crypto/mldsa_impl.c</code> 是仅测试链接的备用桩，会直接返回失败）。本篇不断言任何具体设备的配置。</p>
+<p><strong>误区四：`trusty/user/app/` 下有 `keymint` 目录，就能从这份清单推断实现细节。</strong> 清单只表达「这些能力被期望跑在 TEE」，trusty 无独立仓 HEAD，本树给不出提交号，内部实现不在可核范围。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>avb_slot_verify</code> 返回枚举而不是布尔？<strong>答</strong>：调用方要区分「footer 不存在」「哈希不匹配」「签名不符」等不同失败，才能决定是拒绝启动还是降级。<strong>追问</strong>：枚举值能穷举吗？<strong>答</strong>：能，但本篇只断言函数签名与所在行，不逐一列枚举成员。</p>
+<p><strong>问</strong>：<code>IKeymasterDevice.hal</code> 只有 80 行，是不是已经废弃？<strong>答</strong>：不能这么读。HIDL 4.0/4.1 两代接口与该文件并列存在，行数少只说明该版本接口面窄。<strong>追问</strong>：那新代码该看哪个？<strong>答</strong>：看 <code>IKeyMintDevice.aidl</code>，1005 行的 AIDL 是 KeyMint 的主契约。</p>
+<p><strong>问</strong>：TEE 里的 <code>gatekeeper</code> 应用和 <code>IGatekeeper.aidl</code> 是同一件事吗？<strong>答</strong>：不是。前者是清单里的一个目录名，后者是 154 行的接口定义；接口说契约，目录只说明能力归属。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不确定 AVB 库版本</td><td><code>grep -n 'AVB_VERSION_' external/avb/libavb/avb_version.h</code></td><td>三个宏的值</td><td>非 1.4.0 则按实际版本重读 §4.2</td></tr><tr><td>找不到校验入口</td><td><code>grep -rn 'AvbSlotVerifyResult avb_slot_verify' external/avb</code></td><td>命中的文件与行</td><td>文件非 <code>avb_slot_verify.c</code> 则说明树被改造</td></tr><tr><td>footer 魔数对不上</td><td><code>sed -n '39,40p' external/avb/libavb/avb_footer.h</code></td><td>字符串是否为 <code>&quot;AVBf&quot;</code>、长度是否 4</td><td>不符则先确认分支</td></tr><tr><td>等级枚举值可疑</td><td><code>grep -n '= 100' hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></td><td><code>KEYSTORE</code> 的赋值</td><td>若为 3 则版本不同，重读 §9</td></tr><tr><td>想确认 TEE 应用集合</td><td><code>ls trusty/user/app | wc -l</code></td><td>是否为 10</td><td>数量不同先确认树来源</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：<code>libfs_avb</code> 挂载细节见 <code>AND-P8-101</code>；SELinux 域与应用沙箱见 <code>AND-P9-202</code>；密钥使用期的权限校验见 <code>AND-P9-201</code>。</li><li><strong>本篇前置依赖</strong>：<code>AND-P8-101</code>。</li><li><strong>本篇后继</strong>：<code>AND-P9-201</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>AVB 库版本 1.4.0（源码常量，<code>avb_version.h:39-41</code>）。</li><li><code>avb_slot_verify.c</code> 1819 行、<code>avb_mldsa.c</code> 155 行（源码行数实测）。</li><li><code>IKeyMintDevice.aidl</code> 1005 行、<code>IGatekeeper.aidl</code> 154 行、<code>IKeymasterDevice.hal</code> 80 行（源码行数实测）。</li><li><code>SecurityLevel.aidl</code> 四个等级值 0/1/2/100（源码常量）。</li><li>Trusty 应用数量 10（目录枚举实测）；其内部实现暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>HIDL Keymaster 4.0/4.1 时代</td><td><code>IKeymasterDevice.hal</code> 80 行，与 4.0 接口并列</td><td>密钥接口面窄，查询等级的能力受限</td></tr><tr><td>android17-release（本树实测）</td><td>AIDL <code>IKeyMintDevice.aidl</code> 1005 行；<code>SecurityLevel.aidl</code> 含 <code>KEYSTORE</code>=100</td><td>接口契约扩大，等级多了软件层一档</td></tr><tr><td>本树实测</td><td><code>external/avb</code> 1.4.0，枚举含 <code>AVB_ALGORITHM_TYPE_MLDSA65</code>/<code>AVB_ALGORITHM_TYPE_MLDSA87</code></td><td>库层具备后量子算法入口，是否启用看 <code>vbmeta</code></td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>verified boot</code>、<code>AVB</code>、<code>KeyMint</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>avb_slot_verify</code>、<code>SecurityLevel</code>、<code>IKeyMintDevice</code>。</li><li>本仓关键路径：<code>external/avb/libavb/avb_slot_verify.c</code>、<code>external/avb/libavb/avb_mldsa.c</code>、<code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code>。</li><li>承接篇：<code>AND-P8-101</code>、<code>AND-P9-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-102 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binder 内核驱动：binder.c、线程池调度与优先级继承</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Binder 内核驱动：binder.c、线程池调度与优先级继承</h1>
+<div class="kv"><span>ID：AND-P5-201</span><span>卷：P5</span><span>章：5.2</span><span>难度：5</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：external/kernel-headers/original/uapi/linux/android/binder.h ；external/kernel-headers/original/uapi/linux/android/binderfs.h ；bionic/libc/kernel/uapi/linux/android/binder.h ；bionic/libc/kernel/uapi/linux/android/binder_netlink.h ；frameworks/native/libs/binder/ProcessState.cpp ；frameworks/native/libs/binder/IPCThreadState.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Binder 内核驱动对用户态只暴露一层窄契约：14 个 ioctl 入口、22 条命令协议、24 条返回协议。线程池的&quot;够不够用&quot;由 <code>BINDER_SET_MAX_THREADS</code> 的上限和 <code>BR_SPAWN_LOOPER</code> 的扩线程请求共同决定，用户态 <code>joinThreadPool</code> 的第一件事是 <code>BC_ENTER_LOOPER</code> 或 <code>BC_REGISTER_LOOPER</code>。优先级继承的入口在 node 的 <code>flat_binder_object</code> 标志位里，只有 <code>FLAT_BINDER_FLAG_INHERIT_RT</code> 置位、且是同步事务时，调用方才把实时调度策略传进来。协议版本号在 64 位平台上为 8。驱动实现本身不在本树核验范围，本篇只写契约面。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P5-G01</code>（卷导读，先建立 P5 各篇分工），<code>AND-P2-101</code>（事务语义与用户态编组，本篇只讲驱动契约面）。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></li><li><code>external/kernel-headers/original/uapi/linux/android/binderfs.h</code></li><li><code>bionic/libc/kernel/uapi/linux/android/binder.h</code></li><li><code>bionic/libc/kernel/uapi/linux/android/binder_netlink.h</code></li><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。验证方式是静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>跨进程调用偶发变慢，抓 trace 看到调用线程在等回复，服务端侧无线程可用。线程池明明设了上限，实际起来的线程数却对不上。另一头，音频链路的服务线程被普通优先级的调用方拉进长事务后，实时性突然掉了。这两类现象都不是用户态代码能单独解释的，答案在驱动那一侧的契约里：线程什么时候被叫起来、优先级什么时候被沿调用链传下去。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念。<strong>节点（node）</strong>是驱动里一个可被跨进程引用的服务实体，它携带 <code>flat_binder_object</code> 里的标志位。<strong>线程池（thread pool）</strong>是每个进程在驱动侧挂着的线程集合，靠 <code>BINDER_SET_MAX_THREADS</code> 定上限、靠 <code>BR_SPAWN_LOOPER</code> 触发扩容。<strong>事务（transaction）</strong>是一次 <code>BC_TRANSACTION</code> 到 <code>BR_TRANSACTION</code> 的搬运，中间由 ioctl 的 <code>BINDER_WRITE_READ</code> 承载。<strong>调度策略位</strong>挂在 node 上，决定调用方优先级能否被继承。</p>
+<p>图 1：契约面各层的对应关系</p>
+<pre><code>用户态 libbinder         驱动契约头            驱动侧实体
+ProcessState.cpp   -&gt;  binder.h ioctl 枚举  -&gt;  线程池上限
+IPCThreadState.cpp -&gt;  BC_*/BR_* 协议       -&gt;  事务与线程登记
+flat_binder_object -&gt;  flags 位             -&gt;  node 调度策略</code></pre>
+<p>一个进程只有一条 <code>BINDER_WRITE_READ</code> 主干：写方向塞 <code>BC_*</code> 命令，读方向回 <code>BR_*</code> 返回。线程登记、事务投递、缓冲释放全在这条主干上来回。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>入口层：14 个 ioctl。</strong> <code>enum</code> 起始于 <code>binder.h:308</code>，入口从 :309 排到 :322。其中和本篇直接相关的三个：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BINDER_WRITE_READ</code></td><td>承载全部 <code>BC_*</code>／<code>BR_*</code> 收发的主入口</td><td><code>binder.h:309</code></td></tr><tr><td><code>BINDER_SET_MAX_THREADS</code></td><td>下发进程线程池线程上限</td><td><code>binder.h:311</code></td></tr><tr><td><code>BINDER_SET_CONTEXT_MGR_EXT</code></td><td>注册 context manager，携带扩展参数</td><td><code>binder.h:318</code></td></tr></tbody></table>
+<p>同族还有 <code>BINDER_SET_IDLE_TIMEOUT</code>（:310）、<code>BINDER_SET_IDLE_PRIORITY</code>（:312）、<code>BINDER_SET_CONTEXT_MGR</code>（:313）、<code>BINDER_THREAD_EXIT</code>（:314）、<code>BINDER_VERSION</code>（:315）、<code>BINDER_GET_NODE_DEBUG_INFO</code>（:316）、<code>BINDER_GET_NODE_INFO_FOR_REF</code>（:317）、<code>BINDER_FREEZE</code>（:319）、<code>BINDER_GET_FROZEN_INFO</code>（:320）、<code>BINDER_ENABLE_ONEWAY_SPAM_DETECTION</code>（:321）、<code>BINDER_GET_EXTENDED_ERROR</code>（:322）。注意 <code>BINDER_SET_IDLE_TIMEOUT</code> 与 <code>BINDER_SET_IDLE_PRIORITY</code> 是历史入口，现代用户态不以此调度。</p>
+<p><strong>线程池：上限与扩容是两件事。</strong> 用户态侧 <code>ProcessState.cpp:49</code> 定义 <code>DEFAULT_MAX_BINDER_THREADS 15</code>；<code>setThreadPoolMaxThreadCount(size_t maxThreads)</code>（:451）经 <code>ioctl(mDriverFD, BINDER_SET_MAX_THREADS, &amp;maxThreads)</code>（:455）把上限交给驱动。上限只约束数量，不负责唤醒。扩容请求由驱动在需要时说：返回协议里有一条 <code>BR_SPAWN_LOOPER</code>（:478）。用户态收到它就新起一个线程进 <code>joinThreadPool</code>，而 <code>joinThreadPool</code> 的首个动作是写 <code>BC_ENTER_LOOPER</code>（主线程）或 <code>BC_REGISTER_LOOPER</code>（新线程），见 <code>IPCThreadState.cpp:847</code>。也就是说，每个线程都必须向驱动登记，驱动才知道池里现在有几个可用线程。</p>
+<p>图 2：线程从登记到扩容的契约往返</p>
+<pre><code>joinThreadPool -&gt; BC_ENTER_LOOPER / BC_REGISTER_LOOPER  (登记)
+驱动侧计数        (池内可用线程)
+需要更多 -&gt; BR_SPAWN_LOOPER  (请求扩容)
+用户态新线程 -&gt; joinThreadPool -&gt; BC_REGISTER_LOOPER</code></pre>
+<p>上限是真约束：线程数到 <code>BINDER_SET_MAX_THREADS</code> 给的值后，驱动不再要求扩容。此时事务会排队，调用方表现为等回复变长。</p>
+<p><strong>命令与返回：22 与 24。</strong> 命令协议 <code>enum binder_driver_command_protocol</code>（:537-637）共 22 个，用户态写给驱动。返回协议 <code>enum binder_driver_return_protocol</code>（:415-535）共 24 个，驱动读给用户态。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BC_TRANSACTION</code></td><td>发起一次事务</td><td><code>binder.h:538</code></td></tr><tr><td><code>BC_REPLY</code></td><td>回复一次事务</td><td><code>binder.h:539</code></td></tr><tr><td><code>BC_FREE_BUFFER</code></td><td>归还读到的缓冲</td><td><code>binder.h:551</code></td></tr><tr><td><code>BC_ENTER_LOOPER</code></td><td>主线程登记进线程池</td><td><code>binder.h:584</code></td></tr><tr><td><code>BC_REGISTER_LOOPER</code></td><td>非主线程登记进线程池</td><td><code>binder.h:578</code></td></tr><tr><td><code>BC_EXIT_LOOPER</code></td><td>线程退出线程池</td><td><code>binder.h:585</code></td></tr><tr><td><code>BC_TRANSACTION_SG</code></td><td>分散聚集形式的发起</td><td><code>binder.h:613</code></td></tr><tr><td><code>BC_REPLY_SG</code></td><td>分散聚集形式的回复</td><td><code>binder.h:614</code></td></tr></tbody></table>
+<p>带 <code>_SG</code> 后缀的一对是散列表版本，语义与 <code>BC_TRANSACTION</code>／<code>BC_REPLY</code> 平行，只是缓冲描述方式不同。但 §1 事实清单未观测到 <code>BR_*</code> 侧有对应 <code>_SG</code> 返回，本篇不断言。</p>
+<p>返回侧的关键几条：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BR_TRANSACTION</code></td><td>收到一次事务</td><td><code>binder.h:429</code></td></tr><tr><td><code>BR_REPLY</code></td><td>收到一次回复</td><td><code>binder.h:430</code></td></tr><tr><td><code>BR_TRANSACTION_COMPLETE</code></td><td>本端发起的动作已完成</td><td><code>binder.h:448</code></td></tr><tr><td><code>BR_SPAWN_LOOPER</code></td><td>请用户态扩一个线程</td><td><code>binder.h:478</code></td></tr><tr><td><code>BR_DEAD_REPLY</code></td><td>对端已死</td><td><code>binder.h:442</code></td></tr><tr><td><code>BR_FAILED_REPLY</code></td><td>事务失败</td><td><code>binder.h:501</code></td></tr><tr><td><code>BR_FROZEN_REPLY</code></td><td>对端处于冻结态</td><td><code>binder.h:507</code></td></tr><tr><td><code>BR_ONEWAY_SPAM_SUSPECT</code></td><td>oneway 洪水嫌疑</td><td><code>binder.h:513</code></td></tr><tr><td><code>BR_TRANSACTION_PENDING_FROZEN</code></td><td>事务因冻结挂起</td><td><code>binder.h:520</code></td></tr><tr><td><code>BR_FROZEN_BINDER</code></td><td>冻结相关的 binder 通知</td><td><code>binder.h:525</code></td></tr></tbody></table>
+<p>注意 <code>BR_TRANSACTION_COMPLETE</code> 不是&quot;对端处理完了&quot;，它只表示本端发出的这次写已经进了驱动。同步事务的完成信号是 <code>BR_REPLY</code>。把前者当后者，就会出现&quot;明明 complete 了为什么还在等&quot;的误判。上表是<strong>代表性选列，不是完整清单</strong>——<code>enum binder_driver_return_protocol</code>（:415-535）实有 24 项，未列出的还有 <code>BR_ERROR</code>、<code>BR_OK</code>、<code>BR_TRANSACTION_SEC_CTX</code>、<code>BR_ACQUIRE_RESULT</code>、<code>BR_INCREFS</code>、<code>BR_ATTEMPT_ACQUIRE</code>、<code>BR_NOOP</code>、<code>BR_FINISHED</code>、<code>BR_DEAD_BINDER</code>、<code>BR_CLEAR_DEATH_NOTIFICATION_DONE</code>、<code>BR_CLEAR_FREEZE_NOTIFICATION_DONE</code> 等。</p>
+<p><strong>优先级继承：位在 node 上，不在调用上。</strong> <code>flat_binder_object</code>（:125）的结构是 hdr ＋ <code>__u32 flags</code> ＋ union（<code>binder</code>／<code>handle</code>）＋ cookie。flags 的语义在 <code>enum flat_binder_object_flags</code>（:53）里：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>FLAT_BINDER_FLAG_PRIORITY_MASK</code></td><td>低 8 位，最低调度优先级掩码</td><td><code>binder.h:65</code></td></tr><tr><td><code>FLAT_BINDER_FLAG_ACCEPTS_FDS</code></td><td>node 接受文件描述符</td><td><code>binder.h:69</code></td></tr><tr><td><code>FLAT_BINDER_FLAG_INHERIT_RT</code></td><td>允许继承实时调度策略</td><td><code>binder.h:91</code></td></tr><tr><td><code>FLAT_BINDER_FLAG_TXN_SECURITY_CTX</code></td><td>事务携带安全上下文</td><td><code>binder.h:99</code></td></tr></tbody></table>
+<p>策略位本身占两个比特，起点是 <code>FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT = 9</code>（:47），组合形式为 <code>FLAT_BINDER_FLAG_SCHED_POLICY_MASK</code>（:82-83，等于 <code>3U &lt;&lt; FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT</code>）。两比特编码四种（:76-81 注释）：00b 对应 SCHED_NORMAL，01b 对应 SCHED_FIFO，10b 对应 SCHED_RR，11b 对应 SCHED_BATCH。</p>
+<p>关键在 <code>FLAT_BINDER_FLAG_INHERIT_RT</code>（:91）的注释：只有这一位置位，调用进入该 node 时才会从调用方继承实时调度策略，而且仅限同步事务（&quot;for synchronous transactions&quot;）。没置位，普通优先级调用方不会被抬高；置位但走 oneway，也不继承。</p>
+<p>图 3：优先级继承的判定顺序</p>
+<pre><code>调用方发起同步事务
+  -&gt; 目标 node 的 flags 有 INHERIT_RT 吗
+       否 -&gt; 不继承，按 node 自身策略运行
+       是 -&gt; 调用方是实时策略吗
+             是 -&gt; 把策略传给服务线程
+             否 -&gt; 无可继承内容</code></pre>
+<p>注意这是契约描述，不是驱动内部实现描述。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>设服务进程启动时调 <code>setThreadPoolMaxThreadCount(...)</code>，上限落到 <code>BINDER_SET_MAX_THREADS</code>。主线程已写 <code>BC_ENTER_LOOPER</code>，另有两个线程写 <code>BC_REGISTER_LOOPER</code>，池内登记 3 个。三个并发同步事务各占一个，第四个调用方进来，驱动侧无空闲线程、上限又没到，于是回一个 <code>BR_SPAWN_LOOPER</code>；服务进程起新线程，<code>joinThreadPool</code> 写 <code>BC_REGISTER_LOOPER</code>，池内变 4 个，第四个事务被接走。这里线程池扩容是驱动请求、用户态响应的往返，用户态无法自主&quot;多起几个线程&quot;来提升处理能力。</p>
+<p>再看优先级。音频服务把某个 node 的 flags 里两个策略位写成 01b、并置 <code>FLAT_BINDER_FLAG_INHERIT_RT</code>。此时一个 SCHED_FIFO 的调用方发起同步事务，服务线程按契约可继承实时策略。换成 oneway 传入，同一个 node 不继承——同步限定是硬条件，不是实现细节。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>事务的用户态编组、<code>Parcel</code> 布局和代理/桩的生成，归 <code>AND-P2-101</code> 与 <code>AND-P3-302</code>；本篇只讲这些字节送到驱动门口之后的契约面。oneway 的缓冲占用上限与洪水判定策略归 <code>AND-P5-202</code>；本篇只提到 <code>BR_ONEWAY_SPAM_SUSPECT</code> 这个返回码存在，不展开判定阈值。冻结相关（<code>BINDER_FREEZE</code>、<code>BR_FROZEN_REPLY</code>、<code>BR_TRANSACTION_PENDING_FROZEN</code>）在进程生命周期篇展开，本篇只做协议面登记。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>契约头（权威）</td><td><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>ioctl 枚举、<code>TF_*</code>、<code>BC_*</code>／<code>BR_*</code>、<code>flat_binder_object</code></td><td>共 640 行；行号口径基准</td></tr><tr><td>契约头（bionic 拷贝）</td><td><code>bionic/libc/kernel/uapi/linux/android/binder.h</code></td><td>同上，自动生成、注释被裁</td><td>共 247 行；不得当权威读</td></tr><tr><td>契约头（文件系统）</td><td><code>external/kernel-headers/original/uapi/linux/android/binderfs.h</code></td><td>binderfs 挂载与控制</td><td>与 <code>DRIVER_FEATURES_PATH</code> 同族命名空间</td></tr><tr><td>契约头（netlink）</td><td><code>bionic/libc/kernel/uapi/linux/android/binder_netlink.h</code></td><td>上报通道 UAPI</td><td>本篇不展开</td></tr><tr><td>线程池上限</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>DEFAULT_MAX_BINDER_THREADS</code>（:49）、<code>setThreadPoolMaxThreadCount</code>（:451）→ ioctl（:455）</td><td>上限来自用户态常量</td></tr><tr><td>能力探测</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>DRIVER_FEATURES_PATH</code>（:537）、<code>isDriverFeatureEnabled</code>（:538）</td><td>读 binderfs 的 feature 文件</td></tr><tr><td>线程登记</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>BC_ENTER_LOOPER</code>／<code>BC_REGISTER_LOOPER</code>（:847）</td><td>joinThreadPool 首个动作</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：external/kernel-headers:68a96878f2ce</p></blockquote>
+<p>验证方式：静态源码分析。行号是&quot;怎么找&quot;的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<pre><code class="lang-bash"># 1) 契约头行数
+wc -l external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>640</code>。</p>
+<pre><code class="lang-bash"># 2) ioctl 入口数与起止
+sed -n '308,323p' external/kernel-headers/original/uapi/linux/android/binder.h | grep -c 'BINDER_'</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>14</code>（枚举起始行 :308 之后的 14 个入口），对应事实 2 的&quot;共 14 个入口，从 :309 排到 :322&quot;。</p>
+<pre><code class="lang-bash"># 3) 优先级继承标志位与协议版本
+grep -n 'FLAT_BINDER_FLAG_INHERIT_RT\|FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT\|BINDER_CURRENT_PROTOCOL_VERSION' \
+  external/kernel-headers/original/uapi/linux/android/binder.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>INHERIT_RT</code> 在 <code>:91</code>、<code>SCHED_POLICY_SHIFT</code> 在 <code>:47</code>、协议版本 64 位为 <code>8</code>（:243）、<code>BINDER_IPC_32BIT</code> 分支为 <code>7</code>（:241）。注意 <code>sed -n '308,323p'</code> 这个区间正好覆盖 14 个 ioctl 入口，grep 计数即为 14。</p>
+<pre><code class="lang-bash"># 4) 用户态线程上限与下发路径
+grep -n 'DEFAULT_MAX_BINDER_THREADS\|BINDER_SET_MAX_THREADS\|BINDER_VM_SIZE' \
+  frameworks/native/libs/binder/ProcessState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>:49</code> 为 <code>15</code>、<code>:48</code> 为 <code>BINDER_VM_SIZE</code>、<code>:455</code> 出现 <code>ioctl</code> 与 <code>BINDER_SET_MAX_THREADS</code>。</p>
+<pre><code class="lang-bash"># 5) 线程回归登记
+grep -n 'BC_ENTER_LOOPER\|BC_REGISTER_LOOPER' frameworks/native/libs/binder/IPCThreadState.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>:847</code> 同时出现两者。</p>
+<pre><code class="lang-bash"># 6) 返回与命令协议的名义数量（排除注释行后计数见行）
+sed -n '415,535p' external/kernel-headers/original/uapi/linux/android/binder.h | grep -c 'BR_'
+sed -n '537,637p' external/kernel-headers/original/uapi/linux/android/binder.h | grep -c 'BC_'</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望两个区间都非零；具体计数随注释中出现 <code>BR_</code>／<code>BC_</code> 的次数而偏移，口径为&quot;含注释中出现次数&quot;，不承诺等于 23／22。</p>
+<pre><code class="lang-bash"># 7) bionic 拷贝行数
+wc -l bionic/libc/kernel/uapi/linux/android/binder.h</code></pre>
+<p>期望 <code>247</code>。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：线程数上去了，处理能力就上去了。</strong> 上限只是天花板，扩容的动议在驱动侧。用户态能做的只有把上限抬高，以及收到 <code>BR_SPAWN_LOOPER</code> 后老实登记一个新线程。手工多起几个 <code>joinThreadPool</code> 线程当然有效，但那等于自己绕过驱动的扩容节奏，池内登记数与驱动预期就会不一致。</p>
+<p><strong>误区二：设置了优先级就一定被继承。</strong> 看起来对，其实错。策略位在 node 上，不在调用上。node 的 flags 里 <code>FLAT_BINDER_FLAG_INHERIT_RT</code> 不置位，调用方再高的实时优先级也不会传进去；置位了但事务是 oneway，同样不继承（&quot;for synchronous transactions&quot;）。</p>
+<p><strong>误区三：`BR_TRANSACTION_COMPLETE` 意味着对端处理完了。</strong> 它只表示本端这次写已交给驱动。同步事务要等 <code>BR_REPLY</code>；对端死掉等 <code>BR_DEAD_REPLY</code>；失败等 <code>BR_FAILED_REPLY</code>。把 complete 当 reply，会漏掉对端迟迟不回复的真实耗时。</p>
+<p><strong>误区四：bionic 里那份 `binder.h` 和 kernel-headers 那份可以混着用。</strong> 前者是自动生成拷贝，247 行，注释被裁掉，行号与权威头完全不可对账。查契约语义只认 <code>external/kernel-headers</code> 那份。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>BINDER_VM_SIZE</code> 是给线程用的吗？ <strong>答</strong>：不是。<code>ProcessState.cpp:48</code> 的 <code>BINDER_VM_SIZE ((1 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)</code> 是映射给驱动收发缓冲的地址空间大小，和线程池数量无关。 <strong>追问</strong>：那线程池大小靠什么决定？ <strong>答</strong>：默认值 <code>DEFAULT_MAX_BINDER_THREADS 15</code>（:49），运行期可经 <code>setThreadPoolMaxThreadCount</code> 改；实际起多少线程由 <code>BR_SPAWN_LOOPER</code> 的到达节奏决定，两级都受约束。</p>
+<p><strong>问</strong>：<code>BINDER_FREEZE</code> 和线程池有关系吗？ <strong>答</strong>：有边界关系。冻结进程时事务会挂起，<code>BR_TRANSACTION_PENDING_FROZEN</code>（:520）与 <code>BR_FROZEN_REPLY</code>（:507）是对外可见的两个返回码。但冻结主体机制不在本篇范围。 <strong>追问</strong>：那我现在能拿它判断什么？ <strong>答</strong>：只判断&quot;我这个事务是不是撞上了冻结&quot;，不要在冻结场景下把挂起误读成线程池满。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>线程数不涨、事务排队</td><td><code>grep -n 'DEFAULT_MAX_BINDER_THREADS|BINDER_SET_MAX_THREADS' frameworks/native/libs/binder/ProcessState.cpp</code></td><td>上限常量的值与下发点是否存在</td><td>对比目标进程实际设定的上限是否偏低</td></tr><tr><td>怀疑没登记进线程池</td><td><code>grep -n 'BC_ENTER_LOOPER|BC_REGISTER_LOOPER' frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>登记的写入点位置</td><td>确认线程走的是 <code>joinThreadPool</code> 而非自建循环</td></tr><tr><td>实时优先级没传下去</td><td><code>grep -n 'FLAT_BINDER_FLAG_INHERIT_RT|FLAT_BINDER_FLAG_SCHED_POLICY' external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>位定义与&quot;仅同步&quot;注释</td><td>核目标 node 的 flags 是否置了继承位</td></tr><tr><td>能力探测读不到</td><td><code>grep -n 'DRIVER_FEATURES_PATH|isDriverFeatureEnabled' frameworks/native/libs/binder/ProcessState.cpp</code></td><td>binderfs feature 路径前缀</td><td>核挂载点是否提供了对应 feature 文件</td></tr><tr><td>协议版本对不上</td><td><code>grep -n 'BINDER_CURRENT_PROTOCOL_VERSION' external/kernel-headers/original/uapi/linux/android/binder.h</code></td><td>64 位为 8、<code>BINDER_IPC_32BIT</code> 为 7</td><td>核双方对 <code>BINDER_VERSION</code> 的处理分支</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：事务用户态编组与 <code>Parcel</code> 布局（<code>AND-P2-101</code>、<code>AND-P3-302</code>）；oneway 缓冲限额与洪水判定（<code>AND-P5-202</code>）；进程冻结与杀进程路径（P5 生命周期相关篇）；SELinux 对 <code>BINDER_SET_CONTEXT_MGR_EXT</code> 的判定（权限判定篇）。</li><li><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>、<code>AND-P2-101</code>。</li><li><strong>本篇后继</strong>：<code>AND-P5-202</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>ioctl 入口 14 个（源码枚举，<code>binder.h</code> :309–:322）；口径为 android17-release 静态统计。</li><li>命令协议 22 个、返回协议 24 个（源码枚举，:537-637 与 :415-535）；口径同上。</li><li>协议版本号在 64 位平台上为 8、<code>BINDER_IPC_32BIT</code> 为 7（源码宏，:243／:241）。</li><li>用户态默认线程上限 <code>15</code>（源码常量，<code>ProcessState.cpp:49</code>）；这是默认值，不是契约上限，实际上限由调用 <code>BINDER_SET_MAX_THREADS</code> 传入。</li><li>驱动侧对同一 node 允许的并发同步事务数、以及继承实时优先级时的具体提升时机，暂无实测，列为待补——<strong>驱动实现不在本树核验范围</strong>。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树（android17-release）</td><td>实测状态：契约头 640 行、ioctl 14 个入口、返回协议 24 个、命令协议 22 个、<code>BINDER_CURRENT_PROTOCOL_VERSION</code> 64 位为 8</td><td>本篇全部行号与数量以此为准</td></tr><tr><td>引入 <code>BINDER_FREEZE</code>／<code>BINDER_GET_FROZEN_INFO</code> 之前</td><td>冻结相关返回码（<code>BR_FROZEN_REPLY</code>、<code>BR_TRANSACTION_PENDING_FROZEN</code>、<code>BR_FROZEN_BINDER</code>）不存在于枚举中</td><td>老内核上&quot;事务挂起&quot;无法归因到冻结，只能按线程池或死锁方向排查</td></tr><tr><td>引入 binderfs 之前</td><td><code>DRIVER_FEATURES_PATH</code> 指向的 binderfs feature 目录不可用</td><td><code>isDriverFeatureEnabled</code> 的能力探测路径不可达，oneway 洪水检测等能力无从判断</td></tr></tbody></table>
+<p>驱动实现差异（同一协议号在不同内核版本的处理细节）不在本树核验范围，本篇不断言。</p>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>binder</code>、<code>binderfs</code>；kernel.org 站内检索 <code>Android Binder IPC</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>binder uapi</code>、<code>BINDER_SET_MAX_THREADS</code>、<code>FLAT_BINDER_FLAG_INHERIT_RT</code>。</li><li>本仓关键路径：</li><ul class="nested"><li><code>external/kernel-headers/original/uapi/linux/android/binder.h</code></li><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></li></ul><li>承接篇：<code>AND-P5-202</code>（oneway 与缓冲限制）；<code>AND-P2-101</code>（事务语义与用户态编组）。</li></ul>
+</article>
+<footer>android-100 · AND-P5-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

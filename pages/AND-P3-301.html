@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JNI 桥：注册、查找方法、临界区与异常</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>JNI 桥：注册、查找方法、临界区与异常</h1>
+<div class="kv"><span>ID：AND-P3-301</span><span>卷：P3</span><span>章：3.3</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：art/runtime/jni/java_vm_ext.cc ；art/runtime/jni/jni_internal.cc ；art/runtime/jni/check_jni.cc ；art/runtime/jni/indirect_reference_table.h ；art/runtime/native/dalvik_system_ZygoteHooks.cc ；frameworks/base/core/jni/AndroidRuntime.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>JNI 不是&quot;直接调用&quot;——每个 JNI 函数都是 <code>JNINativeInterface</code> 结构里的一个函数指针，Java 侧调用 native、native 侧反查 Java 类与方法，全部经由这张表。方法查找失败最常见的原因不是名字写错，而是 <code>FindClass</code> 用错了类加载器：它取的是<strong>调用者 native 方法所属 library 的加载器</strong>，不是&quot;当前线程上下文&quot;的加载器。引用的生命周期由 indirect reference table 管理，局部引用不释放会撑满表；<code>CheckJNI</code> 只是把同一张表换成包装版本，先校验再转发。临界区（<code>GetPrimitiveArrayCritical</code> 等）换来的是不阻塞的访问窗口，代价是这段时间里几乎不能调用别的 JNI 函数。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 D 只读 §1/§4.1/§9｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P3-G01</code>（P3 卷导读），本篇默认你已知道 ART 运行时有解释器、编译器与运行时三块，不再解释基本名词。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>art/runtime/jni/java_vm_ext.cc</code></li><li><code>art/runtime/jni/jni_internal.cc</code></li><li><code>art/runtime/jni/check_jni.cc</code></li><li><code>art/runtime/jni/indirect_reference_table.h</code></li><li><code>art/runtime/native/dalvik_system_ZygoteHooks.cc</code></li><li><code>frameworks/base/core/jni/AndroidRuntime.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>典型现场：native 代码里 <code>FindClass(&quot;com/example/Foo&quot;)</code> 在某台设备上返回空，日志里还有一条 <code>Call to JNI FindClass with dots in name</code>。另一头，长时间跑循环的 native 线程在第几千次迭代后崩在 <code>NewLocalRef</code> 附近，栈里只有一串地址。还有人打开 <code>-Xcheck:jni</code> 复现失败，关掉就&quot;好了&quot;——那不是 bug 消失，是校验不做了。</p>
+<p>这些现象分别落在三个点上：类加载器语义、引用表的容量与生命周期、校验层的开关。三者都在同一张 <code>JNINativeInterface</code> 函数表上，所以放在一起讲。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：<strong>函数表</strong>（<code>JNINativeInterface</code>，JNI 函数的唯一入口）、<strong>注册</strong>（把 Java 声明的 native 方法与 C++ 函数指针对上）、<strong>引用表</strong>（indirect reference table，管局部/全局/弱全局引用的槽位）、<strong>临界区</strong>（短暂挂起 GC 相关约束以换取裸指针）。</p>
+<p>图 1：JNI 桥的三层结构</p>
+<pre><code>Java 侧 native 声明
+      |
+      v
+[JNINativeInterface 函数表]  &lt;- CheckJNI 时换成包装表
+      |
+      +--&gt; RegisterNatives / FindClass / FindMethodID
+      |
+      +--&gt; indirect reference table (局部/全局/弱全局)
+      |
+      +--&gt; Get*Critical (临界区)</code></pre>
+<p>函数表是唯一入口，注册、查找、引用、临界区都是表里的不同槽位。<code>CheckJNI</code> 不改变调用方写法，只把表指针换成包装实现。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>函数表与实例选择。</strong> 基础实现在 <code>art/runtime/jni/jni_internal.cc:3226</code> 的 <code>gJniNativeInterface</code>，它是 <code>JNINativeInterface</code> 结构的一份静态实例。<code>GetJniNativeInterface</code>（同文件 <code>:3463</code>）按 <code>JniIdType</code> 选择返回哪一个实例——也就是说&quot;JNI 函数表&quot;在运行时可以有多个版本，调用方拿到的是哪一个由 ID 类型决定。虚拟机创建入口是 <code>JNI_CreateJavaVM</code>（<code>art/runtime/jni/java_vm_ext.cc:1237</code>，<code>extern &quot;C&quot;</code>），宿主进程启动时由此把运行时拉起来。</p>
+<p><strong>注册与查找。</strong> 注册走 <code>RegisterNatives</code>，但它的 CheckJNI 版本在 <code>art/runtime/jni/check_jni.cc:1836</code>，先校验方法签名与可见性，再转基础实现。查找侧的关键函数集中在下表：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>FindMethodID</code></td><td>由类 + 名字 + 签名查方法 ID</td><td><code>jni_internal.cc:379</code></td></tr><tr><td><code>FindFieldID</code></td><td>由类 + 名字 + 签名查字段 ID</td><td><code>jni_internal.cc:424</code></td></tr><tr><td><code>FindMethodJNI</code></td><td>方法查找主流程，内部调 <code>c-&gt;FindClassMethod</code></td><td><code>jni_internal.cc:485</code></td></tr><tr><td><code>GetClassLoader</code></td><td>取当前正在执行的 native 方法其 declaring class 的类加载器</td><td><code>jni_internal.cc:393</code></td></tr><tr><td><code>GetCheckJniNativeInterface</code></td><td>返回 CheckJNI 包装后的函数表</td><td><code>check_jni.cc:4141</code></td></tr><tr><td><code>NewGlobalRef</code></td><td>CheckJNI 版先校验再转基础实现</td><td><code>check_jni.cc:2139</code></td></tr></tbody></table>
+<p><code>GetClassLoader</code> 是理解 <code>FindClass</code> 的钥匙。<code>FindClass</code> 的类加载器不是从线程上下文取的，而是从&quot;当前正在执行的 native 方法属于哪个 library&quot;推出来的。在系统启动阶段注册的 library 里调用 <code>FindClass</code>，拿到的就是那条加载链的视野，而不是应用自己的类。</p>
+<p>命名还会触发告警：名字里带点会打 <code>Call to JNI FindClass with dots in name</code>（<code>jni_internal.cc:356</code>）。这条日志几乎总是&quot;返回空&quot;的伴生现象，不是独立故障。</p>
+<p><strong>引用表。</strong> 局部、全局、弱全局引用统一由 indirect reference table 管理（<code>art/runtime/jni/indirect_reference_table.h</code>）。弱全局另有清理路径 <code>SweepJniWeakGlobals</code>（同文件 <code>:254</code>）。局部引用不会因为函数返回&quot;自动&quot;回收——JNI 只保证在 native 方法返回 Java 侧时清理该帧内的局部引用；在 native 自己起的线程里，必须手动 <code>DeleteLocalRef</code> 或 <code>PushLocalFrame</code>/<code>PopLocalFrame</code>。</p>
+<p><strong>临界区与异常。</strong> 四个临界区函数在函数表里各占一个槽位：<code>GetPrimitiveArrayCritical</code>/<code>ReleasePrimitiveArrayCritical</code>（<code>jni_internal.cc:3449-3450</code>）、<code>GetStringCritical</code>/<code>ReleaseStringCritical</code>（<code>:3451-3452</code>）。名字里的 Critical 指的是&quot;这段窗口内不要做别的事&quot;：拿到裸指针后，任何可能触发 GC 或再次进入同一临界区的 JNI 调用都可能导致阻塞或未定义行为。异常方面，JNI 函数本身不抛 C++ 异常，异常挂起在运行时，native 侧必须显式检查并在返回 Java 前处理干净。</p>
+<p><strong>CheckJNI 的开关。</strong> 启动时用 <code>-Xcheck:jni</code> 选项（<code>art/runtime/parsed_options.cc:128</code>）。也支持迟启用：<code>EnableDebugFeatures</code> 处理 <code>DEBUG_ENABLE_CHECKJNI</code> 位，然后调 <code>vm-&gt;SetCheckJniEnabled(true)</code>（<code>art/runtime/native/dalvik_system_ZygoteHooks.cc:164-176</code>）。迟启用意味着一个已在运行的进程可以中途换成包装表——预算开销前一定要确认当前进程处于哪种状态。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>以系统进程注册 Binder 的 native 方法为样例：<code>frameworks/base/core/jni/AndroidRuntime.cpp:657</code> 的 <code>AndroidRuntime::startVm</code> 负责拼虚拟机参数，<code>:1208</code> 调 <code>JNI_CreateJavaVM</code>；之后 <code>:1582</code> 用 <code>REG_JNI</code> 宏把 <code>register_android_os_Binder</code> 登记进启动流程，批量 <code>RegisterNatives</code> 的实现在 <code>frameworks/base/core/jni/android_util_Binder.cpp:1930</code>（<code>AndroidRuntime.cpp:60</code> 只是它的 extern 声明）。</p>
+<p>顺序很重要：<code>startVm</code> 先建虚拟机，之后才轮到各个 <code>register_*</code> 函数批量注册。在这些系统 library 里调 <code>FindClass</code> 时，<code>GetClassLoader</code>（<code>jni_internal.cc:393</code>）给出的是这条 library 所属的加载器。如果把一段系统侧 <code>FindClass</code> 代码复制进应用自己的 native library 里，逻辑看似一样，实际类加载器视野已经换了，于是同一个类名一边成功一边返回空。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P3-G01</code>：卷导读，给出 ART 运行时整体结构，本篇只讲桥。</li><li><code>AND-P3-201</code>：ART 类加载语义归它，本篇只到&quot;<code>FindClass</code> 用哪个加载器&quot;为止。</li><li><code>AND-P3-302</code>：<code>libbinder</code> 的 Bn/Bp 对应、<code>libbinder</code> 内部实现归它；本篇只用 <code>register_android_os_Binder</code> 当注册样例，不展开 Binder。</li><li>后继篇：JNI 之上的崩溃栈与 tombstone 分析。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>函数表与查找</td><td><code>art/runtime/jni/jni_internal.cc</code></td><td><code>gJniNativeInterface</code>、<code>GetJniNativeInterface</code>、<code>FindMethodID</code></td><td>基础实现，全程主战场</td></tr><tr><td>虚拟机创建</td><td><code>art/runtime/jni/java_vm_ext.cc</code></td><td><code>JNI_CreateJavaVM</code></td><td><code>extern &quot;C&quot;</code> 入口</td></tr><tr><td>校验包装层</td><td><code>art/runtime/jni/check_jni.cc</code></td><td><code>RegisterNatives</code>、<code>NewGlobalRef</code>、<code>GetCheckJniNativeInterface</code></td><td>先校验再转发</td></tr><tr><td>引用表</td><td><code>art/runtime/jni/indirect_reference_table.h</code></td><td><code>SweepJniWeakGlobals</code></td><td>局部/全局/弱全局槽位</td></tr><tr><td>迟启用开关</td><td><code>art/runtime/native/dalvik_system_ZygoteHooks.cc</code></td><td><code>EnableDebugFeatures</code></td><td>处理 <code>DEBUG_ENABLE_CHECKJNI</code> 位</td></tr><tr><td>宿主启动与注册样例</td><td><code>frameworks/base/core/jni/AndroidRuntime.cpp</code>（<code>startVm</code>）；<code>android_util_Binder.cpp:1930</code>（批量注册实现）</td><td><code>startVm</code>、<code>register_android_os_Binder</code></td><td>参数拼接与批量注册</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：art:b753cf97923c</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C art rev-parse HEAD</code></pre>
+<p>期望输出 <code>b753cf97923c</code>，对上本篇的行号口径。</p>
+<pre><code class="lang-bash">grep -n &quot;gJniNativeInterface\|GetJniNativeInterface&quot; art/runtime/jni/jni_internal.cc | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>3226</code> 与 <code>3463</code> 两个行号附近的定义与选择逻辑，对应 §4.2 的函数表事实。</p>
+<pre><code class="lang-bash">grep -n &quot;dots in name&quot; art/runtime/jni/jni_internal.cc</code></pre>
+<p>期望定位到 <code>356</code> 附近的告警字符串，对应 §4.2 的命名告警。</p>
+<pre><code class="lang-bash">grep -n &quot;FindMethodID\|FindFieldID\|FindMethodJNI\|GetClassLoader&quot; art/runtime/jni/jni_internal.cc | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>379</code>、<code>424</code>、<code>485</code>、<code>393</code>，对上 §4.2 的查找表。</p>
+<pre><code class="lang-bash">sed -n '3440,3460p' art/runtime/jni/jni_internal.cc</code></pre>
+<p>期望看到 <code>GetPrimitiveArrayCritical</code>/<code>ReleasePrimitiveArrayCritical</code> 与 <code>GetStringCritical</code>/<code>ReleaseStringCritical</code> 的槽位，对应 §4.2 的临界区事实。</p>
+<pre><code class="lang-bash">grep -n &quot;DEBUG_ENABLE_CHECKJNI\|SetCheckJniEnabled&quot; art/runtime/native/dalvik_system_ZygoteHooks.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望落在 <code>164-176</code> 区间，对应 §4.2 的迟启用路径。</p>
+<pre><code class="lang-bash">grep -n &quot;JNI_CreateJavaVM&quot; frameworks/base/core/jni/AndroidRuntime.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>1208</code>，确认宿主侧调用点。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>&quot;`FindClass` 找的是当前线程上下文的类加载器。&quot;</strong> 不是。实现取的是当前正在执行的 native 方法其 declaring class 的类加载器（<code>GetClassLoader</code>，<code>jni_internal.cc:393</code>：经 <code>GetCurrentMethod()-&gt;GetDeclaringClass()-&gt;GetClassLoader()</code> 取到，<code>Runtime.nativeLoad</code> 场景用 override）。同一个类名在不同 declaring class 下结果可以不同。</p>
+<p><strong>&quot;局部引用会随作用域结束自动释放。&quot;</strong> 只在&quot;native 方法返回到 Java 侧&quot;这个边界上才清理该帧的局部引用。native 自建线程、长循环里必须显式删除，否则表持续增长直到溢出。</p>
+<p><strong>&quot;开了 `-Xcheck:jni` 会更慢，所以上线版本一定没开。&quot;</strong> 不一定。除了启动参数 <code>-Xcheck:jni</code>（<code>art/runtime/parsed_options.cc:128</code>），还有迟启用路径处理 <code>DEBUG_ENABLE_CHECKJNI</code> 位（<code>dalvik_system_ZygoteHooks.cc:164-176</code>）。看着&quot;关掉就好了&quot;的 bug，往往是被校验层抓住了。</p>
+<p><strong>&quot;`GetPrimitiveArrayCritical` 拿到了裸指针，随便用。&quot;</strong> 这段窗口内几乎不能调别的 JNI 函数，也不能长时间持有。它换的是访问窗口，不是使用自由度。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：日志里有 <code>Call to JNI FindClass with dots in name</code>，改成分号斜杠就一定能修好吗？</p>
+<p><strong>答</strong>：不一定。这条告警说明名字格式不对，但返回空也可能是加载器视野问题。改完格式后如果仍返回空，就去看这段代码属于哪个 library。</p>
+<p><strong>追问</strong>：怎么快速判断？</p>
+<p><strong>答</strong>：用 §6 的命令确认当前行号没漂，然后在调用点上方加一条 <code>FindClass</code> 前的类名与所属 library 记录，对照 <code>GetClassLoader</code> 的取法推断。</p>
+<p><strong>问</strong>：<code>RegisterNatives</code> 返回负数，但签名看着全对。</p>
+<p><strong>答</strong>：先确认签名字符串里的类型描述符（尤其引用类型的分号与斜杠）与 Java 声明逐字符一致；CheckJNI 版会在转发前校验，错误通常在返回值之外的日志里。</p>
+<p><strong>追问</strong>：CheckJNI 版本在哪？</p>
+<p><strong>答</strong>：<code>art/runtime/jni/check_jni.cc:1836</code>；整张包装表由 <code>GetCheckJniNativeInterface</code>（<code>:4141</code>）给出。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td><code>FindClass</code> 返回空</td><td><code>grep -n &quot;GetClassLoader&quot; art/runtime/jni/jni_internal.cc</code></td><td>加载器取自 native 方法的 declaring class</td><td>核对调用点 declaring class 与目标类的加载链</td></tr><tr><td>日志出现 dots in name</td><td><code>grep -n &quot;dots in name&quot; art/runtime/jni/jni_internal.cc</code></td><td>告警字符串位置</td><td>把类名改成斜杠分隔</td></tr><tr><td>长循环后崩在引用操作</td><td><code>grep -n &quot;SweepJniWeakGlobals&quot; art/runtime/jni/indirect_reference_table.h</code></td><td>引用表清理入口</td><td>检查循环内是否缺 <code>DeleteLocalRef</code></td></tr><tr><td>调试开关下才崩</td><td><code>grep -n &quot;DEBUG_ENABLE_CHECKJNI&quot; art/runtime/native/dalvik_system_ZygoteHooks.cc</code></td><td>迟启用位</td><td>确认流程是否走了 <code>SetCheckJniEnabled(true)</code></td></tr><tr><td>临界区内卡死</td><td><code>sed -n '3440,3460p' art/runtime/jni/jni_internal.cc</code></td><td>四个临界区槽位</td><td>检查窗口内是否混入了分配或再次进入临界区的调用</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：ART 类加载语义（<code>AND-P3-201</code>）；<code>libbinder</code> 的 Bn/Bp 对应与实现（<code>AND-P3-302</code>）；Java 侧 native 声明的语法与编译集成。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P3-G01</code>。</p>
+<p><strong>本篇后继</strong>：JNI 之上的崩溃栈与 tombstone 分析；<code>AND-P3-302</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>函数表槽位数量：以 <code>JNINativeInterface</code> 结构为准，本篇不断言具体数值（来源：源码结构体，待逐字段核对）。</li><li>临界区函数数量：4 个（<code>jni_internal.cc:3449-3452</code>，源码常量）。</li><li>局部引用表容量：暂无实测，列为待补（口径为运行时配置，非本篇源码事实）。</li><li><code>-Xcheck:jni</code> 的启动参数文本：<code>-Xcheck:jni</code>（来源：<code>art/runtime/parsed_options.cc:128</code>）。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 <code>android17-release</code></td><td><code>FindClass</code> 点号命名仍打告警 <code>Call to JNI FindClass with dots in name</code>（<code>jni_internal.cc:356</code>）；临界区为 4 个槽位（<code>:3449-3452</code>）；迟启用走 <code>DEBUG_ENABLE_CHECKJNI</code> 位</td><td>本篇全部行号与符号以此为准</td></tr><tr><td>其他近版本</td><td>启动参数名与迟启用路径的表述可能不同</td><td>行号必然漂移，按符号 grep 重锚后再对照 §6</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>jni</code>；developer.android.com 站内检索 <code>JNI tips</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>jni_internal</code>、<code>check_jni</code>。</li><li>本仓关键路径：<code>art/runtime/jni/jni_internal.cc</code>、<code>art/runtime/jni/check_jni.cc</code>、<code>art/runtime/jni/indirect_reference_table.h</code>。</li><li>承接篇：<code>AND-P3-201</code>、<code>AND-P3-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P3-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

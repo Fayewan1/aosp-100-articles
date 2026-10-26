@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：跨过 Binder 之前</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：跨过 Binder 之前</h1>
+<div class="kv"><span>ID：AND-P2-G01</span><span>卷：P2</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-15</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/BpBinder.cpp ；frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java ；frameworks/base/core/java/com/android/internal/os/Zygote.java ；frameworks/base/core/java/android/os/Looper.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>P2 卷只解决一个问题：一次请求如何跨过 Binder，从应用进程到达 <code>system_server</code>。全书 108 篇 = 96 篇正文（12 卷 × 8 篇）+ 12 篇卷导读，本卷是第 2 卷，共 9 篇。读完本篇你能排出本卷的阅读顺序，知道哪两篇是三审重点，也清楚哪些内容被推到 P3、P5、P8、P9。硬前置只有一篇：AND-P1-102 组件生命周期——先有客户端语义，再谈跨进程。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A（只想要地图）只读 §1/§4.1/§7｜路径 B（按卷推进）全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P1-102（组件生命周期）。客户端语义是跨进程动作的被调用方，缺了它，101 讲不清「谁在请求」。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/libs/binder/BpBinder.cpp</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></li><li><code>frameworks/base/core/java/android/os/Looper.java</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>／<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>很多人能背出 Binder 是 C/S 结构，却答不上：从应用侧调一个远程接口，到 <code>system_server</code> 里真正执行，中间经过几层、每层叫什么、在哪一层可能卡住。另一个常见困惑是读法——必须按顺序啃，还是可以跳。本篇给地图。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>本卷三个反复出现的概念：Java 框架层（客户端拿到的接口在这里）、系统服务（真正干活的实现，多数住在 <code>system_server</code>）、Binder（两者之间唯一的通行方式）。请求方向永远是单向纵链：应用进程 → Binder → <code>system_server</code>。</p>
+<p>图 1：本卷纵链 A 主干</p>
+<pre><code>  应用进程
+     |
+  Binder 通道
+     |
+  system_server
+     |
+  AMS / WMS / PMS</code></pre>
+<p>P2 讲中间与右侧：Binder 怎么走、服务怎么接、接住之后怎么干。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇分工如下。编号规则是 AND-P{卷}-{序号}，<code>G</code> 表示卷导读。</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>说明</th></tr></thead><tbody><tr><td>AND-P2-G01</td><td>卷导读</td><td>本篇：地图与读法</td></tr><tr><td>AND-P2-101</td><td>Binder 事务的一次完整往返</td><td>锚点篇，★★★★</td></tr><tr><td>AND-P2-102</td><td>oneway、死亡通知与失败形状</td><td>★★★★</td></tr><tr><td>AND-P2-201</td><td>AMS 与 Activity 启动</td><td>锚点篇，★★★★</td></tr><tr><td>AND-P2-202</td><td>WMS 与窗口层级</td><td>★★★★</td></tr><tr><td>AND-P2-203</td><td>PMS、InputManager 与其余系统服务</td><td>B 档横切，★★★</td></tr><tr><td>AND-P2-301</td><td>框架并发模型</td><td>★★★</td></tr><tr><td>AND-P2-302</td><td>权限校验框架</td><td>B 档横切，★★★</td></tr><tr><td>AND-P2-401</td><td>进程模型</td><td>★★★，出卷收口</td></tr></tbody></table>
+<p>依赖顺序：G01 → 101 →（102｜201→202｜203｜301｜302）→ 401。101 之后 102 与 201 可分头进；202 依赖 201，不能先读；401 收口全卷，同时是出卷衔接 P8 的桥。</p>
+<p>本卷术语在导读处锁定，后文不再重定义：Binder、BpBinder/BBinder、IBinder、Parcel、AIDL、ServiceManager、oneway、死亡通知（linkToDeath）、binder 线程池、Zygote 进程（Zygote）、写时复制（COW）、adj/oom_score_adj、cgroup、system_server、AMS/ATMS、ActivityStarter、PMS、WMS、Token、InputManager、输入分发、Handler/Looper/MessageQueue、checkPermission、AppOps。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>查「点击图标到窗口出现」这条链落在哪几篇：201 管 AMS 与 Activity 启动，202 管 WMS 与窗口层级，203 管其余系统服务的横切面；101/102 提供前置——事务怎么往返、失败是什么形状；301 说明这条链跑在什么线程与消息队列上；401 说明进程怎么起来、怎么被分级。卷外部分：Binder 的 Native 侧归 P3-302，驱动归 P5-201/202，图形后端归 P6-102/P6-302，进程创建起点归 P8-301，权限体系归 P9-201。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>前置只有 AND-P1-102。后续衔接五处：101/102 → P3-302 与 P5-201/202；202 → P6-102 与 P6-302；401 → P8-301；302 → P9-201。边界声明：本篇不碰 Binder 事务细节（归 101）、不碰单服务深链（归 201/202）、不碰驱动（归 P5）、不碰权限模型（归 P9-201）。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>Binder 代理侧</td><td><code>frameworks/native/libs/binder/BpBinder.cpp</code></td><td>BpBinder</td><td>101/102 的事务与失败形状落点</td></tr><tr><td>活动与任务管理</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></td><td>ActivityTaskManagerService</td><td>201 的服务侧深链</td></tr><tr><td>进程孵化</td><td><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td>Zygote</td><td>401 与 P8-301 的衔接点</td></tr><tr><td>消息循环</td><td><code>frameworks/base/core/java/android/os/Looper.java</code></td><td>Looper</td><td>301 的并发模型基座</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base log -1 --format=%H
+git -C frameworks/native log -1 --format=%H</code></pre>
+<p>第一行期望 <code>94b4c163b7df</code> 开头、第二行 <code>ae266dcb70</code> 开头，对上 §6 锚点与 frameworks/native 的行号基准。</p>
+<pre><code class="lang-bash">ls frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java \
+   frameworks/base/core/java/com/android/internal/os/Zygote.java \
+   frameworks/base/core/java/android/os/Looper.java \
+   frameworks/native/libs/binder/BpBinder.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>四条路径全部存在，对 §5 表格。</p>
+<pre><code class="lang-bash">grep -rn &quot;linkToDeath&quot; frameworks/native/libs/binder --include=BpBinder.cpp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望能看到 <code>linkToDeath</code> 符号，对上 §4.2 的术语锁定。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：读完 101 就算懂 Binder 了。</strong> 101 只讲一次完整往返，102 讲 oneway、死亡通知与失败形状——没有 102，你不知道调用失败长什么样。</p>
+<p><strong>误区二：本卷可以直接跳读 202。</strong> 202 依赖 201 的启动链，先读 202 会缺上下文。203/301/302 才相对独立。</p>
+<p><strong>误区三：Binder 的全部内容都在 P2。</strong> 看起来对，其实是错的。P2 只讲 Java 框架层的跨进程这一段；Native 侧归 P3-302，驱动归 P5-201/202。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：本卷必须按顺序读吗？ <strong>答</strong>：主干按 G01 → 101 → 201 → 401 走，中间可插读 102/203/301/302。 <strong>追问</strong>：插读会不会断链？ <strong>答</strong>：不会。这些篇都是横切视角，不依赖前一篇的局部结论。</p>
+<p><strong>问</strong>：为什么 401 既是收口又是出卷桥？ <strong>答</strong>：全卷的服务与线程都落在进程上，所以收口；进程起点在 Zygote，归 P8-301，所以出桥。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>找不到本篇提到的文件</td><td><code>ls frameworks/base/core/java/android/os/Looper.java</code></td><td>路径是否存在</td><td>不在则确认源码树版本</td></tr><tr><td>提交号对不上</td><td><code>git -C frameworks/base log -1 --format=%H</code></td><td>是否 <code>94b4c163b7df</code></td><td>不符则按 §9 口径记录差异</td></tr><tr><td>术语在后续篇写法不同</td><td><code>grep -rn &quot;linkToDeath&quot; frameworks/native/libs/binder --include=BpBinder.cpp</code></td><td>符号是否存在</td><td>按 §4.2 锁定写法统一</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Binder 事务细节（101）、单服务深链（201/202）、驱动（P5）、权限模型（P9-201）。</li><li><strong>本篇前置依赖</strong>：AND-P1-102。</li><li><strong>本篇后继</strong>：AND-P2-101、AND-P2-201、AND-P2-203、AND-P2-301、AND-P2-302、AND-P2-401。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>全书 108 篇 = 96 正文 + 12 导读；本卷 9 篇 = 1 导读 + 8 正文（口径：《选题规划》）。</li><li>本卷难度分布：101/102/201/202 为 ★★★★，203/301/302/401 为 ★★★，导读 ★★★（口径：卷纲）。</li><li>验证策略：主体 V1 静态源码分析；101/201/401 可叠加 V3 现场观测（口径：卷纲）。</li><li>三审重点锚点篇为 101 与 201（口径：卷纲 §五）。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td>行号基准 frameworks/base HEAD <code>94b4c163b7df</code>（2026-05-21）、frameworks/native HEAD <code>ae266dcb70</code>（2026-04-23）</td><td>本篇所有路径与锚点按此核实</td></tr><tr><td>其他近版本</td><td>文件名与包路径大体稳定</td><td>行号会漂，按符号 grep 重锚即可</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>Binder</code> <code>AIDL</code> <code>system services</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>BpBinder</code>、<code>ActivityTaskManagerService</code>。</li><li>本仓关键路径：<code>frameworks/native/libs/binder/BpBinder.cpp</code>、<code>frameworks/base/core/java/android/os/Looper.java</code>、<code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code>。</li><li>承接篇：AND-P2-101、AND-P2-201。</li></ul>
+</article>
+<footer>android-100 · AND-P2-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

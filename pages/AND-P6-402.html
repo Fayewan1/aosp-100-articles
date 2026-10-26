@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vulkan 在 Android 的落地与差异</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Vulkan 在 Android 的落地与差异</h1>
+<div class="kv"><span>ID：AND-P6-402</span><span>卷：P6</span><span>章：6.4</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/vulkan/libvulkan/api.cpp ；frameworks/native/vulkan/libvulkan/driver.cpp ；frameworks/native/vulkan/libvulkan/swapchain.cpp ；frameworks/native/vulkan/nulldrv/null_driver.cpp ；frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp ；external/skia/include/core/SkMilestone.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 上的 Vulkan 不是「桌面 Vulkan 编译过来跑」，而是 libvulkan loader 把驱动当作可替换插件、按属性在两套加载路径里选一个，再把 <code>VkSurfaceKHR</code> 桥接到 SurfaceFlinger 能消费的 BufferQueue 上。桌面 loader 假设驱动是 <code>.so</code> 由 <code>libvulkan.so.1</code> 按 ICD 清单枚举；Android loader 直接读属性走 APEX 或 updatable gfx driver，没有 ICD JSON 那一层。swapchain 在 Android 上不是「窗口系统的可选后端」，<code>vkCreateSwapchainKHR</code> 必须拿到一个 <code>ANativeWindow</code> 句柄，否则创建失败。HWUI 有一条走 <code>VkPipeline</code> 的渲染路径，它与 Skia 的 GL 路径并列存在。没有驱动时还有 <code>nulldrv</code> 兜底，让 API 调用不崩、画面不出。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P6-101</code>，图形栈全景给出 App → Surface → SurfaceFlinger → HWC 的整链，本篇只在其上切出 Vulkan 这一段。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/native/vulkan/libvulkan/api.cpp</code></li><li><code>frameworks/native/vulkan/libvulkan/driver.cpp</code></li><li><code>frameworks/native/vulkan/libvulkan/swapchain.cpp</code></li><li><code>frameworks/native/vulkan/nulldrv/null_driver.cpp</code></li><li><code>frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp</code></li><li><code>external/skia/include/core/SkMilestone.h</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你写了一个 Vulkan 应用，桌面上好好的，搬到 Android 上第一件事就是 <code>vkCreateInstance</code> 之后 <code>vkCreateSwapchainKHR</code> 直接返回 <code>VK_ERROR_SURFACE_LOST_KHR</code>，或者 <code>vkGetPhysicalDeviceSurfaceCapabilitiesKHR</code> 返回的尺寸和 Surface 实际尺寸对不上。第二个困惑是：<code>adb shell</code> 里 <code>ro.vulkan.apex</code> 是什么、为什么换个设备值就不一样。第三个困惑是 HWUI 明明有 GL 后端，为什么还会有 <code>SkiaVulkanPipeline</code>。这三件事都不在 Vulkan 规范里，全是 Android 落地时加的那层。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：loader（应用链接的 <code>libvulkan</code>）、驱动（<code>builtin</code> 与 <code>updated</code> 两条加载路径）、swapchain 桥（把 <code>VkSwapchainKHR</code> 和 <code>ANativeWindow</code> 互转）、HWUI 后端（<code>SkiaVulkanPipeline</code>）。</p>
+<p>图 1：Vulkan 在 Android 的加载与桥接层次</p>
+<pre><code>应用
+  |  vkXxx
+libvulkan (loader: api.cpp)
+  |  GetInstanceProcAddr 链尾 = driver
+  |--- LoadBuiltinDriver  &lt;- ro.vulkan.apex
+  |--- LoadUpdatedDriver   &lt;- updatable gfx driver
+  v
+驱动 .so
+  |
+  +--&gt; swapchain.cpp &lt;--&gt; ANativeWindow / BufferQueue
+  |
+  +--&gt; SkiaVulkanPipeline (HWUI 侧)</code></pre>
+<p>loader 的职责是「把调用转发到驱动」，但它在 <code>create_instance</code> 时要把自己的装载数据注入进去，后面 swapchain 才知道用哪个 loader 的 <code>ANativeWindow</code> 包装。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>loader 的分层。</strong> <code>api.cpp</code> 共 1545 行，<code>vkGetInstanceProcAddr</code> 的最终落点是 <code>get_instance_proc_addr_ = driver::GetInstanceProcAddr</code>（:597），也就是 loader 链的最后一段直接指向驱动表，loader 本身不实现图形命令。实例创建由 <code>PFN_vkCreateInstance create_instance</code> 承接（:854-856）。装载数据注入有两个点：<code>SetInstanceLoaderData</code>（:509）与 <code>SetDeviceLoaderData</code>（:511），swapchain 与内存相关扩展靠这两个函数拿到 loader 私有上下文。<code>vkEnumerateInstanceLayerProperties</code> 的实现注释在 :1315，原文口径是：所有 explicit 层都会返回给应用；为兼容 LunarG loader，所有 implicit 层也同样返回；只有 platform 与 OEM 层不返回——它们在应用不知情的前提下被启用。所以 layer 枚举并非整体留空，留空的只是 platform/OEM 那一类。</p>
+<p><strong>驱动加载双路径。</strong> <code>driver.cpp</code> 共 2102 行，路径选择在 <code>Hal::Open()</code>（:241），底层加载器是 <code>LoadDriver</code>（:153），两条路径如下：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>LoadDriver</code></td><td>两条路径共用的底层加载器（:153-200）</td><td><code>driver.cpp:153</code></td></tr><tr><td><code>LoadBuiltinDriver</code></td><td>从 APEX 加载 builtin 驱动，读 <code>ro.vulkan.apex</code></td><td><code>driver.cpp:202</code>，属性读取 :208-211</td></tr><tr><td><code>LoadUpdatedDriver</code></td><td>走 updatable gfx driver 加载可更新驱动</td><td><code>driver.cpp:224</code>，区间 :224-233</td></tr></tbody></table>
+<p><code>driver.h</code> 共 337 行，声明了这两条路径共用的驱动句柄与函数表结构。两条路径的差别是更新粒度：builtin 随系统分区走，updated 可以脱离系统版本单独更新，代价是加载时要多做一层校验。选择次序在 <code>Hal::Open()</code>（:241）：先调 <code>LoadUpdatedDriver</code>（:259），拿到 <code>-ENOENT</code>（没有可更新驱动）才回退 <code>LoadBuiltinDriver</code>（:261）；两条都失败时用 stub HAL（nulldrv）兜底（:263-267）。底层 <code>LoadDriver</code>（:153-200）遍历 <code>HAL_SUBNAME_KEY_PROPERTIES</code>（:141-144，即 <code>ro.hardware.vulkan</code> 与 <code>ro.board.platform</code>）拼出 <code>vulkan.&lt;值&gt;.so</code>（:164），有 linker namespace 走 <code>android_dlopen_ext</code>（:171，updated 路径），没有则走 <code>android_load_sphal_library</code>（:178，builtin 路径）。</p>
+<p><strong>swapchain 桥接。</strong> <code>swapchain.cpp</code> 共 3529 行，核心是两个互逆的转换：<code>HandleFromSwapchain</code>（:440）把 loader 侧的 <code>VkSwapchainKHR</code> 转成 64 位句柄，<code>SwapchainFromHandle</code>（:444）转回来——它们只做句柄与对象互转，不负责取窗口。创建入口 <code>CreateSwapchainKHR</code> 在 :1900，它经 <code>SurfaceFromHandle</code>（:1951）从 <code>create_info-&gt;surface</code> 拿到 <code>ANativeWindow</code>；BufferQueue 由该 <code>ANativeWindow</code>／Surface 层持有，swapchain 只是连上去，不是自己创建一份。<code>oldSwapchain</code> 的处理分两段：:1953-1961 校验 <code>surface.swapchain_handle</code> 与传入句柄是否一致，不一致直接返回 <code>VK_ERROR_NATIVE_WINDOW_IN_USE_KHR</code>；一致则走 :1962-1963 的 <code>OrphanSwapchain</code> 把旧链孤儿化。重建 swapchain 时必须由应用把旧句柄传进来，否则旧 BufferQueue 的 slot 不会被释放。<code>VkSwapchainImageUsageFlagsANDROID</code> 在 :2116，这是 Android 独有的 usage 位，用来告诉合成器这张图是不是被当作共享纹理使用。</p>
+<p><strong>HWUI 侧。</strong> <code>SkiaVulkanPipeline.cpp</code> 共 226 行，构造函数在 :45，<code>vulkanManager()</code> 在 :54。它很薄，因为真正干活的是 Skia 的 <code>GrVulkanManager</code>，HWUI 只负责把 <code>VkDevice</code>/<code>VkQueue</code> 与 Surface 生命周期对上。版本口径：<code>SkMilestone.h:8</code> 是 <code>#define SK_MILESTONE 148</code>。</p>
+<p><strong>兜底。</strong> <code>null_driver.cpp</code> 共 1841 行，<code>#include &lt;hardware/hwvulkan.h&gt;</code>（:23）。它实现一套能返回成功但不出图的 Vulkan 接口，好处是图形栈初始化不会因缺驱动整条链崩掉。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设设备上 <code>ro.vulkan.apex</code> 有值。<code>Hal::Open()</code>（:241）先调 <code>LoadUpdatedDriver</code>（:259）；设备没有可更新驱动时它返回 <code>-ENOENT</code>，于是回退 <code>LoadBuiltinDriver</code>（:261）——后者读 <code>ro.vulkan.apex</code>（:208-209）拿到 APEX 名，从该 APEX 的导出 namespace 里 <code>dlopen</code> 驱动。驱动加载成功后，<code>create_instance</code> 指向驱动的 <code>vkCreateInstance</code>（:854-856）。应用 <code>vkCreateSwapchainKHR</code> 进来，<code>CreateSwapchainKHR</code>（:1900）先经 <code>SurfaceFromHandle</code>（:1951）由 <code>create_info-&gt;surface</code> 取到 <code>ANativeWindow</code>（<code>HandleFromSwapchain</code>（:440）只是 swapchain 句柄与对象互转的工具，不参与取窗口），读 <code>VkSwapchainImageUsageFlagsANDROID</code>（:2116）判断 usage，最后经 <code>ANativeWindow</code> 连到 Surface 层持有的 BufferQueue。应用若在这个窗口上重建，必须在 <code>oldSwapchain</code> 字段（:1953）填旧句柄——<code>swapchain.cpp:1953-1961</code> 校验 <code>surface.swapchain_handle</code> 与传入句柄是否一致，不一致直接返回 <code>VK_ERROR_NATIVE_WINDOW_IN_USE_KHR</code>；一致则走 <code>:1962-1963</code> 的 <code>OrphanSwapchain</code> 把旧链孤儿化，其 buffer 才能被回收。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P6-101</code> 给整条图形栈，本篇只切 Vulkan 落地这一段，Surface/SurfaceFlinger 细节归 101。Skia 通用渲染（<code>GrVulkanManager</code>、<code>GrContext</code>）归 <code>AND-P6-202</code>，本篇只写到 <code>SkiaVulkanPipeline</code> 这一层边界。HWUI 的 GL 后端与渲染线程调度归 P6 卷内 HWUI 篇，不在此展开。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>loader 主实现</td><td><code>frameworks/native/vulkan/libvulkan/api.cpp</code></td><td><code>get_instance_proc_addr_</code>、<code>create_instance</code>、<code>SetInstanceLoaderData</code></td><td>1545 行，dev 分发与装载数据注入</td></tr><tr><td>驱动加载</td><td><code>frameworks/native/vulkan/libvulkan/driver.cpp</code></td><td><code>LoadDriver</code>、<code>LoadBuiltinDriver</code>、<code>LoadUpdatedDriver</code></td><td>2102 行，双路径选择</td></tr><tr><td>驱动接口声明</td><td><code>frameworks/native/vulkan/libvulkan/driver.h</code></td><td>驱动句柄与函数表</td><td>337 行</td></tr><tr><td>swapchain 桥</td><td><code>frameworks/native/vulkan/libvulkan/swapchain.cpp</code></td><td><code>HandleFromSwapchain</code>、<code>CreateSwapchainKHR</code></td><td>3529 行，<code>ANativeWindow</code> 互转</td></tr><tr><td>兜底驱动</td><td><code>frameworks/native/vulkan/nulldrv/null_driver.cpp</code></td><td><code>hwvulkan.h</code></td><td>1841 行，无驱动时可用</td></tr><tr><td>HWUI 后端</td><td><code>frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp</code></td><td>构造函数、<code>vulkanManager()</code></td><td>226 行，接 Skia Vulkan</td></tr><tr><td>Skia 版本</td><td><code>external/skia/include/core/SkMilestone.h</code></td><td><code>SK_MILESTONE</code></td><td>当前 148</td></tr></tbody></table>
+<p>构建口径补充：<code>frameworks/native/vulkan/libvulkan/Android.bp</code> 里 <code>libvulkan</code> 出现在 :33 与 :112 两处，<code>symbol_file: &quot;libvulkan.map.txt&quot;</code> 在 :34 与 :115，<code>libvulkanallocator</code> 在 :95——即 loader 有两条构建目标、共用一份符号表。</p>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git -C frameworks/native rev-parse HEAD</code></pre>
+<p>期望输出 <code>ae266dcb70...</code>，与本篇锚点一致。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/vulkan/libvulkan/api.cpp \
+      frameworks/native/vulkan/libvulkan/driver.cpp \
+      frameworks/native/vulkan/libvulkan/driver.h \
+      frameworks/native/vulkan/libvulkan/swapchain.cpp \
+      frameworks/native/vulkan/nulldrv/null_driver.cpp \
+      frameworks/base/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望依次为 <code>1545 / 2102 / 337 / 3529 / 1841 / 226</code>，对上 §4.2 各文件行数。</p>
+<pre><code class="lang-bash">grep -n &quot;get_instance_proc_addr_\|create_instance\|SetInstanceLoaderData\|SetDeviceLoaderData&quot; \
+  frameworks/native/vulkan/libvulkan/api.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>SetInstanceLoaderData</code> 在 509、<code>SetDeviceLoaderData</code> 在 511、<code>get_instance_proc_addr_</code> 赋值在 597、<code>create_instance</code> 在 854-856 附近。</p>
+<pre><code class="lang-bash">grep -n &quot;ro.vulkan.apex\|LoadBuiltinDriver\|LoadUpdatedDriver\|LoadDriver&quot; \
+  frameworks/native/vulkan/libvulkan/driver.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 <code>LoadDriver</code> 在 153、<code>LoadBuiltinDriver</code> 在 202、<code>LoadUpdatedDriver</code> 在 224，属性字符串落在 208-211。</p>
+<pre><code class="lang-bash">grep -n &quot;HandleFromSwapchain\|SwapchainFromHandle\|CreateSwapchainKHR\|VkSwapchainImageUsageFlagsANDROID\|oldSwapchain&quot; \
+  frameworks/native/vulkan/libvulkan/swapchain.cpp | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望 440/444 两个转换、1900 创建入口、1951 <code>SurfaceFromHandle</code>、1953 <code>oldSwapchain</code> 校验、2116 usage 位出现。</p>
+<pre><code class="lang-bash">sed -n '8p' external/skia/include/core/SkMilestone.h</code></pre>
+<p>期望输出 <code>#define SK_MILESTONE 148</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;libvulkan\|symbol_file\|libvulkanallocator&quot; \
+  frameworks/native/vulkan/libvulkan/Android.bp</code></pre>
+<p>期望 <code>libvulkan</code> 出现在 33 与 112，<code>symbol_file</code> 在 34 与 115，<code>libvulkanallocator</code> 在 95。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：Android 的 Vulkan loader 也走 ICD JSON 枚举。</strong> 不对。桌面 loader 读 <code>/usr/share/vulkan/icd.d/*.json</code>，Android 没有这一层。<code>driver.cpp</code> 里只有 <code>LoadBuiltinDriver</code> 与 <code>LoadUpdatedDriver</code> 两条路径，前者读 <code>ro.vulkan.apex</code>，后者走 updatable gfx driver。</p>
+<p><strong>误区二：`vkCreateSwapchainKHR` 拿到的 surface 是「窗口句柄的包装」，和桌面 `VkSurfaceKHR` 同一语义。</strong> 看起来对其实是错的。桌面 surface 绑定的是窗口系统（X11/Wayland）的窗口；Android 的 surface 必须落到一个 <code>ANativeWindow</code> 上，<code>HandleFromSwapchain</code>（:440）/<code>SwapchainFromHandle</code>（:444）这一对转换就是为此存在。没有 <code>ANativeWindow</code> 就没有 surface，这与桌面「surface 可以脱离某个具体窗口存活」不同。</p>
+<p><strong>误区三：HWUI 只有 GL 一条路。</strong> 不对，<code>SkiaVulkanPipeline.cpp</code> 存在且独立编译，<code>SkiaVulkanPipeline</code> 与 GL 后端并列，由运行时决定启用哪条。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>ro.vulkan.apex</code> 没设值怎么办？ <strong>答</strong>：加载次序在 <code>Hal::Open()</code>（<code>driver.cpp:241</code>）：先 <code>LoadUpdatedDriver</code>（:259），返回 <code>-ENOENT</code> 才回退 <code>LoadBuiltinDriver</code>（:261）。<code>ro.vulkan.apex</code> 只影响 <code>LoadBuiltinDriver</code> 内部——设了就从该 APEX 的导出 namespace 加载（:208-215），没设则走系统 HAL 搜索路径（<code>LoadDriver</code> 以空 namespace 调 <code>android_load_sphal_library</code>，:178）。两条都失败才由 stub HAL（nulldrv）顶上（:263-267）。 <strong>追问</strong>：<code>nulldrv</code> 顶上以后应用会怎样？ <strong>答</strong>：实例和 device 能建出来，绘制命令返回成功但不出图。这是「不崩」而不是「能用」，属于兜底而非功能。</p>
+<p><strong>问</strong>：重建 swapchain 一定要传 <code>oldSwapchain</code> 吗？ <strong>答</strong>：<code>swapchain.cpp:1953-1961</code> 校验这个字段（不一致返回 <code>VK_ERROR_NATIVE_WINDOW_IN_USE_KHR</code>），<code>:1962-1963</code> 的 <code>OrphanSwapchain</code> 负责把旧链孤儿化。传了，旧 BufferQueue 的 slot 才能在创建新链时被回收；不传，旧链资源取决于驱动与 loader 的协作，容易留下未释放的 buffer。 <strong>追问</strong>：<code>VkSwapchainImageUsageFlagsANDROID</code>（:2116）是做什么的？ <strong>答</strong>：给合成器声明这张图的使用方式，影响 BufferQueue 分配时选的 gralloc usage 位，不是应用侧可见的语义。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>swapchain 创建失败</td><td><code>adb shell getprop ro.vulkan.apex</code></td><td>属性是否为空</td><td>空则先查 updatable gfx driver 是否注册（<code>Hal::Open</code> 先走它），再查系统分区内的 builtin 驱动</td></tr><tr><td>应用拿到的是空实现</td><td><code>adb shell dumpsys SurfaceFlinger | grep -i vulkan</code></td><td>是否命中 nulldrv 特征</td><td>用 <code>grep -n &quot;hwvulkan&quot; frameworks/native/vulkan/nulldrv/null_driver.cpp</code> 确认兜底路径</td></tr><tr><td>HWUI 没走 Vulkan</td><td><code>adb shell dumpsys gfxinfo &lt;pkg&gt; | grep -i pipeline</code></td><td>当前 pipeline 名</td><td>对照 <code>SkiaVulkanPipeline.cpp</code> 的构造函数与 <code>vulkanManager()</code> 是否被调用</td></tr><tr><td>重建链后内存涨</td><td><code>dumpsys SurfaceFlinger --buffers &lt;pkg&gt;</code></td><td>旧 swapchain 的 buffer 数</td><td>检查应用是否在 <code>oldSwapchain</code> 字段填了旧句柄</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：图形栈全景与 Surface/SurfaceFlinger 合成归 <code>AND-P6-101</code>；Skia 通用渲染与 <code>GrContext</code> 归 <code>AND-P6-202</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P6-101</code>。</p>
+<p><strong>本篇后继</strong>：P6 卷 HWUI 渲染篇、Surface 生命周期篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>loader 主文件 1545 行、驱动加载 2102 行、swapchain 桥 3529 行——口径为 <code>android17-release</code> 本地树 <code>wc -l</code> 实测。</li><li><code>SkiaVulkanPipeline.cpp</code> 仅 226 行——说明 HWUI 在 Vulkan 侧刻意做薄，主逻辑在 Skia，口径为 <code>wc -l</code> 实测。</li><li>Skia 里程碑 148——口径为 <code>SkMilestone.h:8</code>。</li><li>构建目标有两条 <code>libvulkan</code> 与两份 <code>symbol_file</code> 声明——口径为 <code>Android.bp</code> 实测，两目标的具体差异暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期 Android（具体版本本篇不断言）</td><td>updatable gfx driver 路径尚未成为常规选项</td><td>驱动只能随系统分区更新</td></tr><tr><td>android17-release（本树实测）</td><td><code>LoadBuiltinDriver</code> 读 <code>ro.vulkan.apex</code> 与 <code>LoadUpdatedDriver</code> 两条路径并存</td><td>驱动可脱离系统版本更新；应用侧 API 不变</td></tr><tr><td>android17-release（本树实测）</td><td><code>SkiaVulkanPipeline</code> 与 GL 后端并列存在，Skia 口径 <code>SK_MILESTONE 148</code></td><td>HWUI 后端选择由运行时决定</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>vulkan</code>、<code>graphics architecture</code>；developer.android.com 站内检索 <code>Vulkan validation layers</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>libvulkan</code>、<code>LoadUpdatedDriver</code>、<code>VkSwapchainImageUsageFlagsANDROID</code>。</li><li>本仓关键路径：<code>frameworks/native/vulkan/libvulkan/</code>、<code>frameworks/native/vulkan/nulldrv/</code>、<code>frameworks/base/libs/hwui/pipeline/skia/</code>。</li><li>承接篇：<code>AND-P6-101</code>、<code>AND-P6-202</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

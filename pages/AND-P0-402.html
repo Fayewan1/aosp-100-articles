@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>如何提问题与查资料：官方文档、AOSP 与 stacktrace 的用法</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>如何提问题与查资料：官方文档、AOSP 与 stacktrace 的用法</h1>
+<div class="kv"><span>ID：AND-P0-402</span><span>卷：P0</span><span>章：0.4</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/ActivityThread.java ；frameworks/base/core/java/android/app/Activity.java ；frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java ；build/make/core/version_util.mk ；build/release/flag_values/trunk_staging/RELEASE_PLATFORM_SDK_VERSION.textproto</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>查 Android 问题的信息源只有三个：官方文档、AOSP 源码、Gerrit。文档给公开契约，源码给真实行为，Gerrit 给「为什么改成这样」。栈帧是连接三者的最短路径：从 <code>at android.app.ActivityThread.performLaunchActivity(...)</code> 取类名，映射到 <code>frameworks/base/core/java/android/app/ActivityThread.java</code>，再 grep 方法名即可落到具体实现。查这些不需要编译、不需要真机，一棵源码树加 git/grep 就够。提问时把现象、复现、版本、已排除假设、关键栈帧这五样给全，别人才能回你。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P0-301</code> 与 <code>AND-P0-302</code>：前者给链路骨架，后者给树内阅读顺序。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/app/ActivityThread.java</code></li><li><code>frameworks/base/core/java/android/app/Activity.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></li><li><code>build/make/core/version_util.mk</code></li><li><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_SDK_VERSION.textproto</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树 + git/grep 即可；本篇验证方式为静态源码分析，不需要编译与真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>应用崩溃日志里出现 <code>at android.app.ActivityThread.performLaunchActivity(...)</code>，你知道是启动环节的问题，但不知道这段代码在哪、谁调的、哪个版本改过。搜索引擎给的多是三年前的博客，示例代码和你树里的对不上。官方文档只写了 <code>onCreate</code> 该做什么，没写框架怎么调它。于是问题卡在「知道现象，找不到代码」。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个信息源分工明确，栈帧是入口。</p>
+<p>图 1：从栈帧定位源码的四步</p>
+<pre><code>  stacktrace 栈帧
+        |
+        v
+  类名 -&gt; 源码路径 -&gt; grep 方法名
+        |
+        +--&gt; 官方文档（公开契约）
+        +--&gt; Gerrit（变更与评审）</code></pre>
+<p>官方文档分两类：developer.android.com 的 API 参考、source.android.com 的平台文档。AOSP 源码是本树 1084 个 git 项目，行为以它为准。Gerrit 在 android-review.googlesource.com，看某个改动是谁提的、评审里怎么讨论的。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>栈帧定位法四步：读栈帧取类名，类名映射到包路径下的文件，在文件内 grep 方法名，读到实现。栈帧形如 <code>at android.app.ActivityThread.performLaunchActivity(...)</code>，<code>ActivityThread</code> 落在 <code>frameworks/base/core/java/android/app/ActivityThread.java</code>，本树实测该方法存在。这里的路径映射分两层：<code>android.*</code> 这类 public API 在 <code>frameworks/base/core/java/</code> 下；<code>com.android.server.*</code> 系统服务不在 core/java，而在 <code>frameworks/base/services/core/java/</code>——例如 <code>ActivityTaskManagerService</code> 落在 <code>services/core/java/com/android/server/wm/</code>，按 core/java 拼路径会落空。</p>
+<p>public API 的声明与实现在 <code>frameworks/base/core/java/</code> 下。文档查不到的实现细节以源码为准；<code>@hide</code> 标注的接口不进公开文档，只能读源码。</p>
+<p>报版本信息要两个值：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BUILD_ID</code></td><td>版本号</td><td><code>build/make/core/build_id.mk</code></td></tr><tr><td><code>SDK_INT</code></td><td>API 级别</td><td><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_SDK_VERSION.textproto</code>（值 <code>37</code>；编译期取值，运行时以 <code>ro.build.version.sdk</code> 为准）</td></tr></tbody></table>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>沿 §4.2 四步走一遍：类名 <code>ActivityThread</code> → 文件 <code>frameworks/base/core/java/android/app/ActivityThread.java</code> → grep <code>performLaunchActivity</code> 落到约 4414 行。要确认是不是最近改的，去 android-review.googlesource.com 搜符号名，看提交与评审。报版本时把 <code>CP2A.260605.016</code> 与本树 SDK 级别（trunk_staging 旗标值 <code>37</code>）一起给，对方才能对齐你的树。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>树内阅读顺序归 AND-P0-302；启动机制本身归 AND-P2-201，本篇只用栈帧做定位演示，不展开流程。前置为 AND-P0-301。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th></tr></thead><tbody><tr><td>栈帧落点示例</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>performLaunchActivity</code>（约 4414 行）</td></tr><tr><td>公开 API 实现</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td>生命周期回调声明</td></tr><tr><td>系统服务落点</td><td><code>frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java</code></td><td><code>startActivityAsUser</code>（系统服务不在 core/java）</td></tr><tr><td>版本号来源</td><td><code>build/make/core/version_util.mk</code></td><td>版本拼装规则</td></tr><tr><td>API 级别旗标</td><td><code>build/release/flag_values/trunk_staging/RELEASE_PLATFORM_SDK_VERSION.textproto</code></td><td><code>37</code></td></tr><tr><td>版本锚点口径</td><td><code>_meta/version-anchor.md</code>（书仓内文件，不在 <code>D:/aosp</code>）</td><td>锚点定义</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。在源码树根执行：</p>
+<pre><code class="lang-bash"># 1. 确认栈帧里的方法真实存在
+grep -n &quot;performLaunchActivity&quot; \
+  frameworks/base/core/java/android/app/ActivityThread.java
+
+# 2. 看该方法所在类的包声明，验证类名到路径的映射
+sed -n '1,40p' frameworks/base/core/java/android/app/ActivityThread.java | grep package
+
+# 3. 读当前树的版本号
+grep -rn &quot;BUILD_ID&quot; build/make/core/build_id.mk
+
+# 4. 数本树的 git 项目数量
+wc -l .repo/project.list
+
+# 5. 读本树 trunk_staging 的 API 级别旗标（期望 37）
+grep -rn &quot;RELEASE_PLATFORM_SDK_VERSION&quot; \
+  build/release/flag_values/trunk_staging/
+
+# 6. 系统服务栈帧的落点不在 core/java
+grep -rn &quot;class ActivityTaskManagerService&quot; \
+  frameworks/base/services/core/java/</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>命令 1 期望命中行号；命令 3 期望 <code>CP2A.260605.016</code>；命令 4 口径为 <code>.repo/project.list</code> 行数（2026-10-14 实测 1084）；命令 5 期望值为 <code>37</code>；命令 6 只在 <code>services/core/java/</code> 下命中，<code>core/java/</code> 下无此文件。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：文档没写就是不支持。</strong> 错。文档覆盖公开契约，<code>@hide</code> 接口不进文档但源码里存在，实现细节一律以源码为准。</p>
+<p><strong>误区二：搜索博客比读源码快。</strong> 看起来对其实是错的。博客示例常对应旧版本，字段名和方法签名会漂移，读本树源码才能对齐你的环境。</p>
+<p><strong>误区三：查源码要先编译。</strong> 错。查文档与源码不需要编译、不需要真机，grep 静态读即可。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：栈帧里只有混淆后的类名怎么办？ <strong>答</strong>：先看是不是应用自身代码，框架类名不会被混淆。 <strong>追问</strong>：框架类名也认不出呢？ <strong>答</strong>：按包名前缀拼路径试 grep——<code>android.*</code> 这类 public API 在 <code>frameworks/base/core/java/</code>，<code>com.android.server.*</code> 系统服务在 <code>frameworks/base/services/core/java/</code>；拿不准就截取最后的类名在整个 <code>frameworks/base/</code> 下 grep。</p>
+<p><strong>问</strong>：文档说的行为和源码不一致以谁为准？ <strong>答</strong>：源码。 <strong>追问</strong>：想确认这是不是设计意图？ <strong>答</strong>：去 Gerrit 搜相关符号名，看评审讨论。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不知道类在哪个文件</td><td><code>grep -rn &quot;class ActivityThread&quot; frameworks/base/core/java/</code></td><td>命中的文件路径</td><td>进该文件 grep 方法名</td></tr><tr><td>方法有多种实现</td><td><code>grep -rn &quot;performLaunchActivity&quot; frameworks/base/</code></td><td>命中点数量</td><td>按包名筛出目标</td></tr><tr><td>版本号报不准</td><td><code>grep -rn &quot;BUILD_ID&quot; build/make/core/build_id.mk</code></td><td>输出值</td><td>与 SDK_INT 一起报</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：启动流程本身归 AND-P2-201；树内阅读顺序归 AND-P0-302。</p>
+<p><strong>本篇前置依赖</strong>：AND-P0-301。</p>
+<p><strong>本篇后继</strong>：AND-P2-201。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>本树 git 项目数 1084，口径为 <code>.repo/project.list</code> 行数，2026-10-14 实测。</li><li>本树 <code>BUILD_ID</code> 为 <code>CP2A.260605.016</code>，来源 <code>build/make/core/build_id.mk</code>。</li><li>本树 trunk_staging 的 <code>RELEASE_PLATFORM_SDK_VERSION</code> 为 <code>37</code>：<code>SDK_INT</code> 编译期由该旗标决定，运行时经 <code>ro.build.version.sdk</code> 暴露（<code>Build.java</code> 约 443 行）；其它 release config 取值不同（如 <code>ap2a</code> 为 34）。</li><li><code>performLaunchActivity</code> 私有实现在约 4414 行，口径为本树实测（2026-10-14）。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>本树 android17-release</td><td><code>BUILD_ID</code> 为 <code>CP2A.260605.016</code>，trunk_staging SDK 旗标为 <code>37</code></td><td>报版本以此为基准</td></tr><tr><td>更早版本</td><td>版本号格式与 API 级别不同</td><td>栈帧与路径可能漂移，需重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：developer.android.com 站内检索 <code>activity lifecycle</code>；source.android.com 站内检索 <code>background activity launch restrictions</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ActivityTaskManagerService startActivityAsUser</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/app/ActivityThread.java</code>、<code>frameworks/base/core/java/android/app/Activity.java</code>。</li><li>承接篇：AND-P0-302、AND-P2-201。</li></ul>
+</article>
+<footer>android-100 · AND-P0-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图形栈全景：从 OpenGL ES 到 Vulkan 的演进</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>图形栈全景：从 OpenGL ES 到 Vulkan 的演进</h1>
+<div class="kv"><span>ID：AND-P6-101</span><span>卷：P6</span><span>章：6.1</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/opengl/libs/EGL/egl.cpp ；frameworks/native/opengl/libs/EGL/egl_display.cpp ；frameworks/native/opengl/libs/EGL/eglApi.cpp ；frameworks/native/vulkan/libvulkan/api.cpp ；frameworks/native/vulkan/libvulkan/driver.cpp ；frameworks/native/libs/renderengine/skia/SkiaRenderEngine.cpp ；external/skia/include/core/SkMilestone.h ；frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 的图形栈分两条互不重叠的入口链：OpenGL ES 走 EGL，Vulkan 走 loader，两者在 <code>frameworks/native</code> 之下才汇到驱动。EGL 的实质工作是维护两张全局钩子表 <code>gHooks[2]</code> 与 <code>gHooksNoContext</code>，当前上下文由 TLS 槽位 <code>TLS_SLOT_OPENGL_API</code> 决定。Vulkan 的 loader 不做钩子表，它把入口链直接改写为驱动函数指针，例如 <code>get_instance_proc_addr_ = driver::GetInstanceProcAddr</code>。渲染侧，SurfaceFlinger 与 HWUI 都通过 RenderEngine 抽象，Skia 后端是 <code>SkiaRenderEngine.cpp</code>，另有 GL 与 Vulkan 数个变体并存。本篇只给分层与契约文件，BufferQueue 归 <code>AND-P6-102</code>，合成归 <code>AND-P6-201</code>。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P6-G01</code>，卷导读给出九篇的分工与依赖顺序，本篇的定位由它决定。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/native/opengl/libs/EGL/egl.cpp</code></li><li><code>frameworks/native/opengl/libs/EGL/egl_display.cpp</code></li><li><code>frameworks/native/opengl/libs/EGL/eglApi.cpp</code></li><li><code>frameworks/native/vulkan/libvulkan/api.cpp</code></li><li><code>frameworks/native/vulkan/libvulkan/driver.cpp</code></li><li><code>frameworks/native/libs/renderengine/skia/SkiaRenderEngine.cpp</code></li><li><code>external/skia/include/core/SkMilestone.h</code></li><li><code>frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code> 与 <code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>应用里一行 <code>GLES20.glDrawArrays</code>，或者一句 <code>vkCmdDraw</code>，从 Java 到 GPU 中间要跨多少层？最常出现的困惑是两类。一类是「我明明调的是 GL，为什么崩溃栈里出现 <code>libvulkan.so</code>」——原因是 RenderEngine 的 Skia 后端可以由 Vulkan 承载，但那是 SurfaceFlinger 自己的绘制，与应用调用的 GL 无关。另一类是「编译进系统的驱动到底什么时候被 <code>dlopen</code>」——EGL 与 Vulkan 的答案完全不同：EGL 在初始化时一次性填表，Vulkan 在 loader 引导期改写函数指针。把这两条链摊开看，才能判断某一行日志属于哪一层。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念。<strong>EGL</strong>：GL 与本地窗口系统的粘合层，负责上下文、表面与当前绑定。<strong>Vulkan loader</strong>：代替 GL 的「钩子表」模式，用函数指针链把应用调用导到驱动。<strong>驱动</strong>：厂商提供的 <code>libGLES_*.so</code> 或 Vulkan ICD，由属性与目录扫描决定加载哪一个。<strong>RenderEngine</strong>：SurfaceFlinger 侧的绘制抽象，屏蔽 Skia / GL / Vulkan 后端差异。</p>
+<p>图 1：应用绘制到驱动的两条入口链</p>
+<pre><code>应用(Java/Kotlin)
+   |
+HardwareRenderer.setSurface   -&gt; HWUI (libhwui)
+   |
+   +-- GL 路径 --&gt; EGL (eglApi/egl.cpp) --&gt; 驱动
+   +-- Vk 路径 --&gt; libvulkan loader    --&gt; 驱动
+
+SurfaceFlinger --&gt; RenderEngine --&gt; Skia (GL 或 Vk 后端)</code></pre>
+<p>两条链在驱动处合流，但上面的契约完全不同：GL 侧应用直接调 EGL，Vulkan 侧应用只认识 loader。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>EGL 侧：钩子表 + TLS。</strong> <code>egl.cpp</code> 全文 223 行，核心资产是两张表：<code>gl_hooks_t gHooks[2]</code>（:34）与 <code>gl_hooks_t gHooksNoContext</code>（:35）。<code>gHooks</code> 的长度 2 对应两套 API 变体，<code>gHooksNoContext</code> 供无当前上下文时调用兜底。当前上下文绑定后，EGL 把选中的钩子表地址写进 TLS 槽位 <code>TLS_SLOT_OPENGL_API</code>（:188）。之后应用每一次 <code>glXxx</code> 都是「读 TLS → 取函数指针 → 跳转」，不经过 <code>libEGL</code> 的符号查找。这是 GL 侧性能与隔离的关键设计：分叉点在这一行，不在 <code>eglApi.cpp</code>。</p>
+<p><strong>EGL 侧：三段生命周期。</strong> <code>egl_display_t</code> 在 <code>egl_display.cpp</code>（共 560 行）里管显示设备：<code>initialize</code>（:240）通过已就绪的驱动入口完成 EGL 初始化并在 <code>:270</code> 把 TLS 兜底为 <code>gHooksNoContext</code>，<code>terminate</code>（:401）释放，<code>makeCurrent</code>（:496）切换当前上下文并更新 TLS。要注意的是，驱动连接与 <code>gHooks</code> 的填充并不在 <code>initialize</code> 内：实际发生在 <code>egl_init_drivers_locked</code>（<code>egl.cpp:125</code>）——它在 <code>:136-137</code> 把 <code>cnx-&gt;hooks[GLESv1/2_INDEX]</code> 指向 <code>&amp;gHooks[...]</code>，并在 <code>:138</code> 调 <code>loader.open(cnx)</code>，由 <code>Loader::open</code> 内部把驱动函数指针填进 <code>gHooks</code>。<code>eglApi.cpp</code> 共 659 行，是 <code>eglGetDisplay</code>、<code>eglCreateContext</code>、<code>eglMakeCurrent</code> 等入口的分发面，它本身不含策略。</p>
+<p><strong>Vulkan 侧：loader 改写而非填表。</strong> <code>frameworks/native/vulkan/libvulkan/api.cpp</code> 共 1545 行。loader 在拿到驱动后做的是函数指针赋值，<code>get_instance_proc_addr_ = driver::GetInstanceProcAddr</code>（:597）；<code>vkCreateInstance</code> 则经 <code>get_instance_proc_addr_(VK_NULL_HANDLE, &quot;vkCreateInstance&quot;)</code> 取到 <code>PFN_vkCreateInstance create_instance</code>，位置在 :854-858。两者差别在于：GL 的钩子表是按签名预先声明好的数组，Vulkan 的入口是在运行期查询出来的指针，驱动可以有自己的一套实现，loader 只看签名是否匹配。</p>
+<p>图 2：两条链上的关键契约符号</p>
+<pre><code>EGL:    gHooks[2] / gHooksNoContext  (表, 静态)
+        TLS_SLOT_OPENGL_API          (槽, 每线程)
+
+Vulkan: get_instance_proc_addr_      (指针, 运行期赋值)
+        create_instance              (查询得到的入口)</code></pre>
+<p><strong>驱动加载。</strong> <code>driver.cpp</code>（共 2102 行）分三条路径：<code>LoadDriver</code>（:153）是总入口，<code>LoadBuiltinDriver</code>（:202）走系统内置驱动，<code>LoadUpdatedDriver</code>（:224）走可更新驱动。内置驱动的目录从属性 <code>ro.vulkan.apex</code> 读得（:208-211），也就是说 Vulkan 驱动的选择不是在编译期写死的，而是由这一属性指向的 APEX 决定。</p>
+<p><strong>RenderEngine 的后端族。</strong> <code>SkiaRenderEngine.cpp</code> 共 1907 行，构造函数 <code>SkiaRenderEngine::SkiaRenderEngine(Threaded threaded, ...)</code> 在 :328，主绘制入口 <code>drawLayersInternal</code> 在 :885。同目录并存 <code>SkiaGLRenderEngine.cpp</code>（571 行）、<code>SkiaVkRenderEngine.cpp</code>（182 行）、<code>GaneshVkRenderEngine.cpp</code>（131 行）、<code>GraphiteVkRenderEngine.cpp</code>（312 行）。行数差异本身就是信息：GL 后端比 Vulkan 后端厚，而 Graphite 后端比 Ganesh 后端厚，说明迁移尚未收敛到单一实现。</p>
+<p><strong>构建切分。</strong> <code>frameworks/native/libs/renderengine/Android.bp</code> 中 <code>librenderengine_skia_sources</code> 在 :82，<code>librenderengine</code> 模块在 :145。源集合与模块名分开定义，意味着后端文件通过源集合拼装，而不是各自成立一个模块。</p>
+<p>同族符号集中表：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>gHooks[2]</code></td><td>GL 钩子表，两套 API 变体</td><td><code>egl.cpp:34</code></td></tr><tr><td><code>gHooksNoContext</code></td><td>无当前上下文时使用的钩子表</td><td><code>egl.cpp:35</code></td></tr><tr><td><code>TLS_SLOT_OPENGL_API</code></td><td>当前钩子表的 TLS 槽位</td><td><code>egl.cpp:188</code></td></tr><tr><td><code>get_instance_proc_addr_</code></td><td>Vulkan loader 保存的驱动查询入口</td><td><code>api.cpp:597</code></td></tr><tr><td><code>PFN_vkCreateInstance</code></td><td><code>vkCreateInstance</code> 的函数指针类型</td><td><code>api.cpp:854-858</code></td></tr><tr><td><code>LoadDriver</code> / <code>LoadBuiltinDriver</code> / <code>LoadUpdatedDriver</code></td><td>驱动加载三条路径</td><td><code>driver.cpp:153/202/224</code></td></tr><tr><td><code>ro.vulkan.apex</code></td><td>内置驱动所在 APEX 的属性</td><td><code>driver.cpp:208-211</code></td></tr></tbody></table>
+<p><strong>框架侧入口。</strong> <code>HardwareRenderer.java</code> 共 1969 行，<code>public class HardwareRenderer</code> 在 :90，<code>setSurface</code> 出现在 :399 与 :413（两个重载）。Java 侧只负责把 Surface 交给 HWUI，之后 GL 与 Vulkan 的分叉发生在 native 层，应用代码看不到。HWUI 的模块定义在 <code>frameworks/base/libs/hwui/Android.bp</code>，<code>libhwui</code> 在 :735。</p>
+<p><strong>Skia 版本锚。</strong> <code>external/skia/include/core/SkMilestone.h:8</code> 是 <code>#define SK_MILESTONE 148</code>。这个数字是判断「本地 Skia 与哪个 Android 版本对应」的唯一硬锚点，比任何注释都可靠。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设应用某次绘制崩在 <code>libGLES_*.so</code> 里。按图 1 回溯：Java 侧 <code>HardwareRenderer.setSurface</code> 交付 Surface，HWUI 建上下文时进 <code>egl_display_t::initialize</code>（:240）——此时驱动连接与 <code>gHooks</code> 填充已在更早的 <code>egl_init_drivers_locked</code>（<code>egl.cpp:125</code>，由 <code>Loader::open</code> 执行）完成，<code>initialize</code> 调通驱动入口后在 <code>:270</code> 把 TLS 兜底为 <code>gHooksNoContext</code>；<code>egl_display_t::makeCurrent</code>（:496）把选中的表写进 <code>TLS_SLOT_OPENGL_API</code>（:188）；应用调用 <code>glDrawArrays</code> 时读 TLS 跳转。崩溃点落在驱动，说明分叉早已完成、入口链正确，问题在驱动或传参——而不是 EGL。反过来说，若崩溃栈里出现 <code>libvulkan.so</code> 但应用只调 GL，则要查 SurfaceFlinger 的 RenderEngine 是否选了 Vulkan 后端（<code>SkiaVkRenderEngine.cpp</code> 一族），与本应用的 GL 调用无关。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P6-102</code> 接着本篇往下讲：本篇止于「驱动拿到调用」，102 讲 Surface 如何进 BufferQueue、如何在生产者与消费者之间流转。<code>AND-P6-201</code> 讲 SurfaceFlinger 拿到缓冲之后怎么合成，本篇只交代 RenderEngine 的后端族，不讲合成策略。<code>AND-P6-202</code> 讲 Skia 绘制管线内部，本篇只到 <code>SkiaRenderEngine.cpp</code> 的入口符号与 <code>SK_MILESTONE</code>。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>EGL 钩子表与 TLS</td><td><code>frameworks/native/opengl/libs/EGL/egl.cpp</code></td><td><code>gHooks[2]</code>、<code>gHooksNoContext</code>、<code>TLS_SLOT_OPENGL_API</code></td><td>223 行；GL 分叉的实际发生地</td></tr><tr><td>EGL 显示生命周期</td><td><code>frameworks/native/opengl/libs/EGL/egl_display.cpp</code></td><td><code>initialize</code>、<code>terminate</code>、<code>makeCurrent</code></td><td>560 行；驱动连接与当前上下文切换</td></tr><tr><td>EGL 入口分发</td><td><code>frameworks/native/opengl/libs/EGL/eglApi.cpp</code></td><td><code>eglGetDisplay</code> 等入口</td><td>659 行；不含策略，只做转发</td></tr><tr><td>Vulkan loader 主体</td><td><code>frameworks/native/vulkan/libvulkan/api.cpp</code></td><td><code>get_instance_proc_addr_</code>、<code>PFN_vkCreateInstance</code></td><td>1545 行；入口链改写</td></tr><tr><td>Vulkan 驱动加载</td><td><code>frameworks/native/vulkan/libvulkan/driver.cpp</code></td><td><code>LoadDriver</code>、<code>LoadBuiltinDriver</code>、<code>LoadUpdatedDriver</code>、<code>ro.vulkan.apex</code></td><td>2102 行；三条加载路径</td></tr><tr><td>RenderEngine Skia 后端</td><td><code>frameworks/native/libs/renderengine/skia/SkiaRenderEngine.cpp</code></td><td>构造函数、<code>drawLayersInternal</code></td><td>1907 行；另有 GL/Vk/Ganesh/Graphite 变体</td></tr><tr><td>Skia 版本锚</td><td><code>external/skia/include/core/SkMilestone.h</code></td><td><code>SK_MILESTONE 148</code></td><td>第 8 行；判断 Skia 代际</td></tr><tr><td>框架侧入口</td><td><code>frameworks/base/graphics/java/android/graphics/HardwareRenderer.java</code></td><td><code>public class HardwareRenderer</code>、<code>setSurface</code></td><td>1969 行；两个 <code>setSurface</code> 重载</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/opengl/libs/EGL/egl.cpp \
+      frameworks/native/opengl/libs/EGL/egl_display.cpp \
+      frameworks/native/opengl/libs/EGL/eglApi.cpp</code></pre>
+<p>期望输出三行，分别为 223、560、659——对上 §4.2 的 EGL 三个文件行数。</p>
+<pre><code class="lang-bash">grep -n &quot;gHooks\[2\]\|gHooksNoContext\|TLS_SLOT_OPENGL_API&quot; \
+      frameworks/native/opengl/libs/EGL/egl.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :34、:35、:188 三处，即两张钩子表与 TLS 写入点。</p>
+<pre><code class="lang-bash">grep -n &quot;egl_display_t::initialize\|egl_display_t::terminate\|egl_display_t::makeCurrent&quot; \
+      frameworks/native/opengl/libs/EGL/egl_display.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 :240、:401、:496，对上显示设备的初始化、销毁与绑定三段。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/vulkan/libvulkan/api.cpp \
+      frameworks/native/vulkan/libvulkan/driver.cpp
+sed -n '595,600p;852,858p' frameworks/native/vulkan/libvulkan/api.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望行数为 1545 与 2102；<code>sed</code> 段落应看到 <code>get_instance_proc_addr_</code> 赋值与 <code>create_instance</code> 查询。</p>
+<pre><code class="lang-bash">sed -n '150,230p' frameworks/native/vulkan/libvulkan/driver.cpp | grep -n &quot;LoadDriver\|LoadBuiltinDriver\|LoadUpdatedDriver\|ro.vulkan.apex&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到三条加载函数与属性读取，确认内置驱动由 <code>ro.vulkan.apex</code> 指向的 APEX 决定。</p>
+<pre><code class="lang-bash">wc -l frameworks/native/libs/renderengine/skia/*.cpp
+grep -n &quot;SK_MILESTONE&quot; external/skia/include/core/SkMilestone.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出五个后端的行数（1907/571/182/131/312），并命中 <code>#define SK_MILESTONE 148</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;public class HardwareRenderer\|public void setSurface&quot; \
+      frameworks/base/graphics/java/android/graphics/HardwareRenderer.java
+grep -n &quot;libhwui\|librenderengine&quot; frameworks/base/libs/hwui/Android.bp frameworks/native/libs/renderengine/Android.bp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中类声明在 :90、<code>setSurface</code> 在 :399 与 :413；构建文件命中 <code>libhwui</code>（:735）与 <code>librenderengine</code>（:145）。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 <code>grep</code> 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>错误认知：EGL 是 GL 的「包装库」，所有 `glXxx` 都经过它。</strong> 纠正：<code>glXxx</code> 不经过 <code>libEGL</code> 的符号解析，它读 <code>TLS_SLOT_OPENGL_API</code> 拿到钩子表后直接跳驱动函数指针。EGL 只在 <code>initialize</code> 与 <code>makeCurrent</code> 时介入。</p>
+<p><strong>错误认知：Vulkan 也有一张像 `gHooks` 那样的钩子表。</strong> 纠正：没有。Vulkan loader 走的是 <code>get_instance_proc_addr_ = driver::GetInstanceProcAddr</code>（:597）这样的指针改写，加上运行期查询 <code>vkCreateInstance</code>，机制是「查询」而非「预声明数组」。</p>
+<p><strong>错误认知：`libvulkan.so` 出现在栈里就说明应用在用 Vulkan。</strong> 看起对，其实错：SurfaceFlinger 的 RenderEngine 可能选了 Vulkan 后端（<code>SkiaVkRenderEngine.cpp</code> 一族），而应用同时只调 GL。判定依据是两条链互不重叠——应用 GL 走 EGL，合成侧 Vulkan 走 loader。</p>
+<p><strong>错误认知：Vulkan 驱动路径在编译期固定。</strong> 纠正：<code>LoadBuiltinDriver</code>（:202）从属性 <code>ro.vulkan.apex</code>（:208-211）读得 APEX 位置，<code>LoadUpdatedDriver</code>（:224）另有路径，加载位置是运行期决定的。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：两张钩子表 <code>gHooks[2]</code> 与 <code>gHooksNoContext</code> 各管什么？ <strong>答</strong>：<code>gHooks</code> 在下标 0/1 上分别指向两套 API 变体的钩子；<code>gHooksNoContext</code> 在没有当前上下文时兜底，避免空指针跳转。<strong>追问</strong>：谁决定当前用哪张？ <strong>答</strong>：<code>egl_display_t::makeCurrent</code>（:496）在绑定上下文时选表，并把地址写进 <code>TLS_SLOT_OPENGL_API</code>（:188）——每线程一份。</p>
+<p><strong>问</strong>：为什么 RenderEngine 要保留 <code>SkiaGLRenderEngine.cpp</code>、<code>SkiaVkRenderEngine.cpp</code>、<code>GaneshVkRenderEngine.cpp</code>、<code>GraphiteVkRenderEngine.cpp</code> 四个变体？ <strong>答</strong>：GL 与 Vulkan 是不同后端，Vulkan 后端内部又分 Ganesh 与 Graphite 两代渲染抽象，<code>Android.bp</code> 用 <code>librenderengine_skia_sources</code>（:82）拼装源集合而不是各自成模块，因此可以并存。<strong>追问</strong>：迁移完成了吗？ <strong>答</strong>：从行数看（GL 571 行 vs Vulkan 两代 131 与 312 行）尚无单一收敛实现，本篇不断言具体默认选谁。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>应用 GL 崩溃栈含 <code>libvulkan.so</code></td><td><code>grep -rn &quot;SkiaVkRenderEngine|SkiaGLRenderEngine&quot; frameworks/native/libs/renderengine/skia/Android.bp</code></td><td>后端是否同时编入、选谁</td><td>去 <code>AND-P6-201</code> 查合成侧后端选择</td></tr><tr><td>怀疑 EGL 钩子表未填</td><td><code>grep -n &quot;gHooks\[2\]|gHooksNoContext&quot; frameworks/native/opengl/libs/EGL/egl.cpp</code></td><td>两表是否仍在 :34/:35</td><td>若符号改名，按 <code>TLS_SLOT_OPENGL_API</code> 重锚</td></tr><tr><td>Vulkan 初始化失败、怀疑驱动没加载</td><td><code>sed -n '153,230p' frameworks/native/vulkan/libvulkan/driver.cpp</code></td><td><code>LoadDriver</code> 三条分支与 <code>ro.vulkan.apex</code></td><td>用 <code>adb shell getprop ro.vulkan.apex</code> 对属性值</td></tr><tr><td>不确定本地 Skia 代际</td><td><code>grep -n SK_MILESTONE external/skia/include/core/SkMilestone.h</code></td><td>数字是否为 148</td><td>与 <code>AND-P6-202</code> 的管线结论对齐</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Surface 在生产者与消费者之间的流转见 <code>AND-P6-102</code>；SurfaceFlinger 的合成策略与硬件合成器（HWC）交互见 <code>AND-P6-201</code>；Skia 的绘制管线内部见 <code>AND-P6-202</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P6-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P6-102</code>、<code>AND-P6-201</code>、<code>AND-P6-202</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>EGL 钩子表长度固定为 2，源码常量 <code>gHooks[2]</code>（<code>egl.cpp:34</code>）。</li><li>EGL 三个文件规模：223 / 560 / 659 行，口径为本节源码实测于 <code>android17-release</code>。</li><li>Vulkan 两个文件规模：1545 / 2102 行，同上口径。</li><li>内置 Vulkan 驱动由属性 <code>ro.vulkan.apex</code> 定位（<code>driver.cpp:208-211</code>），属性值随设备而异，暂无实测，列为待补。</li><li>Skia 代际为 <code>SK_MILESTONE 148</code>（<code>SkMilestone.h:8</code>），源码常量。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本</td><td>Vulkan 后端只有 Ganesh 一代抽象，RenderEngine 以 GL 为主</td><td>合成侧 Vulkan 路径薄</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>SkiaRenderEngine.cpp</code> 1907 行，同目录并存 GL/Ganesh/Graphite 四个变体；<code>SK_MILESTONE 148</code></td><td>后端可切换但未收敛，行数即证据</td></tr><tr><td>版本史其余节点</td><td>本篇不断言</td><td>需按 <code>git log</code> 自行核实</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>graphics architecture</code>、<code>vulkan loader</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>libvulkan</code>、<code>renderengine</code>、<code>egl_display</code>。</li><li>本仓关键路径：<code>frameworks/native/opengl/libs/EGL/</code>、<code>frameworks/native/vulkan/libvulkan/</code>、<code>frameworks/native/libs/renderengine/skia/</code>。</li><li>承接篇：<code>AND-P6-102</code>、<code>AND-P6-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P6-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

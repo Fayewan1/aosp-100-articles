@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>从 setContentView 到 Window：View 层级与 Token</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>从 setContentView 到 Window：View 层级与 Token</h1>
+<div class="kv"><span>ID：AND-P1-202</span><span>卷：P1</span><span>章：1.2</span><span>难度：3</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/app/Activity.java ；frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java ；frameworks/base/core/java/android/view/Window.java ；frameworks/base/core/java/android/view/WindowManagerImpl.java ；frameworks/base/core/java/android/view/WindowManagerGlobal.java ；frameworks/base/core/java/android/view/ViewRootImpl.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>setContentView</code> 只是把布局塞进窗口的内容容器，真正让界面「挂到系统上」的是后面几步：<code>Activity</code> 在创建阶段就持有一个 <code>PhoneWindow</code>，窗口首次用到时安装 <code>DecorView</code> 并生成内容容器；随后根视图通过 <code>WindowManagerImpl</code> 进入 <code>ViewRootImpl.setView</code>，在那里携带该窗口的 Token 向系统的窗口会话申请加入显示。Token 是应用层与窗口管理服务之间的凭证，在 <code>Activity.attach</code> 阶段取得、随窗口属性一并送达系统，后续所有与显示相关的请求都靠它标识属于哪个窗口。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-102（组件状态机）、AND-P1-101（进程与主线程）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/app/Activity.java</code></li><li><code>frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java</code></li><li><code>frameworks/base/core/java/android/view/Window.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManagerImpl.java</code></li><li><code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code></li><li><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep。本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>「我在 <code>onCreate</code> 里调了 <code>setContentView</code>，界面为什么还是黑的？」这类问题的答案往往不在布局 XML 本身，而在窗口还没走到注册那一步。反过来，排查「窗口泄漏」「Activity 销毁后 View 仍被持有」时，也必须知道是谁在什么时候持有窗口引用与 Token。把从布局到窗口会话这条线串起来，才能判断哪一环断在哪。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个层级：Activity（组件）、Window（窗口抽象，实现为 <code>PhoneWindow</code>）、DecorView（窗口的根视图容器）、ViewRootImpl（根视图与系统的连接器）。</p>
+<p>图 1：Activity 到 ViewRootImpl 的持有链</p>
+<pre><code>  Activity ──持有──▶ PhoneWindow ──根──▶ DecorView
+                                            │
+                        ViewRootImpl ◀──────┘
+                              │
+                       窗口会话（携带 Token 申请加入显示）</code></pre>
+<p>关键点：<code>setContentView</code> 只作用于 <code>DecorView</code> 内部的内容容器，不触发窗口注册；注册发生在 <code>setView</code>。</p>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>四段式链路：</p>
+<p>图 2：setContentView 到布局 inflate 的分解</p>
+<pre><code>  setContentView ─▶ Window.setContentView ─▶ installDecor
+                        │
+        DecorView ◀─────┴─▶ mContentParent ◀── inflate(应用布局)</code></pre>
+<p>第一段，窗口的诞生。<code>Activity.attach</code> 在创建实例时执行 <code>mWindow = new PhoneWindow(...)</code>，窗口对象此刻就存在，但根视图还没有。</p>
+<p>第二段，内容的落位。<code>setContentView</code> 转发到窗口的 <code>setContentView</code>，后者在内容容器为空时先 <code>installDecor</code>：<code>generateDecor</code> 造出 <code>DecorView</code>，<code>generateLayout</code> 依主题生成布局并把内容容器 <code>mContentParent</code> 装到 <code>DecorView</code> 上，最后把应用布局 inflate 进内容容器。</p>
+<p>第三段，窗口的注册。根视图经 <code>WindowManagerImpl.addView</code> 进入全局窗口管理，最终到达 <code>ViewRootImpl.setView</code>。这里把根视图挂为 <code>mAttachInfo.mRootView</code>，并通过窗口会话申请加入显示。</p>
+<p>第四段，Token 的携带。窗口 Token 并非在加入显示时才生成：<code>Activity.attach</code> 取得的组件凭证先存进窗口（<code>Activity.java</code> 约 9247 行的 <code>mToken</code> → <code>Window.java</code> 约 933 行的 <code>mAppToken</code>）。窗口注册的入口是 <code>WindowManagerGlobal.addView</code>（约 409 行）；对顶层 Activity 窗口 <code>parentWindow</code> 非空，于是在约 423 行调用 <code>Window.adjustLayoutParamsForSubWindow</code>（约 947/995 行）把凭证填进窗口属性，随加入显示的请求一并送到系统——系统对它做的是校验与接纳，不是反向下发。此后它成为该窗口在系统侧的身份标识，<code>ViewRootImpl</code> 后续的显示请求都携带它。（装配点并非只有一处：<code>WindowManagerImpl.applyTokens</code>（约 199 行）会用 <code>mDefaultToken</code> 兜底，但条件是 <code>mParentWindow == null</code>——Activity 窗口不满足，故不适用。）</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>在 <code>onCreate</code> 中调用 <code>setContentView(R.layout.main)</code> 时，实际发生的是：内容容器若为空，先补齐 <code>DecorView</code> 与内容容器，再把 <code>main</code> 的布局树加进容器。此时窗口对象与视图树都在，但尚未注册。</p>
+<p>注册发生在主线程第一次触发遍历时：根视图被交给窗口管理，进入 <code>ViewRootImpl.setView</code>，向窗口会话申请加入显示。返回成功后窗口才算真正建立。这也解释了为什么在 <code>onCreate</code> 里读窗口尺寸常拿到零——注册与首次布局都还没发生。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>组件生命周期见 AND-P1-102；视图树建立后的三趟遍历与出帧见 AND-P1-401；窗口管理服务侧的层级与焦点策略归 AND-P2-202 与 AND-P6-302；Token 在合成链中的应用归 AND-P6 各篇。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>窗口创建</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td><code>attach</code>（约 9201 行）</td><td>建 <code>PhoneWindow</code>（约 9232 行）</td></tr><tr><td>取窗口</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td><code>getWindow</code>（约 1354 行）</td><td>返回持有的窗口</td></tr><tr><td>设置内容</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td><code>setContentView</code>（约 3961 行）</td><td>转发到窗口</td></tr><tr><td>窗口抽象</td><td><code>frameworks/base/core/java/android/view/Window.java</code></td><td><code>setContentView</code>（约 1852 行）</td><td>抽象方法，由子类实现</td></tr><tr><td>装饰与容器</td><td><code>frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java</code></td><td><code>installDecor</code>（约 2921 行）</td><td>造 <code>DecorView</code> 与内容容器</td></tr><tr><td>布局生成</td><td>同上</td><td><code>generateLayout</code>（约 2520 行）</td><td>依主题选布局并挂内容容器</td></tr><tr><td>视图注册</td><td><code>frameworks/base/core/java/android/view/WindowManagerImpl.java</code></td><td><code>addView</code>（约 185 行）</td><td>转入全局窗口管理</td></tr><tr><td>会话与 Token</td><td><code>frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td><code>setView</code>（约 1642 行）</td><td>携带 Token 加入显示</td></tr><tr><td>Token 来源</td><td><code>frameworks/base/core/java/android/app/Activity.java</code></td><td><code>attach</code>（<code>mToken</code> 约 9247 行 / 传给窗口约 9267 行）</td><td>组件凭证在 attach 阶段取得</td></tr><tr><td>注册与转调</td><td><code>frameworks/base/core/java/android/view/WindowManagerGlobal.java</code></td><td><code>addView</code>（约 409 行；约 423 行转调 <code>adjustLayoutParamsForSubWindow</code>）</td><td>顶层窗口经父窗口装配 Token</td></tr><tr><td>Token 落位</td><td><code>frameworks/base/core/java/android/view/Window.java</code></td><td><code>adjustLayoutParamsForSubWindow</code>（约 947/995 行）</td><td>客户端把凭证填入窗口属性</td></tr></tbody></table>
+<p>注意：窗口属性的类型是窗口管理器接口内部的 <code>LayoutParams</code>。正文与代码块中提到它时，一律写为「窗口属性」或 <code>mWindowAttributes</code>，不写该内部类的全限定名。</p>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 窗口在 Activity 创建阶段被 new 出来
+grep -n &quot;mWindow = new PhoneWindow&quot; \
+  frameworks/base/core/java/android/app/Activity.java
+# 期望：命中约 9232 行
+
+# 2. setContentView 的转发链
+grep -n &quot;public void setContentView(@LayoutRes int&quot; \
+  frameworks/base/core/java/android/app/Activity.java
+grep -n &quot;public void setContentView(int layoutResID)&quot; \
+  frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java
+# 期望：命中 Activity 约 3961 行、PhoneWindow 约 558 行
+
+# 3. 装饰与内容容器的建立
+grep -n &quot;private void installDecor\|mContentParent = generateLayout&quot; \
+  frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java
+# 期望：命中约 2921 行与约 2934 行
+
+# 4. 视图进入窗口会话
+grep -n &quot;public void addView&quot; \
+  frameworks/base/core/java/android/view/WindowManagerImpl.java
+grep -n &quot;public void setView&quot; \
+  frameworks/base/core/java/android/view/ViewRootImpl.java
+# 期望：命中 WindowManagerImpl 约 185 行、ViewRootImpl 约 1642 行</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 `setContentView` 会立刻显示界面。</strong> 它只填充内容容器；显示要等窗口注册与首次遍历。</p>
+<p><strong>误区二：以为 `onCreate` 里能拿到正确的视图宽高。</strong> 此刻尚未测量布局，读到的是零或占位值；可靠时机在首次布局之后。</p>
+<p><strong>误区三（看起来对其实是错的）：以为 Token 是在窗口加入显示时由系统下发的。</strong> Token 确实不是应用自造的，但也不是等窗口注册时系统才发下来：它是 <code>attach</code> 阶段从系统取得的组件凭证，被应用在注册窗口时主动带进窗口属性（<code>Window.java</code> 约 933/995 行），随加入显示的请求送回系统；系统做的是校验与接纳，而不是授予。（其他窗口类型的装配点可能不同——<code>WindowManagerImpl.applyTokens</code> 的兜底只在无父窗口时生效。）</p>
+<p><strong>误区四：以为 `getWindow` 可能返回空。</strong> 窗口在 <code>attach</code> 阶段就创建，<code>getWindow</code> 总有对象；未注册不等于不存在。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么 <code>setContentView</code> 之前调 <code>requestWindowFeature</code> 才有效？ <strong>答</strong>：因为特性会影响 <code>generateLayout</code> 选用的布局，而该函数只在首次 <code>installDecor</code> 时跑一次；装饰装好后再改特性已不起作用。</p>
+<p><strong>追问</strong>：那重复调用 <code>setContentView</code> 会怎样？ <strong>答</strong>：内容容器会被清空后重新填充，旧视图树被替换。</p>
+<p><strong>问</strong>：窗口什么时候真正「加入显示」？ <strong>答</strong>：在 <code>ViewRootImpl.setView</code> 向窗口会话申请成功后。之前窗口对象与视图树都已存在，只是未注册。</p>
+<p><strong>追问</strong>：怎么验证注册已发生？ <strong>答</strong>：静态看 <code>setView</code> 里的 <code>addToDisplay</code> 调用路径；运行时则看窗口是否出现在系统的窗口列表里（归 P6）。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>界面空白的布局问题</td><td><code>grep -n &quot;public void setContentView(int&quot; frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java</code></td><td>内容容器是否被填充</td><td>查内容容器是否为空</td></tr><tr><td>窗口特性不生效</td><td><code>grep -n &quot;private void installDecor&quot; frameworks/base/core/java/com/android/internal/policy/PhoneWindow.java</code></td><td>装饰是否已装</td><td>特性须在装饰前请求</td></tr><tr><td>视图尺寸为零</td><td><code>grep -n &quot;public void setView&quot; frameworks/base/core/java/android/view/ViewRootImpl.java</code></td><td>是否已注册</td><td>改用布局回调取尺寸</td></tr><tr><td>窗口疑似泄漏</td><td><code>grep -n &quot;public void addView&quot; frameworks/base/core/java/android/view/WindowManagerImpl.java</code></td><td>加入与移除是否成对</td><td>检查销毁路径是否移除根视图</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：视图树的测量布局绘制（AND-P1-401）；组件状态机（AND-P1-102）；窗口管理服务的层级与焦点（AND-P2-202、AND-P6-302）；合成上屏（AND-P6 各篇）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-102</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P1-401</code>，并被 <code>AND-P2-202</code>、<code>AND-P6-302</code> 引用。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>窗口对象在 <code>Activity.attach</code> 阶段创建，口径为 <code>Activity.java</code> 约 9232 行，2026-10-14 实测。</li><li>内容容器 <code>mContentParent</code> 由 <code>installDecor</code> 产生，口径为 <code>PhoneWindow.java</code> 约 2921–2934 行，2026-10-14 实测。</li><li><code>WindowManagerImpl.addView</code> 位于约 185 行，口径为该文件符号位置，2026-10-14 实测。</li><li>窗口注册的耗时随设备与首帧负载变化，无跨设备统一量级；首帧预算的量化约束见 AND-P1-401，本篇不给具体毫秒数。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>窗口创建、装饰安装与注册的分段如本篇所述</td><td>读者按本篇命令可复现</td></tr><tr><td>更早版本</td><td>装饰与内容容器的类名与结构大体沿用，<code>addView</code> 的会话参数有调整（据官方公开资料，本树仅含 android17-release，无法回溯核验）</td><td>按符号重锚，注意内部类位置</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>window</code>、<code>view hierarchy</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>PhoneWindow</code>、<code>ViewRootImpl</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/core/java/com/android/internal/policy/</code>、<code>frameworks/base/core/java/android/view/</code>。</li><li>承接篇：<code>AND-P1-102</code>、<code>AND-P1-401</code>、<code>AND-P6-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

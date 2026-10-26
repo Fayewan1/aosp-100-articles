@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>应用沙箱：uid/gid、SELinux 域与文件隔离</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>应用沙箱：uid/gid、SELinux 域与文件隔离</h1>
+<div class="kv"><span>ID：AND-P9-202</span><span>卷：P9</span><span>章：9.2</span><span>难度：4</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/os/Process.java ；frameworks/base/services/core/java/com/android/server/am/ProcessList.java ；frameworks/base/core/java/android/os/ZygoteProcess.java ；system/sepolicy/private/seapp_contexts ；system/sepolicy/private/untrusted_app.te ；system/sepolicy/private/untrusted_app_all.te ；system/sepolicy/private/app.te ；system/sepolicy/private/mac_permissions.xml ；frameworks/base/services/core/java/com/android/server/pm/SELinuxMMAC.java ；external/selinux/libselinux/src/android/android_seapp.c</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>一个应用进程能碰什么，先由内核的 uid/gid 决定「物理上属于谁」，再由 SELinux 域决定「在 SELinux 策略上允许做什么」。uid 是固定的，域不是：同一个 <code>u0_a123</code> 在 targetSdk 不同时会落到 <code>untrusted_app_34</code>、<code>untrusted_app</code> 等不同域，权限面因此不同。域的选择查的是 <code>seapp_contexts</code>，输入是 uid、包名与 seinfo，外加 <code>isSystemServer</code> 标志（<code>selinux_android_setcontext</code> 四参签名，<code>android_device.c:88-92</code>），由 <code>seapp_context_lookup</code> 完成匹配。targetSdk 不是入参，而是 seinfo 串里的一个字段——<code>SELinuxMMAC.java:460-472</code> 把 seinfo 拼成「基础值 ＋ <code>:privapp</code>（特权时）＋ <code>:targetSdkVersion=N</code> ＋ <code>:partition=X</code>」的复合串，libselinux 侧再由 <code>parse_seinfo</code>（<code>android_seapp.c:724</code>）把它拆回来（:779 取出 <code>targetSdkVersion</code>），最后在 :903 与表里的 <code>minTargetSdkVersion</code> 比大小。安装期的签名白名单（<code>mac_permissions.xml</code>）把签名证书映射成 seinfo 的基础值，seinfo 再参与域匹配——这是「签名」与「域」的唯一连接点。数据目录的标签（如 <code>app_data_file</code>）从同一张表派生，文件隔离因此是 uid 隔离与 type 隔离两层叠加的结果。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P5-501</code>——内核 SELinux 的 AVC（Access Vector Cache，内核 SELinux 的访问判定缓存）、type enforcement、neverallow 编译检查归那一篇，本篇只谈 Android 侧的策略表与域装配。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/os/Process.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ProcessList.java</code></li><li><code>frameworks/base/core/java/android/os/ZygoteProcess.java</code></li><li><code>system/sepolicy/private/seapp_contexts</code></li><li><code>system/sepolicy/private/mac_permissions.xml</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/SELinuxMMAC.java</code></li><li><code>external/selinux/libselinux/src/android/android_seapp.c</code></li><li><code>system/sepolicy/private/app.te</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>有两个进程，<code>ps -Z</code> 看过去 uid 都是 <code>u0_aXXX</code>，但一个能读 <code>/data/misc</code> 下的某个文件，另一个不行。另一个常见困惑：同一个 App 只把 targetSdk 从 33 改到 34，什么代码都没动，却突然出现 <code>avc: denied</code>。还有一种：应用被声明为 <code>isolatedProcess</code> 后，<code>open()</code> 返回值全变成 <code>EACCES</code>，可它的 uid 看起来又不像普通应用。这三种现象的答案都落在同一处——进程身份到底由哪几样东西组成，各自在哪一步被确定。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念：</p>
+<ul><li><strong>uid/gid</strong>：内核 DAC 的主体标识，进程创建时由 Zygote fork 后 <code>setuid</code>/<code>setgid</code> 落下。</li><li><strong>SELinux 域</strong>：进程的 SELinux 标签（如 <code>untrusted_app</code>），决定访问哪组 type。</li><li><strong>seinfo</strong>：安装期由签名证书派生的<strong>复合字符串</strong>，是 <code>seapp_contexts</code> 的匹配输入之一，形如 <code>platform:targetSdkVersion=34:partition=system</code>。</li><li><strong>type</strong>：文件的 SELinux 标签（如 <code>app_data_file</code>），由同一张表按进程属性派生。</li></ul>
+<p>图 1：身份的两层来源</p>
+<pre><code>安装期                          运行期
+签名证书 --mac_permissions.xml--&gt; seinfo 基础值
+                                   |（SELinuxMMAC 追加 :privapp /
+                                   | :targetSdkVersion=N / :partition=X）
+uid / 包名 ----------------------+
+                                   v
+                         seapp_context_lookup
+                            /            \
+                    进程 domain        文件 type
+                  (untrusted_app...)  (app_data_file...)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>图 2：从 fork 到标签落定</p>
+<pre><code>system_server ──指定 uid/gid/参数──&gt; Zygote
+   Zygote fork ──setuid/setgid──&gt; 子进程 (DAC 身份已定)
+   子进程 ──读 seapp_contexts──&gt; domain (SELinux 身份已定)</code></pre>
+<p>两层顺序固定：DAC 先、SELinux 后。uid 一旦 <code>setuid</code> 就不可逆，所以 Zygote 必须在 fork 后、exec 前完成；域标签在这之后由 app 进程自己按 <code>/proc/self/attr/current</code> 写入。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>uid 分段</strong>。<code>Process.java</code> 把 uid 空间切成互不重叠的几段，位于哪个段决定进程被当成什么：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>FIRST_APPLICATION_UID = 10000</code></td><td>普通应用段起点</td><td><code>Process.java:294</code></td></tr><tr><td><code>LAST_APPLICATION_UID = 19999</code></td><td>普通应用段终点</td><td><code>Process.java:300</code></td></tr><tr><td><code>FIRST_SDK_SANDBOX_UID = 20000</code></td><td>SDK 沙箱段起点</td><td><code>Process.java:314</code></td></tr><tr><td><code>LAST_SDK_SANDBOX_UID = 29999</code></td><td>SDK 沙箱段终点</td><td><code>Process.java:320</code></td></tr><tr><td><code>FIRST_PCC_UID = 30000</code></td><td>PCC（Private Compute Core，私有计算核心）沙箱段起点</td><td><code>Process.java:328</code>（:325 注释：需跑在 PCC 沙箱里的进程）</td></tr><tr><td><code>LAST_PCC_UID = 39999</code></td><td>PCC 段终点</td><td><code>Process.java:334</code></td></tr><tr><td><code>FIRST_ISOLATED_UID = 99000</code></td><td>隔离进程段起点</td><td><code>Process.java:370</code></td></tr><tr><td><code>LAST_ISOLATED_UID = 99999</code></td><td>隔离进程段终点</td><td><code>Process.java:378</code></td></tr><tr><td><code>SDK_SANDBOX_VIRTUAL_UID = 1090</code></td><td>SDK 沙箱的虚拟 uid</td><td><code>Process.java:277</code></td></tr></tbody></table>
+<p>普通应用段（10000–19999）里一个 uid 对应一个包（<code>sharedUserId</code> 显式共享的除外——共享 uid 的多个包必须落同一个 SELinux 域，<code>SELinuxMMAC.java:360-373</code>），是 DAC 隔离的粒度来源。<code>SDK_SANDBOX_VIRTUAL_UID</code>（<code>Process.java:277</code>，注释写明 &quot;used to aggregate data related to SDK sandbox UIDs&quot;）是给用量与电量统计用的聚合虚拟 uid，<strong>不参与</strong> <code>seapp_contexts</code> 匹配——SDK 沙箱进程的匹配身份是 <code>user=_sdksandbox</code>，由 <code>android_seapp.c:847-852</code> 按 uid 落在 20000–29999 段推导（与 <code>user=_app</code> 同一条 if-else 链），对应条目在 <code>seapp_contexts:185-187</code>。PCC 段在应用段与隔离段之间单列，说明这几类主体在策略上被区别对待。</p>
+<p><strong>uid 的下发</strong>。<code>ProcessList.java</code> 负责为隔离进程挑 uid：<code>IsolatedUidRange</code>（:603）描述一段可分配的 uid 区间，<code>IsolatedUidRangeAllocator</code>（:648）负责挂包名与区间的对应，<code>getIsolatedUidRangeLocked(String, int)</code>（:671）是取用入口。分配至少涉及两个池：全局隔离池 <code>mGlobalIsolatedUids</code>（:712）用 99000–99999；挂在 app Zygote 下的隔离进程走 <code>mAppIsolatedUidRangeAllocator</code>（:723-724），区间是 90000–98999（<code>Process.java:348</code>/<code>:362</code>），并按 <code>NUM_UIDS_PER_APP_ZYGOTE</code>=100（:355）分片。此外还有第三条路径：开启 <code>useSafesetidUidPolicy2</code> 后，app Zygote 隔离 uid 改由 SafeSetID 侧统一管理，池是 <code>mGlobalAppIsolatedUids</code>（:733，:870 赋值）——<code>getOrCreateIsolatedUidRangeLocked</code>（:3454-3463）按「非 app Zygote／已开 SafeSetID 策略／其余」三分流，两池只是未开该策略时的主线。用完可回收——这是它与普通应用 uid 的本质差别：普通应用 uid 由安装决定并长期稳定，隔离进程 uid 是运行期临时资源。</p>
+<p><strong>参数怎么送到 Zygote</strong>。<code>ZygoteProcess.java</code> 的 :623 是注释，列出这一组 Zygote 参数；<code>--setuid=</code> 在 :626，<code>--setgid=</code> 在 :627。system_server 组装一串字符串参数，通过 Zygote 的 socket 发过去，Zygote fork 后解析参数并 <code>setuid</code>/<code>setgid</code>。这意味着 DAC 身份的授予点是 Zygote 子进程，而不是 system_server 自己——system_server 只有「指定」的权力，没有「代替执行」的能力。</p>
+<p><strong>域匹配表</strong>。<code>seapp_contexts</code>（222 行）是一张按属性匹配的表。targetSdk 阶梯在 209–216 行，从高到低匹配（:216 是「无门槛」的兜底行，不带 <code>minTargetSdkVersion</code> 键）：</p>
+<table><thead><tr><th>条件</th><th>匹配到的域</th><th>出处</th></tr></thead><tbody><tr><td><code>minTargetSdkVersion=37</code></td><td><code>untrusted_app</code></td><td><code>seapp_contexts:209</code></td></tr><tr><td><code>minTargetSdkVersion=34</code></td><td><code>untrusted_app_34</code></td><td>:210</td></tr><tr><td><code>minTargetSdkVersion=32</code></td><td><code>untrusted_app_32</code></td><td>:211</td></tr><tr><td><code>minTargetSdkVersion=30</code></td><td><code>untrusted_app_30</code></td><td>:212</td></tr><tr><td><code>minTargetSdkVersion=29</code></td><td><code>untrusted_app_29</code></td><td>:213</td></tr><tr><td><code>minTargetSdkVersion=28</code></td><td><code>untrusted_app_27</code></td><td>:214</td></tr><tr><td><code>minTargetSdkVersion=26</code></td><td><code>untrusted_app_27</code></td><td>:215</td></tr><tr><td>无门槛</td><td><code>untrusted_app_25</code></td><td>:216</td></tr></tbody></table>
+<p>注意两条细节。第一，<code>:214</code> 与 <code>:215</code> 都指向 <code>untrusted_app_27</code>，即 targetSdk 26 与 28 共用同一个域，阶梯不是一一映射。第二，最新一档（targetSdk ≥ 37）落回基线域 <code>untrusted_app</code> 本身，说明「新版本用主域、老版本用带后缀的兼容域」是整体设计方向：兼容域承载的是历史遗留的放行条目。</p>
+<p>阶梯怎么比出来的，值得点明：表里写的是 <code>minTargetSdkVersion=34</code> 这样的门槛值，被比的是从 seinfo 里解析出的 <code>targetSdkVersion</code>——<code>parse_seinfo</code>（<code>android_seapp.c:724</code>）把 <code>:targetSdkVersion=N</code> 拆出来（:779），比对发生在 :903 的 <code>cur-&gt;minTargetSdkVersion &gt; info.targetSdkVersion</code>。也就是说 targetSdk 这条线走的是「seinfo 子串 → 解析 → 与表内门槛比大小」，不是另开一个入参。</p>
+<p><strong>域阶梯的物理形态</strong>。<code>system/sepolicy/private/</code> 下共 8 个相关文件：<code>untrusted_app.te</code>（23 行）、<code>untrusted_app_25.te</code>、<code>_27</code>、<code>_29</code>、<code>_30</code>、<code>_32</code>、<code>_34</code> 六份兼容域，再加公共文件 <code>untrusted_app_all.te</code>（<code>public/untrusted_app.te</code> 另有一份，声明哪些 app 会落进这个域）。主域文件只有 23 行，说明它主要靠引用公共文件组织规则，兼容域各自叠加删减。这种「一个基线 + 一列新旧域 + 一份公共尾部」的结构，让 targetSdk 的影响面可以被精确 diff。</p>
+<p><strong>app 域公共规则</strong>。<code>app.te</code>（903 行）是所有 app 类域共享的规则集合。它与 <code>untrusted_app_all.te</code> 的分工是：前者定义「凡是 app 就允许」的部分，后者定义「凡是 untrusted_app 家族就允许」的部分。域越往下（25/27/29…），叠加的额外放行越多。</p>
+<p><strong>文件侧 type</strong>。<code>seapp_contexts</code> 的 209–216 行每条都带 <code>type=app_data_file</code>，这一列决定的是进程数据目录的标签。同表还有 <code>privapp_data_file</code> 这类 type（:194-198，特权应用数据目录），以及 <code>ephemeral_app</code> 这类<strong>域</strong>（:193 <code>user=_app isEphemeralApp=true domain=ephemeral_app type=app_data_file</code>——临时应用换的是域，数据目录标签仍是 <code>app_data_file</code>）。<code>:138</code> 与 <code>:139</code> 是两条并列的 neverallow，分别针对 <code>user=_app isPrivApp=false name=.* seinfo=&quot;&quot;</code> 与 <code>seinfo=default</code> 两种形态——即「基础 seinfo 为空」与「基础 seinfo 落到默认值」都不许触及相关标签，这是编译期就挡住越界的写法。</p>
+<p><strong>域间最小授权的形状</strong>。<code>untrusted_app.te</code> 里对 <code>sdk_sandbox_data_file</code> 放了两条、又用一条 neverallow 收口：<code>:20</code> 放行 <code>fd</code> 的 <code>use</code>，<code>:21</code> 追加放行 <code>file</code> 的 <code>write</code>，但 <code>:23</code> 用 <code>neverallow ... :file { open create }</code> 把「自己打开或新建」封死。合起来看是「能用别人递过来的 fd、也能往里写，但不能自己开文件」——只讲 <code>:20</code> 会漏掉 <code>:21</code> 的写权限，只讲放行又会漏掉 <code>:23</code> 的封口。这类条目是域阶梯差异的来源，也是「看起来 uid 相同、实际权限不同」的直接原因。</p>
+<p><strong>签名的接入点</strong>。<code>mac_permissions.xml</code>（77 行，10 个 <code>&lt;signer&gt;</code>）把签名证书映射成 seinfo；<code>SELinuxMMAC.java</code>（834 行）是这套映射的 Java 实现，安装期为包算出 seinfo。seinfo 一旦算出，就作为 <code>seapp_contexts</code> 的匹配输入参与域选择。这条链是签名在运行期产生实际效果的通道。</p>
+<p><strong>查表入口</strong>。<code>android_seapp.c</code>（982 行）是 libselinux 侧的匹配实现：<code>seapp_context_lookup_internal</code> 在 :810，对外入口 <code>seapp_context_lookup</code> 在 :972，:981 是转发。普通应用、SDK 沙箱与隔离进程（<code>com_android_internal_os_Zygote.cpp:2174</code> 是调用点）的域与数据目录标签都从这里取出，它是策略表与运行时标签之间的桥。system_server 是例外：Zygote 侧在 fork 后直接硬编码 <code>selinux_android_setcon(&quot;u:r:system_server:s0&quot;)</code>（<code>com_android_internal_os_Zygote.cpp:2204-2208</code>，TODO 明示待删），<code>seapp_contexts:165</code> 的 <code>isSystemServer=true domain=system_server_startup</code> 只覆盖 startup 路径，不是主进程的取域来源。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一个 targetSdk 34 的第三方应用被拉起。system_server 通过 <code>ZygoteProcess</code> 的 <code>--setuid=</code>/<code>--setgid=</code> 参数把 <code>u0_a123</code>（落在 10000–19999 段）传给 Zygote；fork 后 <code>setuid</code> 完成，DAC 身份已定。接着 app 进程调 <code>seapp_context_lookup</code>，输入是 uid、包名与 seinfo——seinfo 此时形如 <code>default:targetSdkVersion=34:partition=...</code>，<code>parse_seinfo</code> 从中取出 34，在 <code>seapp_contexts</code> 里命中 <code>:210</code> 的 <code>minTargetSdkVersion=34</code>，得到 <code>untrusted_app_34</code>；同一行的 <code>type=app_data_file</code> 给出数据目录标签。</p>
+<p>把 targetSdk 改成 32，重装后同样的 uid 和包名，命中的变成 <code>:211</code>，域变为 <code>untrusted_app_32</code>。DAC 侧一模一样，SELinux 侧换了一整套规则。</p>
+<p>若这个包在 <code>mac_permissions.xml</code> 里没有对应的 <code>&lt;signer&gt;</code> 条目，seinfo 的基础值不是空字符串，而是落到默认值 <code>default</code>（<code>SELinuxMMAC.java:80 DEFAULT_SEINFO</code>、:461 赋值），随后的 <code>:privapp</code>/<code>:targetSdkVersion=N</code>/<code>:partition=X</code> 照旧拼上——<code>seapp_contexts:139</code> 那条 neverallow 针对的正是 <code>seinfo=default</code> 这种形态（:138 针对的是 <code>seinfo=&quot;&quot;</code>）。所以「没有签名映射」不等于「没有 seinfo」，它只是拿不到由签名带来的基础值。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P5-501</code> 讲内核 SELinux 机制本身（AVC 判定、type enforcement、neverallow 编译期检查），本篇只讲 Android 的策略表和域装配，两者是「机制」与「配置」的分工。<code>AND-P9-201</code> 讲权限模型（运行时权限、AppOps 一类），那是「用户在运行时授予什么」；本篇讲「底层凭什么拦住」，权限被拒和 <code>avc: denied</code> 是两个不同层次的失败。<code>AND-P9-401</code> 讲密钥存在哪、Keystore 2 与 KeyMint 的分层，属于本篇域规则约束下的具体服务访问，不展开。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>uid 分段常量</td><td><code>frameworks/base/core/java/android/os/Process.java</code></td><td><code>FIRST_APPLICATION_UID</code>、<code>FIRST_ISOLATED_UID</code>、<code>SDK_SANDBOX_VIRTUAL_UID</code></td><td>身份的第一层定义</td></tr><tr><td>隔离进程 uid 分配</td><td><code>frameworks/base/services/core/java/com/android/server/am/ProcessList.java</code></td><td><code>IsolatedUidRange</code>、<code>IsolatedUidRangeAllocator</code>、<code>getIsolatedUidRangeLocked</code></td><td>临时 uid 的池化与回收</td></tr><tr><td>参数下发</td><td><code>frameworks/base/core/java/android/os/ZygoteProcess.java</code></td><td><code>--setuid=</code>、<code>--setgid=</code></td><td>DAC 身份的授予通道</td></tr><tr><td>域匹配表</td><td><code>system/sepolicy/private/seapp_contexts</code></td><td><code>minTargetSdkVersion</code> 阶梯、<code>type=app_data_file</code></td><td>域与文件 type 的共同来源</td></tr><tr><td>基线域</td><td><code>system/sepolicy/private/untrusted_app.te</code></td><td>仅 23 行，主体靠引用</td><td>新 targetSdk 落点</td></tr><tr><td>公共规则</td><td><code>system/sepolicy/private/untrusted_app_all.te</code> 与 <code>app.te</code></td><td>家族共享 / 全体 app 共享</td><td>分层叠加的基座</td></tr><tr><td>签名白名单</td><td><code>system/sepolicy/private/mac_permissions.xml</code></td><td>10 个 <code>&lt;signer&gt;</code></td><td>证书到 seinfo 的映射</td></tr><tr><td>查表实现</td><td><code>external/selinux/libselinux/src/android/android_seapp.c</code></td><td><code>seapp_context_lookup_internal</code>、<code>seapp_context_lookup</code></td><td>表与运行时标签的桥</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/sepolicy:e066568e98d8</p></blockquote>
+<p>验证方式：静态源码分析（V1＋V3 可叠加；V3 观测命令为 <code>ps -Z</code>、<code>ls -Z</code>、<code>getenforce</code>，本篇不断言真机输出）。</p>
+<pre><code class="lang-bash">grep -n &quot;FIRST_APPLICATION_UID\|LAST_APPLICATION_UID\|FIRST_ISOLATED_UID\|LAST_ISOLATED_UID\|SDK_SANDBOX_VIRTUAL_UID&quot; \
+  frameworks/base/core/java/android/os/Process.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：五个常量分别出现在 :294、:300、:370、:378、:277，对应 §4.2 的 uid 分段表。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/core/java/android/os/Process.java \
+      frameworks/base/services/core/java/com/android/server/am/ProcessList.java \
+      frameworks/base/core/java/android/os/ZygoteProcess.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：1971、6193、1313 三个行数上界，与本篇口径一致（行数会随 cherry-pick 漂移，用于确认树版本）。</p>
+<pre><code class="lang-bash">sed -n '209,216p' system/sepolicy/private/seapp_contexts</code></pre>
+<p>期望：八行 <code>minTargetSdkVersion</code> 阶梯，从 37 到无门槛，末列为 <code>untrusted_app</code> 到 <code>untrusted_app_25</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;minTargetSdkVersion&quot; system/sepolicy/private/seapp_contexts</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：命中十条真实条目（<code>:191</code> platform、<code>:194</code> priv_app、<code>:209</code>–<code>:215</code> 七档 untrusted、<code>:217</code> runas_app）＋ <code>:12</code>、<code>:42</code>、<code>:80</code>、<code>:81</code> 四行注释。<code>:216</code> 是「无门槛」兜底行，<strong>不带</strong>这个键；另可确认 :214 与 :215 的域名同为 <code>untrusted_app_27</code>。只想看 untrusted 阶梯就加 <code>sed -n '209,216p'</code>。</p>
+<pre><code class="lang-bash">grep -rn &quot;app_data_file\|privapp_data_file\|ephemeral_app&quot; system/sepolicy/private/seapp_contexts</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：209–216 每条都带 <code>type=app_data_file</code>，另有带 <code>privapp_data_file</code>/<code>ephemeral_app</code> 的行。</p>
+<pre><code class="lang-bash">wc -l system/sepolicy/private/untrusted_app.te system/sepolicy/private/app.te \
+      system/sepolicy/private/mac_permissions.xml</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：23、903、77，对应主域精简、公共规则规模大、白名单条数少。</p>
+<pre><code class="lang-bash">sed -n '48,$p' system/sepolicy/private/mac_permissions.xml | grep -c &quot;&lt;signer&quot;</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：6，即生效条目数（直接对全文 <code>grep -c &quot;&lt;signer&quot;</code> 得 10，多出的 4 个在开头 <code>:4-47</code> 的注释块里）。</p>
+<pre><code class="lang-bash">grep -n &quot;setuid=\|setgid=&quot; frameworks/base/core/java/android/os/ZygoteProcess.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望：:626 与 :627 两个参数拼接点，:623 的注释在其上方。</p>
+<pre><code class="lang-bash">sed -n '19,23p' system/sepolicy/private/untrusted_app.te</code></pre>
+<p>期望：<code>:20</code> 放行 <code>fd use</code>、<code>:21</code> 放行 <code>file write</code>、<code>:23</code> <code>neverallow ... :file { open create }</code>——三条要一起看。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：uid 相同就等于权限相同。</strong> 不对。uid 只决定 DAC 侧的「属于谁」。同一个 uid 完全可能落在不同 SELinux 域，域之间的 allow 规则由 <code>mac_permissions.xml</code>、targetSdk、是否特权应用等共同决定。</p>
+<p><strong>误区二：targetSdk 只影响行为兼容，不影响安全。</strong> 这是最「看起来对其实是错的」的一条。targetSdk 是域选择的直接输入（<code>seapp_contexts:209-216</code>），升到 34 就从 <code>untrusted_app_32</code> 切到 <code>untrusted_app_34</code>，可用规则集整块变化。只看代码是否兼容会漏掉 <code>avc: denied</code>。</p>
+<p><strong>误区三：隔离进程只是「uid 特殊」。</strong> 而且「特殊」还不止一段：隔离 uid 有两套池打底——全局池 99000–99999，app Zygote 池 90000–98999，都是运行期临时分配、用完回收复用（开 <code>useSafesetidUidPolicy2</code> 后 app Zygote 池还改由 SafeSetID 侧统一管理，见 §4.2）；普通应用 uid 则在安装后稳定。这个差别意味着它不能用「某 uid 一定对应某包」来做推理，也不能靠固定 uid 做文件授权。</p>
+<p><strong>误区四：`app.te` 和 `untrusted_app.te` 是同一套规则的粗细两版。</strong> 不是。<code>app.te</code> 是「所有 app 域都适用」的公共规则，<code>untrusted_app_all.te</code> 是「所有 untrusted_app 家族」的规则，两者是纵向上级关系；<code>untrusted_app.te</code> 只有 23 行，主要靠引用，不是 <code>app.te</code> 的裁剪副本。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：一个包在 <code>mac_permissions.xml</code> 里没有匹配的 <code>&lt;signer&gt;</code>，会怎样？</p>
+<p><strong>答</strong>：基础 seinfo 落到默认值 <code>default</code>（<code>SELinuxMMAC.java:80 DEFAULT_SEINFO</code>、:461 赋值），而不是空字符串。<code>seapp_contexts</code> 里两条 neverallow 各管一种形态：<code>:138</code> 管 <code>seinfo=&quot;&quot;</code>、<code>:139</code> 管 <code>seinfo=default</code>；非特权应用落到后者时，策略层面不会被授予特权路径所需的标签。</p>
+<p><strong>追问</strong>：那它还能正常当普通应用跑吗？</p>
+<p><strong>答</strong>：能。<code>default</code> 不等于不能运行，它只是拿不到由签名映射带来的额外放行；最终域仍由 seinfo 里的 <code>:targetSdkVersion=N</code> 与表内门槛比对决定。</p>
+<p><strong>问</strong>：<code>SDK_SANDBOX_VIRTUAL_UID = 1090</code> 为什么不落在 20000–29999 段里？</p>
+<p><strong>答</strong>：它不是内核 DAC 上的实际 uid，是用量与电量统计的聚合身份（<code>Process.java:273-277</code> 注释），不参与 <code>seapp_contexts</code> 匹配。SDK 沙箱进程在 DAC 上落到 20000–29999 段，策略匹配走的是 <code>user=_sdksandbox</code>（<code>android_seapp.c:847-852</code> 按 uid 段推导），命中 <code>seapp_contexts:185-187</code>。把两套编号分开，是为了让统计聚合与策略匹配各走各的口径。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>应用突然大量 <code>avc: denied</code></td><td><code>adb shell getenforce</code></td><td>是否为 <code>Enforcing</code></td><td>若 <code>Permissive</code> 则确认是策略放宽而非 bug；Enforcing 则转下一条</td></tr><tr><td>想知道某进程落在哪个域</td><td><code>adb shell ps -Z | grep &lt;包名&gt;</code></td><td>第一列 SELinux 标签是否为 <code>untrusted_app</code> 或带后缀</td><td>对照 <code>seapp_contexts:209-216</code> 与包的实际 targetSdk</td></tr><tr><td>数据目录可读性不符预期</td><td><code>adb shell ls -Z /data/user/0/&lt;包名&gt;</code></td><td>目录标签是 <code>app_data_file</code> 还是 <code>privapp_data_file</code></td><td>确认包是否特权应用，对照 <code>seapp_contexts</code> 的 <code>isPrivApp</code> 分支</td></tr><tr><td>猜某版本会落到哪个域</td><td><code>grep -n &quot;minTargetSdkVersion&quot; system/sepolicy/private/seapp_contexts</code></td><td>阶梯值与域名的对应</td><td>按包 targetSdk 从高到低取第一条满足的</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：内核 SELinux 的 AVC 判定与 type enforcement 语义（<code>AND-P5-501</code>）；运行时权限模型与 AppOps（<code>AND-P9-201</code>）；密钥存储分层（<code>AND-P9-401</code>）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P5-501</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P9-201</code>（权限模型在本篇的域约束下工作）、<code>AND-P9-401</code>（密钥服务访问受本篇域规则限制）。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>普通应用 uid 空间 10000–19999，共 10000 个槽位（口径：<code>Process.java</code> 常量，<code>FIRST_APPLICATION_UID</code>/<code>LAST_APPLICATION_UID</code>）。</li><li>隔离进程 uid 有两套池打底，别只记一段：全局隔离段 99000–99999，共 1000 个槽位（<code>FIRST_ISOLATED_UID</code>/<code>LAST_ISOLATED_UID</code>，<code>ProcessList.java:712</code> 用它们建 <code>mGlobalIsolatedUids</code>）；app Zygote 隔离段 90000–98999，共 9000 个槽位（<code>Process.java:348 FIRST_APP_ZYGOTE_ISOLATED_UID</code>、<code>:362 LAST_APP_ZYGOTE_ISOLATED_UID</code>，<code>ProcessList.java:723-724</code> 用它们建 <code>mAppIsolatedUidRangeAllocator</code>）。挂在 app Zygote 下的隔离进程走后者；开 <code>useSafesetidUidPolicy2</code> 时后者改由 <code>mGlobalAppIsolatedUids</code>（<code>ProcessList.java:733</code>）承担。</li><li><code>seapp_contexts</code> 的 targetSdk 阶梯共 8 档（含 :216 的无门槛兜底），其中两档共用 <code>untrusted_app_27</code>（口径：<code>seapp_contexts:209-216</code>）。</li><li>签名白名单生效条目 6 个（口径：<code>mac_permissions.xml</code>，<code>sed -n '48,$p' … | grep -c '&lt;signer'</code> 可复核；直接 <code>grep -c '&lt;signer'</code> 得 10，含注释块 :4-47 里的 4 个示例）。</li><li>单个设备上同时存在的隔离进程上限受 <code>IsolatedUidRangeAllocator</code> 的池大小约束，具体数值随分区配置变化；暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>模块化之前（早期版本）</td><td>应用段与隔离段之间无独立分段（本树仅 android17-release 可核，无早期版本实测，时点暂无官方出处，列为待补）</td><td>沙箱进程只能落到应用段或隔离段，策略上无法单列一类主体</td></tr><tr><td>android17-release（本树）</td><td><code>FIRST_SDK_SANDBOX_UID = 20000</code> 与 <code>FIRST_PCC_UID = 30000</code> 单列；<code>seapp_contexts</code> 阶梯最高档为 <code>minTargetSdkVersion=37</code> 映射到基线 <code>untrusted_app</code></td><td>新 targetSdk 应用落在主域，老应用逐档落到兼容域；策略 diff 可按 targetSdk 精确定位</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>security overview</code>、<code>SELinux concepts</code>、<code>seapp_contexts</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>seapp_contexts</code>、<code>untrusted_app</code>、<code>SDK sandbox uid</code>。</li><li>本仓关键路径：<code>system/sepolicy/private/seapp_contexts</code>、<code>system/sepolicy/private/app.te</code>、<code>external/selinux/libselinux/src/android/android_seapp.c</code>。</li><li>承接篇：<code>AND-P5-501</code>、<code>AND-P9-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

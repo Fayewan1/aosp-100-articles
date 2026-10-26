@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>性能分析方法论：指标、基线与归因路径</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>性能分析方法论：指标、基线与归因路径</h1>
+<div class="kv"><span>ID：AND-P10-101</span><span>卷：P10</span><span>章：10.1</span><span>难度：3</span><span>核验：2026-10-21</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java ；frameworks/base/core/java/com/android/internal/os/ProcessCpuTracker.java ；frameworks/base/core/java/android/os/Debug.java ；frameworks/native/cmds/dumpsys/dumpsys.cpp ；frameworks/native/cmds/atrace/atrace.cpp ；frameworks/base/core/java/android/os/Trace.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:14px"><a href="#h7-常量的两种语义">常量的两种语义</a></li><li style="margin-left:14px"><a href="#h8-三个观测入口">三个观测入口</a></li><li style="margin-left:0px"><a href="#h9-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h10-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h11-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h12-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h13-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h14-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h15-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h16-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h17-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h18-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h19-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>「慢」不是指标，是感受。把它翻译成可测量的三个面：CPU 时间、内存占用、trace 上的时间片。系统自己就写死了大量超时常量，这些常量是现成的基线，不是你的目标值。观测只能回答「哪个进程何时占了多少」，判因果必须回到源码常量与调用链。本篇给的是路径：指标定义 → 基线选取 → 归因落点，不给任何设备上的实测数字。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P10-G01</code>，本卷导读篇给出 9 篇的分工与依赖顺序，先看它再决定读哪几篇。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ProcessCpuTracker.java</code></li><li><code>frameworks/base/core/java/android/os/Debug.java</code></li><li><code>frameworks/native/cmds/dumpsys/dumpsys.cpp</code></li><li><code>frameworks/native/cmds/atrace/atrace.cpp</code></li><li><code>frameworks/base/core/java/android/os/Trace.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>用户报「打开这个界面要等三秒」。你手上没有三秒这个数字的来源，只有一句抱怨。你想抓一次 trace，但抓多久、看哪些类别、对照什么阈值，全是空白。抓到了 trace，看到一长条 <code>bindApplication</code>，可它耗时是正常的还是异常的，你没有参照。</p>
+<p>这就是缺三样东西：一个定义清楚的指标、一个系统自己承认的基线、一条从观测数据走回源码的归因路径。三样齐了，「慢」才变成可讨论的问题。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>指标是观测量，基线是参照系，归因是把两者之差落到代码位置上。三者单向依赖：没有指标就定义不了基线，没有基线就判不出归因。</p>
+<p>图 1：指标—基线—归因的单向依赖</p>
+<pre><code>[指标]  CPU / 内存 / trace 时间片
+   |
+   v
+[基线]  系统超时常量、trace 类别、采样入口
+   |
+   v
+[归因]  源码常量 + 调用链</code></pre>
+<p>观测面有三个入口：CPU 走 <code>ProcessCpuTracker</code>，内存走 <code>Debug</code>，时间走 <code>atrace</code> 类别与 <code>Trace</code> 打点。基线不靠猜，系统自己给：一族 <code>DEFAULT_*</code> 常量与调度间隔常量就是它写死的参照系。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<h3 id="h7-常量的两种语义">常量的两种语义</h3>
+<p><code>ActivityManagerConstants.java</code> 里的一族常量，要先分清语义再当基线用，不能一律当成「系统愿意等多久」。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>DEFAULT_SERVICE_TIMEOUT</code></td><td>前台服务启动等待上限，含 <code>Build.HW_TIMEOUT_MULTIPLIER</code> 放大因子</td><td>:320</td></tr><tr><td><code>DEFAULT_SERVICE_BACKGROUND_TIMEOUT</code></td><td>后台服务等待上限，为前者 10 倍</td><td>:325</td></tr><tr><td><code>DEFAULT_GC_TIMEOUT</code></td><td>GC 调度最小间隔（<code>AppProfiler</code> 用它定 <code>GC_BACKGROUND_PROCESSES_MSG</code> 最早触发时刻），不是失败判据</td><td>:208</td></tr><tr><td><code>DEFAULT_BG_START_TIMEOUT</code></td><td>后台 Service 启动队列（<code>mStartingBackground</code>）的调度等待，到点仅释放槽位并放行下一个，非失败判据</td><td>:227</td></tr><tr><td><code>DEFAULT_SERVICE_BG_ACTIVITY_START_TIMEOUT</code></td><td>服务触发后台 Activity 启动特权的有效窗口（到点回收特权）</td><td>:228</td></tr><tr><td><code>DEFAULT_FGS_START_FOREGROUND_TIMEOUT_MS</code></td><td>前台服务 <code>startForeground</code> 的<strong>宽限</strong>上限（<code>mFgsStartForegroundTimeoutMs</code>，:773 持有、<code>DeviceConfig</code> 可调 :1838-1840），<strong>不是</strong> ANR 判据</td><td>:244（=10s）</td></tr><tr><td><code>DEFAULT_SERVICE_START_FOREGROUND_TIMEOUT_MS</code></td><td>服务转入前台的等待上限</td><td>:311</td></tr><tr><td><code>DEFAULT_SHORT_FGS_TIMEOUT_DURATION</code></td><td>short-FGS 存活上限（分钟级）</td><td>:1064</td></tr><tr><td><code>DEFAULT_SHORT_FGS_ANR_EXTRA_WAIT_DURATION</code></td><td>short-FGS 超时后的额外宽限</td><td>:1128</td></tr><tr><td><code>DEFAULT_PROCESS_KILL_TIMEOUT_MS</code></td><td>进程 kill 的等待上限</td><td>:248</td></tr><tr><td><code>DEFAULT_NETWORK_ACCESS_TIMEOUT_MS</code></td><td>网络访问判定窗口，注释标 <code>// 0.2 sec</code></td><td>:249</td></tr></tbody></table>
+<p>表的用法：前两类语义要分开。服务启动那一族多数是失败判据，超过它系统判超时并记一笔，但 <code>DEFAULT_BG_START_TIMEOUT</code> 是例外——它只是后台 Service 启动队列 <code>mStartingBackground</code> 的调度定时器（<code>ActiveServices.java</code> :1656 设值、:728–:730 分发并调用 <code>rescheduleDelayedStartsLocked</code>、:757-:768 到期移出），到点只记 <code>Waited long enough</code> 并放行队列里的下一个，既不判 ANR 也不记超时；<code>DEFAULT_GC_TIMEOUT</code> 同理是调度间隔，超了不会记超时。看到某个等待被系统判超时，说明它已经触到了对应的判据线；没触到，这条线不能反过来当作性能合格的证明。常量值是代码事实，不是设备实测。</p>
+<p>还要注意服务域有三条判据线并存、按 <code>AnrTypes</code> 选线，不是只有一个 <code>DEFAULT_SERVICE_TIMEOUT</code>：Service 启动/执行走 20s×<code>Build.HW_TIMEOUT_MULTIPLIER</code>（后台再乘 10；该倍率由 <code>Build.java</code> :1767 读只读属性 <code>ro.hw_timeout_multiplier</code> 决定、默认 1（<strong>类加载时定值、之后不变</strong>，但不同设备可以不同），故本篇不给出单一毫秒值），<code>ActiveServices.java</code> :8472-:8473 按前后台二选一、:8474 起表，<code>startForeground</code> 转换走 <code>DEFAULT_SERVICE_START_FOREGROUND_TIMEOUT_MS</code> 30s，short-FGS 走 <code>DEFAULT_SHORT_FGS_TIMEOUT_DURATION</code> 180s 加 10s 额外宽限。排障时先辨 ANR 类型，再选常量（注意 <code>AnrTypes.JOB_SERVICE_START</code>（<code>AnrTypes.java</code>:82）属 Job 调度域、不在 am 服务域，本文三条判据线不含它）。</p>
+<h3 id="h8-三个观测入口">三个观测入口</h3>
+<p>CPU：<code>ProcessCpuTracker.update()</code> 在 :339 汇总采样，<code>getCpuTimeForPid(int pid)</code> 在 :633 取单进程时间。内存：<code>Debug.getMemoryInfo(MemoryInfo)</code> 与 <code>getPss()</code> 一族给出具名字段的内存快照；<code>MEMINFO_TOTAL</code>=0 起的一组下标是另一个方法 <code>getMemInfo(long[] outSizes)</code> 的出参口径，消费方是 <code>com.android.internal.util.MemInfoReader</code>，与 <code>getMemoryInfo(int, MemoryInfo)</code> 无关，混用会取错口径。时间：<code>atrace</code> 的 <code>k_categories[]</code> 从 :102 起共 46 项，<code>gfx</code>、<code>input</code>、<code>view</code>、<code>wm</code>、<code>am</code>、<code>sched</code>、<code>freq</code>、<code>binder_driver</code>、<code>memory</code>、<code>thermal</code> 都在里面，其中 <code>core_services</code> 一项由 :72 的常量名间接给出；应用侧用 <code>Trace.beginSection</code>/<code>endSection</code> 打自定义切片，<code>isEnabled()</code> 先判再打。</p>
+<p><code>dumpsys</code> 本身也有代价约束：<code>dumpsys.cpp</code> 里 <code>timeoutArgMs</code> 默认 10000 毫秒（:139），<code>-t</code> 按秒解析（:193-194），另有毫秒参数分支 <code>-T</code>（:205-207；<code>-t</code> 才是秒，:193-194）；<code>--priority</code> 解析于 :170-172、在 :258 生效，<code>--skip</code> 解析于 :163、在 :285 生效，两者都用来缩小采样面。采样工具本身也会扰动被测对象。</p>
+<h2 id="h9-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>某次服务启动在日志里被判了超时。按三步走：</p>
+<p>第一步，定指标。这条路径的观测指标是「服务启动调用到回调返回」的墙钟时长，不是 CPU 时间——等待期间进程可能在睡眠。</p>
+<p>第二步，取基线。<code>DEFAULT_SERVICE_TIMEOUT</code> 值为 <code>20 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>，后台那条是它乘 10。具体毫秒数取决于 <code>HW_TIMEOUT_MULTIPLIER</code> 的实际配置，本篇不断言某台设备上的具体数值。</p>
+<p>第三步，归因。超时说明等的是「前一个进程没在基线内完成启动」，路径落到 <code>ActivityManagerConstants.java</code> 的常量与它被消费的调度逻辑上，而不是落在应用代码里随便某个函数。</p>
+<p>三步走完，「服务启动慢」才变成一个可验证的命题：是等超了，还是根本没到等待阶段。</p>
+<h2 id="h10-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P10-G01</code> 给全卷分工。<code>AND-P10-102</code> 把本篇的指标口径落到启动这一个域；<code>AND-P10-201</code>/<code>AND-P10-202</code> 分别接内存与卡顿；<code>AND-P10-301</code> 接功耗。工具的具体用法不在本篇，atrace 与 perfetto 的操作细节归 401/402——本篇只讲「什么时候该看哪个类别」。</p>
+<h1 id="h11-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>基线条目</td><td><code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></td><td><code>DEFAULT_SERVICE_TIMEOUT</code> :320 等 11 个常量</td><td>共 2625 行，系统自查的等待上限</td></tr><tr><td>CPU 观测</td><td><code>frameworks/base/core/java/com/android/internal/os/ProcessCpuTracker.java</code></td><td><code>update()</code> :339、<code>getCpuTimeForPid(int pid)</code> :633</td><td>共 1006 行，进程级 CPU 采样</td></tr><tr><td>内存观测</td><td><code>frameworks/base/core/java/android/os/Debug.java</code></td><td><code>getMemoryInfo</code> :1999/:2010、<code>getPss</code> :2016/:2028、<code>getMemInfo(long[])</code> 的 <code>MEMINFO_*</code> 下标起于 :2048</td><td>共 2937 行，进程内存快照</td></tr><tr><td>采样代价</td><td><code>frameworks/native/cmds/dumpsys/dumpsys.cpp</code></td><td><code>timeoutArgMs</code> 默认 10000（:139）、<code>-t</code> 解析 :193-194、<code>--skip</code> 解析 :163、<code>--priority</code> 解析 :170-172、<code>--priority</code> 生效 :258、<code>--skip</code> 生效 :285</td><td>共 581 行，采样本身有开销</td></tr><tr><td>trace 类别</td><td><code>frameworks/native/cmds/atrace/atrace.cpp</code></td><td><code>k_categories[]</code> 起于 :102，共 46 项</td><td>共 1481 行，类别决定采样面</td></tr><tr><td>应用打点</td><td><code>frameworks/base/core/java/android/os/Trace.java</code></td><td><code>beginSection</code> :511、<code>endSection</code> :527、<code>isEnabled()</code> :495、<code>TRACE_TAG_*</code> 起于 :52</td><td>共 597 行，自定义切片</td></tr></tbody></table>
+<h1 id="h12-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">grep -n &quot;DEFAULT_SERVICE_TIMEOUT\|DEFAULT_SERVICE_BACKGROUND_TIMEOUT&quot; \
+  frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：两处定义，位于 :320 与 :325，后者值含前者乘 10。</p>
+<pre><code class="lang-bash">sed -n '315,330p' \
+  frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：前台值形如 <code>20 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>，后台值为其 10 倍。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java \
+      frameworks/base/core/java/com/android/internal/os/ProcessCpuTracker.java \
+      frameworks/base/core/java/android/os/Debug.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：2625、1006、2937 三行行数。</p>
+<pre><code class="lang-bash">grep -n &quot;getCpuTimeForPid\|public void update()&quot; \
+  frameworks/base/core/java/com/android/internal/os/ProcessCpuTracker.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>update()</code> 在 :339，<code>getCpuTimeForPid(int pid)</code> 在 :633。</p>
+<pre><code class="lang-bash">grep -n &quot;MEMINFO_TOTAL\|MEMINFO_SHMEM\|public static native long getPss\|getMemInfo&quot; \
+  frameworks/base/core/java/android/os/Debug.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>MEMINFO_*</code> 常量自 :2048 起，<code>getMemInfo(long[])</code> 在 :2118，<code>getPss</code> 在 :2016 与 :2028。</p>
+<pre><code class="lang-bash">grep -n &quot;timeoutArgMs\|priority\|skip&quot; \
+  frameworks/native/cmds/dumpsys/dumpsys.cpp</code></pre>
+<p>期望输出：<code>timeoutArgMs</code> 默认 10000 在 :139，<code>--skip</code> 解析 :163、<code>--priority</code> 解析 :170-172，<code>--priority</code> 生效 :258、<code>--skip</code> 生效 :285。</p>
+<pre><code class="lang-bash">sed -n '102,112p' frameworks/native/cmds/atrace/atrace.cpp</code></pre>
+<p>期望输出：<code>k_categories[]</code> 起始段，<code>gfx</code> :103、<code>input</code> :106、<code>view</code> :107、<code>wm</code> :109、<code>am</code> :110。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h13-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h14-7-1-误区">7.1 误区</h2>
+<p>**误区一：<code>DEFAULT_*</code> 常量都是性能目标。** 不是。服务启动那一族多数是「超过就判失败」的判据，不是「应该做到这么快」的目标；<code>DEFAULT_BG_START_TIMEOUT</code> 与 <code>DEFAULT_GC_TIMEOUT</code> 则是调度定时器/间隔，到点只重排队列，不判失败。贴在常量上做优化，方向可能是错的。</p>
+<p><strong>误区二：一次测出的数字可以当基线。</strong> 一次测量包含设备、温度、后台负载三重方差，它连自己都复现不了。可用的基线要么来自源码常量，要么来自同一条件下的多次同口径采样。</p>
+<p><strong>误区三（看起来对其实错）：trace 上看到的耗时可以直接归因到那一段代码。</strong> 观测只给出「这个时间片内该进程在运行或等待」，不给出因果。等待是被谁阻塞的，要顺着调用链回到常量与锁的持有方。</p>
+<h2 id="h15-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：先抓 CPU 还是先抓时间？</p>
+<p><strong>答</strong>：先定义「慢」是等待还是计算。若日志里已被判超时，那是等待，看时间切片。若 CPU 高而没人等，才看 <code>ProcessCpuTracker</code>。</p>
+<p><strong>追问</strong>：两者都正常但用户仍说慢？</p>
+<p><strong>答</strong>：那是指标选错了。慢可能落在内存或 I/O，换观测面重定义。</p>
+<p><strong>问</strong>：<code>dumpsys</code> 能不能随便跑？</p>
+<p><strong>答</strong>：不能。默认超时 10000 毫秒，服务越多采样扰动越大，用 <code>--priority</code> 与 <code>--skip</code> 收窄面。</p>
+<p><strong>追问</strong>：收窄后结果还有代表性吗？</p>
+<p><strong>答</strong>：只对被你保留的那部分服务有代表性，结论口径要跟着收窄。</p>
+<h2 id="h16-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>应用自定切片没出现在 trace 里</td><td><code>grep -n &quot;isEnabled()&quot; frameworks/base/core/java/android/os/Trace.java</code></td><td>:495 的标签使能判断（<code>isEnabled()</code> 实为 <code>isTagEnabled(TRACE_TAG_APP)</code>，非判空），打点前是否先判</td><td>确认 trace 类别已开，再重打</td></tr><tr><td>服务启动被判超时</td><td><code>grep -n &quot;DEFAULT_SERVICE_TIMEOUT&quot; frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code></td><td>:320 的表达式，是否含 <code>Build.HW_TIMEOUT_MULTIPLIER</code></td><td>先按 <code>AnrTypes</code> 辨判据线（20s×倍率/后台 10 倍、FGS 30s、short-FGS 180s+10s 三条并存），再按乘数折算实际值，定位等待方</td></tr><tr><td>抓到的 trace 缺关键类别</td><td><code>sed -n '102,260p' frameworks/native/cmds/atrace/atrace.cpp</code></td><td><code>k_categories[]</code> 里是否有 <code>gfx</code>/<code>sched</code>/<code>binder_driver</code></td><td>补齐类别，重抓一次</td></tr><tr><td>内存快照口径不一致</td><td><code>grep -n &quot;MEMINFO_TOTAL|getMemoryInfo(int&quot; frameworks/base/core/java/android/os/Debug.java</code></td><td>常量起点归 <code>getMemInfo(long[])</code>，与 <code>getMemoryInfo(int, MemoryInfo)</code> 分开</td><td>统一取值口径后再比</td></tr></tbody></table>
+<h1 id="h17-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：工具操作细节归 <code>AND-P10-401</code>/<code>AND-P10-402</code>；启动域专项归 <code>AND-P10-102</code>；内存与卡顿归 <code>AND-P10-201</code>/<code>AND-P10-202</code>；功耗归 <code>AND-P10-301</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P10-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P10-102</code>、<code>AND-P10-201</code>、<code>AND-P10-402</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>服务等待上限的前台值 = <code>20 * 1000 * Build.HW_TIMEOUT_MULTIPLIER</code>，后台值 = 前者 ×10。口径：源码常量，<code>ActivityManagerConstants.java</code> :320/:325。具体倍数依设备配置，暂无实测，列为待补。</li><li><code>DEFAULT_GC_TIMEOUT</code> 是 GC 调度最小间隔，不可当失败判据。口径：源码常量，<code>ActivityManagerConstants.java</code> :208。实际间隔受运行时状态影响，暂无实测，列为待补。</li><li><code>dumpsys</code> 默认超时 10000 毫秒。口径：源码常量，<code>dumpsys.cpp</code> :139。</li><li><code>atrace</code> 类别总数 46（本树；含 <code>core_services</code> 这类由常量间接给出名字的项）。口径：源码以 <code>grep</code> 计数为准，<code>atrace.cpp</code> :102 起。</li><li>上述等待是否真的被判超时、判了几次，取决于设备与实际负载，暂无实测，列为待补。</li></ul>
+<h1 id="h18-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td><code>DEFAULT_NETWORK_ACCESS_TIMEOUT_MS</code> 定义在 :249，注释标 <code>// 0.2 sec</code></td><td>网络判定窗口在本树是个独立常量</td></tr><tr><td>更早版本</td><td>本篇不断言</td><td>常量行号会随文件重排漂移，按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h19-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>atrace</code>、<code>perfetto</code>、<code>dumpsys</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ActivityManagerConstants</code>、<code>Trace.beginSection</code>。</li><li>本仓关键路径：<code>frameworks/base/services/core/java/com/android/server/am/ActivityManagerConstants.java</code>、<code>frameworks/native/cmds/atrace/atrace.cpp</code>、<code>frameworks/base/core/java/android/os/Trace.java</code>。</li><li>承接篇：<code>AND-P10-102</code>、<code>AND-P10-401</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P10-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

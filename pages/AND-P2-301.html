@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>框架并发模型：Binder 线程池 × Handler/Looper</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>框架并发模型：Binder 线程池 × Handler/Looper</h1>
+<div class="kv"><span>ID：AND-P2-301</span><span>卷：P2</span><span>章：2.3</span><span>难度：4</span><span>核验：2026-10-13</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/ProcessState.cpp ；frameworks/native/libs/binder/IPCThreadState.cpp ；frameworks/base/core/java/android/os/Looper.java ；frameworks/base/core/java/android/os/Handler.java ；frameworks/base/core/java/android/os/LegacyMessageQueue/MessageQueue.java ；frameworks/base/core/java/android/app/ActivityThread.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</a></li><li style="margin-left:0px"><a href="#h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:-14px"><a href="#h12-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h13-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h14-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>框架层有<strong>两套彼此独立、却又必须协同</strong>的并发机制。</p>
+<p>一套在 native。每个进程一个 <code>ProcessState</code>（进程级单例），它拉起一个 <strong>Binder 线程池</strong>：<code>startThreadPool</code> 先起 1 个池线程，之后按需扩容，上限默认 15（<code>DEFAULT_MAX_BINDER_THREADS</code>，ProcessState.cpp:49）。线程的增减由<strong>内核</strong>按队列压力驱动，用户态只做登记（<code>joinThreadPool</code>，IPCThreadState.cpp:841）。</p>
+<p>一套在 Java。每个线程一个 <code>Looper</code>（线程私有，<code>ThreadLocal</code>），主线程的 Looper 由 <code>ActivityThread.main</code>(ActivityThread.java:9465) 里的 <code>Looper.prepareMainLooper()</code>(9507) ＋ <code>Looper.loop()</code>(9523) 拉起，消息进 <code>MessageQueue</code>，由 <code>Handler</code> 分发。</p>
+<p><strong>关键结论有两条。</strong> 一是「Binder 线程」和「主线程」是两批完全不同的线程：系统服务在 Binder 线程上处理事务时，必须把要碰 UI/主线程状态的工作 <code>post</code> 到自己的 <code>Handler</code> 上——这正是框架里无处不在的 <code>xxxHandler</code> 的由来。二是两者叠加后，最典型的故障是<strong>跨进程同步调用造成的线程互相占满</strong>（双方的 Binder 线程与主线程全部阻塞在等 reply），表现为双方齐刷刷 ANR，而 logcat 只留一条 <code>binder thread pool (16 threads) starved</code> 告警——括号里的 16 是该进程通过 <code>BINDER_SET_MAX_THREADS</code> 设的池上限 <code>mMaxThreads</code>（默认 15），不是线程计数。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<ul><li><strong>建议先读</strong>：AND-P2-101（Binder 事务往返）——本篇把它讲的事务机制「并发化」。读完可接 AND-P2-302（权限校验框架：checkPermission 的所有路径）。</li><li><strong>涉及源码</strong>（行号基于本地 AOSP 检出：manifest 分支 <code>aosp/android17-release</code>；<code>frameworks/native</code> 仓 HEAD <code>ae266dcb70</code>［2026-04-23］，<code>frameworks/base</code> 仓 HEAD <code>94b4c163b7df</code>［2026-05-21］）：</li></ul>
+<table><thead><tr><th>文件</th><th>关键区间</th><th>内容</th></tr></thead><tbody><tr><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td>49 / 220–233 / 435–450 / 451–462 / 606</td><td>线程池默认上限、<code>startThreadPool</code>、<code>spawnPooledThread</code>、<code>setThreadPoolMaxThreadCount</code></td></tr><tr><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>734 / 841–880 / 1246</td><td><code>getAndExecuteCommand</code>、<code>joinThreadPool</code>、<code>talkWithDriver</code></td></tr><tr><td><code>frameworks/base/core/java/android/os/Looper.java</code></td><td>147–151 / 373</td><td><code>prepare</code> / <code>loop</code></td></tr><tr><td><code>frameworks/base/core/java/android/os/Handler.java</code></td><td>124 / 705 / 845</td><td><code>dispatchMessage</code> / <code>sendMessage</code> / <code>enqueueMessage</code></td></tr><tr><td><code>frameworks/base/core/java/android/os/LegacyMessageQueue/MessageQueue.java</code></td><td>362 / 378 / 699</td><td><code>next</code> / <code>nativePollOnce</code> / <code>enqueueMessage</code>（见 §9 说明本树变体布局）</td></tr><tr><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td>9465 / 9507 / 9523</td><td><code>main</code> / <code>prepareMainLooper</code> / <code>loop</code></td></tr></tbody></table>
+<ul><li><strong>环境要求</strong>：AOSP 源码树一份，不需要编译与真机（本篇验证方式＝静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个线上 ANR 的日志长这样，两个进程、几乎同一时刻：</p>
+<p>图 1：主线程阻塞在同步 Binder 调用上的 ANR 堆栈</p>
+<pre><code>// 应用进程
+ANR in com.example.app
+Reason: Input dispatching timed out
+&quot;main&quot; prio=5 tid=1 Native
+  | sysTid=...  native: #00 pc ... libc.so (__ioctl)
+  native: #01 ... libbinder.so (... IPCThreadState::talkWithDriver)
+  native: #02 ... libbinder.so (... IPCThreadState::waitForResponse)
+  // → 主线程正阻塞在一次同步 Binder 调用上
+
+// system_server
+W Binder:1234_2: binder thread pool (16 threads) starved for 312 ms</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>应用的主线程卡在等 reply，<code>system_server</code> 侧的 Binder 线程也全被占住（本例日志里的 16 表示该进程池上限被设为 16）。如果只看一侧，你会以为是「对方服务慢」；但真相常常是<strong>双方各自发了同步事务、又在等对方 reply</strong>——所有可用线程都拿去等了，没有任何一个线程能腾出来把 reply 送回去。这就是「跨进程同步调用」在高并发下的死锁形状。</p>
+<p>要定位这类问题，脑子里得同时装着两套线程模型和它们之间的桥：<strong>Binder 线程是「外来请求的执行者」，Handler/Looper 是「本地任务的执行者」</strong>。什么时候该在哪一边干活、什么情况会把两边一起拖死，是本篇要讲清的。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-数据结构与状态定义">4.1 数据结构与状态定义</h2>
+<p>图 2：进程级 Binder 状态与线程池</p>
+<pre><code>进程级（每个进程一份）
+├─ ProcessState  （单例，ProcessState::self()）
+│    ├─ mDriverFD               : /dev/binder 的 fd
+│    ├─ mLock                  : 保护线程池登记
+│    ├─ mThreadPoolStarted     : 是否已 startThreadPool
+│    ├─ mMaxThreads            : 池线程上限（默认 15，见 :49）
+│    └─ mKernelStartedThreads  : 已向内核登记的数量
+└─ 若干 PoolThread（joinThreadPool 循环体）——Binder 线程池成员
+
+线程级（每个 Binder 线程一份）
+└─ IPCThreadState （线程私有单例，TLS）
+     ├─ mOut / mIn : 收发 Parcel
+     └─ mIsLooper  : 是否为池成员
+
+线程级（每个 Java 线程按需一份）
+└─ Looper（ThreadLocal）
+     ├─ mQueue : MessageQueue（消息队列）
+     └─ mThread : 所属线程（主线程 = 进程主线程）
+
+消息
+└─ Message（target=Handler, callback, when）——由 Handler 入队/出队/分发</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>三条要点先把概念钉死：</p>
+<ul><li><strong>Binder 线程池是进程级、跨语言层（Native 与 Java 侧）的</strong>：它由 <code>ProcessState</code> 管，Java 侧看不见这些线程对象，但 Java 的 <code>Binder.onTransact</code> 就跑在这些线程上。</li><li><strong>`IPCThreadState` 是「当前线程」私有的</strong>：同线程发事务不会串，但一个线程同一时刻只能处理一个事务。</li><li><strong>主线程也是一个「有 Looper 的普通线程」</strong>：它在系统里之所以特殊，只因为 <code>ActivityThread.main</code> 给它建了主 Looper，且不允许 <code>quit</code>。</li></ul>
+<h2 id="h6-4-2-关键流程-含失败路径">4.2 关键流程（含失败路径）</h2>
+<p><strong>流程一：Binder 线程池怎么长出来。</strong></p>
+<p>图 3：线程池启动与按需扩容流程</p>
+<pre><code>进程启动 → ProcessState::self() 首次调用 → ProcessState 构造(:606) open /dev/binder
+         → startThreadPool()(:220)
+              └─ spawnPooledThread(true)(:435)  → 新建 1 个 isMain 池线程（新线程，不是调用者），
+                                                  其 threadLoop 调 joinThreadPool(true)(:841)（BC_ENTER_LOOPER）
+         → 之后内核按需「请」更多线程：
+              内核发现某进程队列积压 → 下发 BR_SPAWN_LOOPER
+              → 用户态 spawnPooledThread(false) → 新线程 BC_REGISTER_LOOPER 入池
+         → 上限受 mMaxThreads 约束（默认 15）；超限不再加载</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>注意池线程是<strong>内核驱动</strong>的懒加载：进程刚起只有 1 个池线程（<code>startThreadPool</code> 拉起的那个 isMain 线程），压力上来才逐渐加到上限。<code>setThreadPoolMaxThreadCount</code>(:451) 只能在此前调大，<strong>启动后不允许缩小</strong>（函数开头就是 <code>LOG_ALWAYS_FATAL_IF</code>，硬崩）。</p>
+<p><strong>流程二：一个事务落到哪个线程。</strong></p>
+<p>图 4：Binder 线程的命令循环</p>
+<pre><code>Binder 线程（并非主线程！）
+  └─ joinThreadPool(:841) 循环
+       └─ getAndExecuteCommand()(:734)
+            └─ talkWithDriver()(:1246) 取到 BR_TRANSACTION
+                 └─ executeCommand → BBinder::transact → onTransact(code, data, reply)
+                      ◆ 服务实现若需碰主线程状态 → post 到自己的 Handler
+                         ◆ 若直接在主线程上已有锁/资源，会与主线程竞争 → 见失败路径</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>系统服务里的 <code>XxxHandler.obtainMessage(...).sendToTarget()</code> 遍地都是，原因就在这里：<strong>`onTransact` 跑在 Binder 线程上，它不能直接改需要主线程串行化的状态</strong>。</p>
+<p><strong>流程三：Java 主线程循环。</strong></p>
+<p>图 5：主线程 Looper 循环</p>
+<pre><code>ActivityThread.main(:9465)
+  └─ Looper.prepareMainLooper()(:9507)   // 建主线程 Looper
+  └─ Looper.loop()(:9523)  （一直不返回）
+       └─ MessageQueue.next()(MessageQueue.java:362)
+            └─ nativePollOnce(ptr, timeout)(:378)  // 无消息时在此阻塞，由 epoll 唤醒
+       └─ msg.target.dispatchMessage(msg)(Handler.java:124)</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>Handler</code> 发送一方：<code>sendMessage</code>(Handler.java:705) → <code>enqueueMessage</code>(Handler.java:845) → <code>queue.enqueueMessage</code>(:699) 并唤醒 <code>nativePollOnce</code>。<strong>整条 Java 侧链路的核心事实</strong>：主线程是一个「走到 <code>next()</code> 就阻塞、被消息唤醒、执行、再阻塞」的循环，没有消息时它消耗 0 CPU。</p>
+<p><strong>失败路径（三类）</strong>：</p>
+<ol><li><strong>Binder 线程池耗尽（达到 `mMaxThreads` 上限）</strong>：所有池线程都在跑一个慢的 <code>onTransact</code>，新事务排队 → 调用方 <code>waitForResponse</code> 干等 → 主线程 ANR。日志即 §3 的 <code>starved</code>。</li><li><strong>跨进程互相同步调用 → 死锁</strong>：A 主线程同步调 B，B 处理时又同步调 A；A 的池线程正被 B 占着、B 的池线程正被 A 占着，双方 <code>reply</code> 都送不回去。<strong>解除办法只有设计层</strong>：把至少一个方向改成 oneway，或跨进程绝不持锁/同步等待。</li><li><strong>`Looper.loop()` 退出即线程死亡</strong>：主线程 Looper 若被 <code>quit</code>（主 Looper 不允许），或非主线程 Looper 处理完 <code>quit</code> 后继续 <code>sendMessage</code>，会抛 <code>IllegalStateException</code> / 静默丢消息。用子线程 Handler 时必须保证 Looper 生命周期长于消息发送。</li></ol>
+<h2 id="h7-4-3-关键代码逐段剖析">4.3 关键代码逐段剖析</h2>
+<p><strong>第一段：拉起线程池</strong>（ProcessState.cpp:220–233）</p>
+<pre><code class="lang-cpp">void ProcessState::startThreadPool()
+{
+    std::unique_lock&lt;std::mutex&gt; _l(mLock);
+    if (!mThreadPoolStarted) {
+        if (mMaxThreads == 0) {
+            ALOGW(&quot;Extra binder thread started, but 0 threads requested. Do not use &quot;
+                  &quot;*startThreadPool when zero threads are requested.&quot;);
+        }
+        mThreadPoolStarted = true;
+        spawnPooledThread(true);         // 只起 1 个新池线程（isMain=true）
+    }
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>startThreadPool</code> 只负责拉起 <strong>1 个新池线程</strong>（<code>spawnPooledThread(true)</code> 内部 <code>sp&lt;PoolThread&gt;::make(isMain)</code> ＋ <code>t-&gt;run()</code>，ProcessState.cpp:440–441），<strong>不是把调用者（通常是进程主线程）变成池成员</strong>；调用者主线程是否入池，由宿主代码在自己的 <code>main</code> 尾部另行调 <code>joinThreadPool</code> 决定。多出来的池线程由内核后续按需补——省线程、省内存，代价是「压力突然上来时，线程创建有延迟」，这也是为什么突发流量下会先看到 <code>starved</code> 告警而不是直接失败。</p>
+<p><strong>第二段：池线程的循环体</strong>（IPCThreadState.cpp:841–880，节选）</p>
+<pre><code class="lang-cpp">void IPCThreadState::joinThreadPool(bool isMain)
+{
+    mProcess-&gt;mCurrentThreads++;
+    mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);
+    mIsLooper = true;
+    status_t result;
+    do {
+        processPendingDerefs();
+        result = getAndExecuteCommand();     // 取一条命令、执行；无事时阻塞在内核
+        if (result == TIMED_OUT &amp;&amp; !isMain) {
+            break;                            // 非主线程空闲超时后退出池（内核按需再唤醒）
+        }
+    } while (result != -ECONNREFUSED &amp;&amp; result != -EBADF);
+    mOut.writeInt32(BC_EXIT_LOOPER);
+    mIsLooper = false;
+    talkWithDriver(false);
+    mProcess-&gt;mCurrentThreads.fetch_sub(1);
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>BC_ENTER_LOOPER</code> 和 <code>BC_REGISTER_LOOPER</code> 是给内核看的「我要/我加入池」命令；<code>isMain</code> 区分「主线程永不主动退出」与「池线程空闲可退出」。<strong>这实现的就是「线程池不是固定 15 个常驻线程，而是 1–15 之间动态伸缩」。</strong></p>
+<p><strong>第三段：主线程循环与消息队列</strong>（Looper.java:373 与 MessageQueue.java:362–378，节选）</p>
+<pre><code class="lang-java">public static void loop() {
+    final Looper me = myLooper();
+    ...
+    for (;;) {
+        Message msg = me.mQueue.next();     // 队列空则阻塞（nativePollOnce）
+        if (msg == null) {
+            return;                          // 收到 null 表示 quit
+        }
+        msg.target.dispatchMessage(msg);     // 交给 Handler
+        ...
+    }
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-java">Message next() {
+    ...
+    for (;;) {
+        nativePollOnce(ptr, nextPollTimeoutMillis);   // 阻塞在此，等 epoll 事件
+        ...
+    }
+}</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>nativePollOnce</code> 是主线程「睡觉」的地方：没有消息时它不空转，被 <code>enqueueMessage</code> 唤醒。<strong>推论</strong>：主线程卡顿有两种截然不同的形状——一是 <code>dispatchMessage</code> 里干了太久（你的代码慢），二是 <code>nativePollOnce</code> 里被无限期唤醒后消息海量（消息风暴）。二者堆栈完全不同，别混。</p>
+<h2 id="h8-4-4-与相邻机制的关系">4.4 与相邻机制的关系</h2>
+<ul><li><strong>与 Binder 事务（AND-P2-101）</strong>：本篇讲的是 101 那条事务链在「多个线程并发」下的行为。101 的单次时序图里，「服务端 Binder 线程」只是一个点；这里把它展开成一个会被占满的池。</li><li><strong>与线程池策略（AND-P2-102，承接篇）</strong>：oneway 的语义与死亡通知属 102；<code>setThreadPoolMaxThreadCount</code> 的取值权衡在本篇 §6 给出核验路径（默认上限与生命周期可静态定位）。</li><li><strong>与驱动（AND-P5-201/P5-202）</strong>：<code>BR_SPAWN_LOOPER</code> 的触发条件、内核如何决定「该给这个进程加线程」，属 P5。本篇止于 <code>BC_REGISTER_LOOPER</code> 的用户态侧。</li><li><strong>与应用层</strong>：<code>HandlerThread</code>、<code>runOnUiThread</code>、<code>AsyncTask</code>（已废弃）都是这套 Looper/Handler 模型的封装；<code>Executor</code> 系列则是<strong>另一套</strong>（Java 线程池），不要与 Binder 线程池混淆——它们互不隶属。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<table><thead><tr><th>层级</th><th>文件路径</th><th>关键类/函数</th><th>说明</th></tr></thead><tbody><tr><td>原生进程</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>ProcessState</code> (606) / <code>startThreadPool</code> (220)</td><td>进程级单例、线程池入口</td></tr><tr><td>线程增长</td><td>同上</td><td><code>spawnPooledThread</code> (435)</td><td>按需再起池线程</td></tr><tr><td>上限设置</td><td>同上</td><td><code>setThreadPoolMaxThreadCount</code> (451)</td><td>仅启动前可改，启动后缩小即崩</td></tr><tr><td>池循环</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>joinThreadPool</code> (841)</td><td>池线程主循环</td></tr><tr><td>取命令</td><td>同上</td><td><code>getAndExecuteCommand</code> (734) / <code>talkWithDriver</code> (1246)</td><td>取事务、执行</td></tr><tr><td>Java 主循环</td><td><code>frameworks/base/core/java/android/os/Looper.java</code></td><td><code>prepare</code> (147) / <code>loop</code> (373)</td><td>线程消息循环</td></tr><tr><td>队列</td><td><code>.../android/os/LegacyMessageQueue/MessageQueue.java</code></td><td><code>next</code> (362) / <code>enqueueMessage</code> (699)</td><td>阻塞与唤醒（见 §9）</td></tr><tr><td>分发</td><td><code>frameworks/base/core/java/android/os/Handler.java</code></td><td><code>sendMessage</code> (705) / <code>dispatchMessage</code> (124)</td><td>入队与回调</td></tr><tr><td>主线程宿主</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>main</code> (9465) / <code>prepareMainLooper</code> (9507) / <code>loop</code> (9523)</td><td>主 Looper 建立</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<p><strong>验证方式：静态源码分析</strong>（命令在源码树根执行）。</p>
+<pre><code class="lang-bash"># 1) 线程池默认上限与生命周期（应命中 49 / 220 / 435 / 451）
+grep -n &quot;DEFAULT_MAX_BINDER_THREADS&quot; frameworks/native/libs/binder/ProcessState.cpp
+grep -n &quot;void ProcessState::startThreadPool\|void ProcessState::spawnPooledThread\|setThreadPoolMaxThreadCount&quot; \
+  frameworks/native/libs/binder/ProcessState.cpp
+
+# 2) 池循环与注册命令（应命中 841 / 734 与 BC_ENTER_LOOPER）
+sed -n '841,865p' frameworks/native/libs/binder/IPCThreadState.cpp
+
+# 3) Java 主循环（应命中 9465 / 9507 / 9523 / 373 / 378）
+grep -n &quot;public static void main\|Looper.prepareMainLooper()\|Looper.loop()&quot; \
+  frameworks/base/core/java/android/app/ActivityThread.java
+grep -n &quot;public static void loop()&quot; frameworks/base/core/java/android/os/Looper.java
+grep -n &quot;nativePollOnce&quot; frameworks/base/core/java/android/os/LegacyMessageQueue/MessageQueue.java
+
+# 4) Handler 入队/分发（应命中 705 / 845 / 124）
+grep -n &quot;public final boolean sendMessage\|private boolean enqueueMessage\|public void dispatchMessage&quot; \
+  frameworks/base/core/java/android/os/Handler.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>怎么对</strong>：行号漂移时用 <code>grep -n &quot;joinThreadPool\|prepareMainLooper&quot; …</code> 重新锚定。本篇行号是「怎么找」的示范，不承诺跨版本恒等。</p>
+<p>运行期对照（不计入本篇验证方式，仅供建立体感）：</p>
+<pre><code class="lang-bash">adb shell ps -T -p $(adb shell pidof system_server) | grep -c &quot;Binder&quot;   # 数一下 Binder 线程
+adb shell dumpsys activity processes | grep -i &quot;binder&quot;                  # 部分版本有线程统计
+# 触发一次同步跨进程调用后，观察 main 线程是否阻塞在 waitForResponse 的堆栈形状</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<p><strong>Binder 回调跑在主线程上？</strong> 不是。<code>Binder.onTransact</code> 跑在<strong>调用方的 Binder 线程</strong>（服务端进程的池线程），不是服务端主线程。在 <code>onTransact</code> 里直接动 UI 或主线程独占状态必然出事——<code>post</code> 到 <code>Handler</code> 才是正解。</p>
+<p><strong>Binder 线程池固定 16 个常驻？</strong> 不是。它是 1–15 之间动态伸缩（<code>startThreadPool</code> 起第 1 个池线程，内核再按需补到 <code>mMaxThreads</code>，默认 15）。空闲池线程会退出，压力来时内核再「请」回来。</p>
+<p><strong>`Looper.loop()` 返回了就是正常结束？</strong> 不是。主线程 Looper 不允许 <code>quit</code>；<code>loop()</code> 返回意味着收到 <code>null</code> 消息（quit），此后该线程再 <code>sendMessage</code> 会异常或丢消息。子线程 Handler 必须保证 Looper 活得比消息久。</p>
+<p><strong>Binder 线程池和 `ExecutorService` 是一回事？</strong> 不是。前者由内核驱动、只服务 Binder 事务；后者是 Java 层线程池。把耗时任务丢进 Binder 线程（在 <code>onTransact</code> 里干重活）会占满池、拖垮整个进程收事务的能力。</p>
+<p><strong>面试高频：为什么 Binder 事务不要在服务端线程里做重活？</strong> 答：<code>onTransact</code> 占用的是池线程，池上限只有 15。一个慢事务会把一个池线程钉死；并发几个慢事务就把池占满，进程再也接不了新请求，调用方全部排队——典型 ANR 成因。重活应移出 Binder 线程（<code>post</code> 到 Handler 或专用线程池），尽快 <code>reply</code>。</p>
+<p><strong>面试高频：主线程明明在&quot;死循环&quot;里 `loop()`，为什么手机不卡？</strong> 答：<code>loop()</code> 大部分时间阻塞在 <code>MessageQueue.next → nativePollOnce</code>，由 epoll 等待，CPU 占用接近 0；只有消息到来才被唤醒执行。所以&quot;主线程一直循环&quot;不等于&quot;一直跑&quot;。</p>
+<h1 id="h12-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Binder 事务数据流细节（AND-P2-101）；oneway/死亡通知语义（AND-P2-102）；内核侧 <code>BR_SPAWN_LOOPER</code> 触发与唤醒（AND-P5-201/P5-202）；进程 fork 与 Zygote（AND-P2-401）；AMS 主 Handler 的具体用法（AND-P2-201）。</li><li><strong>本篇前置依赖</strong>：AND-P2-101。<strong>注</strong>：卷纲原定本篇前置为 AND-P2-102；因 102 尚未成稿，登记依赖时以已就绪的 AND-P2-101 为准，102 为<strong>阅读上的</strong>并行承接篇。</li><li><strong>本篇后继</strong>：AND-P2-302（权限校验框架：checkPermission 的所有路径）。</li></ul>
+<h1 id="h13-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期 → 今</td><td>Binder 线程池默认上限长期为 15（<code>DEFAULT_MAX_BINDER_THREADS</code>，ProcessState.cpp:49）</td><td>该常量稳定，是理解池容量的基线</td></tr><tr><td>近期（本树）</td><td><code>android.os.MessageQueue</code> 采用<strong>变体源集</strong>布局：<code>LegacyMessageQueue/</code>、<code>CombinedMessageQueue/</code>、<code>CombinedDeliMessageQueue/</code> 各存一份 <code>MessageQueue.java</code>，由构建按变体选源</td><td>直接 <code>find android/os/MessageQueue.java</code> 会找不到；本篇按 <code>LegacyMessageQueue/MessageQueue.java</code> 取行号，换变体时行号可能不同</td></tr><tr><td>本树（android17-release）</td><td><code>Looper.loop()</code> 仍为阻塞式 for 循环 + <code>nativePollOnce</code></td><td>主线程模型未变</td></tr><tr><td>长期演进</td><td><code>AsyncTask</code> 已废弃（据官方文档，API 30），改用 <code>Executor</code>/协程</td><td>理解 Looper 仍必要，但新代码别再用它做并发编排</td></tr></tbody></table>
+<blockquote><p>★ 变体源集是本树的一个<strong>真实差异点</strong>：它不影响语义，但会让&quot;按行号找代码&quot;失效。定位时优先按<strong>符号名</strong> grep，而非写死路径与行号。</p></blockquote>
+<h1 id="h14-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li><code>android.os.Looper</code> / <code>android.os.Handler</code> / <code>android.os.MessageQueue</code> API 参考（developer.android.com，长期稳定路径）</li><li>AOSP 提交检索（不写死 CL 号）：android-review.googlesource.com 搜 <code>IPCThreadState joinThreadPool</code>、<code>spawnPooledThread</code></li><li>官方并发文档：source.android.com 站内检索 <code>binder thread pool</code></li><li>承接篇：AND-P2-101（Binder 事务往返）；设计模式上可对照《Android 开发艺术探索》Looper/Handler 章节（按你的版本对号）</li></ul>
+</article>
+<footer>android-100 · AND-P2-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卷导读：Java 之下的 Native 世界</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>卷导读：Java 之下的 Native 世界</h1>
+<div class="kv"><span>ID：AND-P3-G01</span><span>卷：P3</span><span>章：G01</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/ProcessState.cpp ；art/runtime/runtime.cc ；bionic/libc/Android.bp ；frameworks/base/core/jni/AndroidRuntime.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Java 代码之下还有一层：对象由 ART 管理、线程跑在 bionic 之上、跨语言调用走 JNI、跨进程调用走 libbinder。本卷 9 篇就讲这一层的静态结构。读顺序有讲究：先建立 Native 世界的地图，再分三条支线（运行时、桥、守护与分区），最后在 libbinder 那篇合流。本卷不承诺运行时性能数字，全部结论来自源码静态分析。读完你应能说清一个 <code>Activity</code> 启动时，Native 侧到底被谁、被什么顺序拉起。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P2-102</code>（Binder 框架侧语义）。没有框架侧的事务语义作底，302 讲的 Native 侧 Binder 会读成两套互不相干的东西。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>art/runtime/runtime.cc</code></li><li><code>bionic/libc/Android.bp</code></li><li><code>frameworks/base/core/jni/AndroidRuntime.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机，本篇验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在 Java 层写下 <code>new Thread(...).start()</code>，线程真的就在你以为的地方跑起来了。应用崩溃日志里出现 <code>libc.so</code> 的帧，你不知道它属于谁。给应用加一个通过 JNI 调用的 <code>.so</code>，加载失败时提示只有一行 <code>UnsatisfiedLinkError</code>。这些现象都在同一个地方：Java 世界之下那一层。它不是黑盒，只是一直没人带你走一遍。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>本卷只讲四个位置：运行时（ART）、C 库（bionic）、跨语言入口（JNI）、跨进程通道（libbinder）。四者不是并列的层级，而是同一进程里四个不同的职责面。</p>
+<p>图 1：本卷四个职责面与 Java 层的关系</p>
+<pre><code>        Java 代码 / 框架 Java 类
+                 |
+     +-----------+-----------+
+     |           |           |
+    ART         JNI       libbinder
+  (对象/线程)  (跨语言)    (跨进程)
+     |           |           |
+     +----- bionic (libc) ---+
+                 |
+            Linux 内核</code></pre>
+<p>ART 管对象与线程，JNI 是 Java 与 Native 的调用桥，libbinder 让 Native 侧也能发起和接收进程间调用，三者都站在 bionic 之上。P3 讲的是这张图的内部；P5 讲最下面那格。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>本卷 9 篇分三层组织：</p>
+<table><thead><tr><th>篇号</th><th>主题</th><th>在卷内的角色</th></tr></thead><tbody><tr><td><code>AND-P3-G01</code></td><td>卷导读</td><td>地图与读法</td></tr><tr><td><code>AND-P3-101</code></td><td>Native 世界导览</td><td>建立整体印象，含属性系统</td></tr><tr><td><code>AND-P3-201</code></td><td>ART 类加载与 DEX/OAT</td><td>运行时支线入口</td></tr><tr><td><code>AND-P3-202</code></td><td>ART 内存与 GC</td><td>运行时支线</td></tr><tr><td><code>AND-P3-203</code></td><td>JIT、Profile 与基线配置</td><td>运行时支线（B 档）</td></tr><tr><td><code>AND-P3-301</code></td><td>JNI 桥</td><td>跨语言支线</td></tr><tr><td><code>AND-P3-302</code></td><td>Native 侧 Binder</td><td>跨进程支线，本卷锚点篇</td></tr><tr><td><code>AND-P3-401</code></td><td>Native 进程守护、ashmem/memfd 与共享内存机制</td><td>系统服务支线</td></tr><tr><td><code>AND-P3-402</code></td><td>VNDK 与 vendor 分区</td><td>系统服务支线（B 档）</td></tr></tbody></table>
+<p>三条支线的关系是：<code>201</code>/<code>202</code> 回答「Java 对象在 Native 侧长什么样」，<code>301</code> 回答「一次 Java 到 Native 的调用怎么过去」，<code>302</code> 回答「Native 侧怎么发起一次进程间调用」。<code>401</code> 和 <code>402</code> 把视角抬到进程与分区层面。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>拿 <code>frameworks/base/core/jni/AndroidRuntime.cpp</code> 举例。这个文件是框架 Java 世界与 ART 之间的接缝：应用进程启动时，Java VM 就是在这里被创建的。走一遍它的入口，你就同时看见了本卷三条支线的起点——VM 创建属于 ART 支线，注册 JNI 方法属于 JNI 支线，而注册进去的方法里有大量会走 libbinder 的。同一个文件，三条支线各自取走一段。这就是为什么导读篇先给地图，而不是先钻进任何一条支线。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>与 <code>AND-P2-102</code>：本篇是它的下游。P2 讲框架侧事务语义，本卷在 <code>302</code> 把它接到 Native 侧。</li><li>与 <code>AND-P4</code>：<code>302</code> 是 P4 全卷的上游。HAL 被框架调用，走的就是 Native Binder。</li><li>与 <code>AND-P5-201</code>：<code>302</code> 同样是驱动入口篇的上游。</li><li>与 <code>AND-P8-202</code>：<code>101</code> 讲属性系统的消费侧，<code>P8-202</code> 讲生产侧（<code>property_service</code> 到 <code>getprop</code> 的完整链路），<code>P8-201</code> 讲 <code>init.rc</code> 一侧。</li><li>与 <code>AND-P10-201</code>：<code>201</code>/<code>202</code> 是内存分析篇的上游。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>Native 侧 Binder 的 ProcessState</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>ProcessState</code></td><td><code>302</code> 的核验入口，讲进程级 Binder 状态怎么建</td></tr><tr><td>ART 运行时装配</td><td><code>art/runtime/runtime.cc</code></td><td><code>Runtime</code></td><td><code>201</code>/<code>202</code> 的共同入口</td></tr><tr><td>bionic 构建定义</td><td><code>bionic/libc/Android.bp</code></td><td><code>libc</code> 模块定义</td><td>看 bionic 提供哪些库与导出面</td></tr><tr><td>框架与 ART 的接缝</td><td><code>frameworks/base/core/jni/AndroidRuntime.cpp</code></td><td>VM 创建与 JNI 注册</td><td><code>301</code> 的核验入口</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base log -1 --format=%H</code></pre>
+<p>期望输出 <code>94b4c163b7df</code> 开头的提交号，对上是本卷行号基准之一。</p>
+<pre><code class="lang-bash">grep -n &quot;class ProcessState&quot; frameworks/native/libs/binder/include/binder/ProcessState.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>ProcessState</code> 类定义（<code>:47</code>），<code>302</code> 从这里展开。</p>
+<pre><code class="lang-bash">grep -rn &quot;ProcessState&quot; frameworks/native/libs/binder/ProcessState.cpp | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望得到一个非零计数，说明该类在本文件内被反复引用，是文件主体。</p>
+<pre><code class="lang-bash">grep -n &quot;Runtime&quot; art/runtime/runtime.cc | head</code></pre>
+<p>期望命中 <code>Runtime</code> 相关符号，<code>201</code>/<code>202</code> 都从这里入手。</p>
+<pre><code class="lang-bash">sed -n '1,40p' frameworks/base/core/jni/AndroidRuntime.cpp</code></pre>
+<p>期望看到该文件的头部包含与注释，确认它是框架与运行时的接缝。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：Native 层是一个独立进程。</strong> 不是。ART、bionic、libbinder 都在你的应用进程地址空间里，与 Java 代码同生共死。所谓「Native 世界」是代码层次，不是进程边界。</p>
+<p><strong>误区二：JNI 只是给 Java 调 C 用的。</strong> 看起来对，其实是错的。JNI 是双向的：Native 侧也能通过 <code>JNIEnv</code> 回调 Java，也能主动把线程挂到 VM 上。只当单向桥用，很多回调崩溃的现场就解释不通。</p>
+<p><strong>误区三：ART 只管 Java 内存，与 Native 内存无关。</strong> 不是。Java 堆与 Native 堆是两套账，但同一个进程的地址空间是共享的，垃圾回收（GC）与 Native 分配会互相挤压。<code>202</code> 与 <code>401</code> 分别从两侧讲这件事。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：本卷能不能跳着读，比如直接读 <code>302</code>？ <strong>答</strong>：可以，但前提是先读完 <code>AND-P2-102</code>。<code>302</code> 的硬前置就是框架侧 Binder 语义。 <strong>追问</strong>：那 <code>201</code> 和 <code>301</code> 呢？ <strong>答</strong>：这两篇可并行，互不依赖；<code>302</code> 之后接 <code>202</code>，再往后是 <code>401</code>。</p>
+<p><strong>问</strong>：为什么本卷没有性能数字？ <strong>答</strong>：本卷验证策略是 V1（静态源码分析），不承诺运行时性能。ART 的行为靠源码与官方文档解释。 <strong>追问</strong>：那 <code>301</code> 的 JNI 示例能跑吗？ <strong>答</strong>：能。<code>301</code> 可叠加 V2，JNI 示例独立编译运行，不依赖整包。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>不确定当前树是不是基准版本</td><td><code>git -C frameworks/base log -1 --format=%H</code></td><td>与锚点提交号是否一致</td><td>不一致则行号不可信，转符号 grep</td></tr><tr><td>找不到某个 Native 符号定义</td><td><code>grep -rn &quot;&lt;符号&gt;&quot; frameworks/native art bionic</code></td><td>命中文件与行</td><td>进对应篇号精读</td></tr><tr><td>怀疑某 <code>.so</code> 来自 bionic</td><td><code>grep -rn &quot;name:&quot; bionic/libc/Android.bp</code></td><td>模块名列表</td><td>对上则读 <code>101</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：bionic 与属性系统细节归 <code>AND-P3-101</code>；ART 内部归 <code>201</code>/<code>202</code>/<code>203</code>；JNI 与 libbinder 归 <code>301</code>/<code>302</code>；VNDK 归 <code>402</code>；驱动归 <code>AND-P5</code>。</li><li><strong>本篇前置依赖</strong>：<code>AND-P2-102</code>。</li><li><strong>本篇后继</strong>：<code>AND-P3-101</code>，然后分三条支线。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>全书规模 108 篇 = 96 篇正文（12 卷 × 8 篇）+ 12 篇卷导读（每卷 1 篇）。来源：选题规划。</li><li>本卷 9 篇，其中 8 篇正文 + 1 篇导读。来源：卷纲。</li><li>难度分布：<code>201</code>/<code>202</code>/<code>302</code> 为 ★★★★，其余为 ★★★。来源：卷纲。</li><li>无 V4 篇目，故本卷不含运行时性能数字。来源：验证策略。</li><li>本卷篇均篇幅按 T1–T3 分档，暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树实测）</td><td>行号基准为 <code>art</code> <code>b753cf97923c</code>、<code>bionic</code> <code>06356e41c5ed</code>、<code>system/core</code> <code>545d2487e38</code>、<code>frameworks/base</code> <code>94b4c163b7df</code>、<code>frameworks/native</code> <code>ae266dcb70</code>（各仓 <code>git -C &lt;仓&gt; log -1</code> 实测；仓库根无 <code>.git</code>，须进子仓执行）</td><td>本卷所有行号以此为准</td></tr><tr><td>其他版本</td><td>路径与符号大体稳定，行号会漂移</td><td>跨版本核验请按符号 grep 重锚</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>art runtime docs</code>、<code>bionic libc</code>、<code>vndk</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ProcessState</code>、<code>Runtime</code>、<code>AndroidRuntime</code>。</li><li>本仓关键路径：<code>art/runtime/</code>、<code>frameworks/native/libs/binder/</code>、<code>bionic/libc/</code>。</li><li>承接篇：<code>AND-P3-101</code>、<code>AND-P3-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P3-G01 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

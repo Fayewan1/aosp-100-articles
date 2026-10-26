@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模块与 PROJECT 名：从 Soong 模块到安装路径</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>模块与 PROJECT 名：从 Soong 模块到安装路径</h1>
+<div class="kv"><span>ID：AND-P0-202</span><span>卷：P0</span><span>章：0.2</span><span>难度：2</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：.repo/manifests/default.xml ；system/logging/logcat/Android.bp ；frameworks/base/services/core/Android.bp ；build/make/target/product/base_system.mk</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>模块名、目录名、安装路径是三套独立的命名空间，彼此没有推导关系。manifest 里 <code>path</code> 是工作区相对路径，<code>name</code> 是 Gerrit 上的项目名，两者经常不同。模块靠进 <code>PRODUCT_PACKAGES</code> 才进产品镜像，目录名与模块名相同只是巧合。安装路径来自构建系统约定，不在源码里硬编码每个模块的落点。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：AND-P0-201，先建立源码树的分层与仓的概念，本篇才有坐标。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>.repo/manifests/default.xml</code></li><li><code>system/logging/logcat/Android.bp</code></li><li><code>frameworks/base/services/core/Android.bp</code></li><li><code>build/make/target/product/base_system.mk</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树 + git/grep 即可；本篇验证方式为静态源码分析，不需要编译与真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你 grep 到 <code>logcat</code> 这个模块名，想去改它的代码，于是打开 <code>frameworks/base/</code> 逐层翻找，翻不到。换一条路：先在某目录看到 <code>Android.bp</code> 里写着 <code>name: &quot;logcat&quot;</code>，就以为目录名一定是模块名，下一次照着这个「规律」去找另一个模块，又错了。这类误判的根因是把几个命名空间当成一个。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个命名空间：</p>
+<table><thead><tr><th>命名空间</th><th>举例</th><th>谁定义</th></tr></thead><tbody><tr><td>工作区路径</td><td><code>system/logging/logcat</code></td><td>manifest 的 <code>path</code></td></tr><tr><td>模块名</td><td><code>logcat</code>、<code>services.core</code></td><td><code>Android.bp</code> / <code>Android.mk</code> 的 <code>name</code></td></tr><tr><td>安装路径</td><td><code>/system/bin/logcat</code></td><td>构建系统约定</td></tr></tbody></table>
+<p>图 1：从 manifest 路径到模块名的映射</p>
+<pre><code>manifest path ──► 工作区目录 ──► Android.bp
+                                    │ name
+                                    ▼
+                              PRODUCT_PACKAGES
+                                    │ 约定
+                                    ▼
+                              安装路径</code></pre>
+<p>目录名与模块名可相同也可无关；安装路径由模块类型加约定决定。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>构建描述文件有两套并存。<code>Android.mk</code> 用 Make 语法，属旧体系；<code>Android.bp</code> 用 Soong 语法，新代码用这套。找模块时两个文件名都要看。</p>
+<p>模块要进产品镜像，通常得在产品配置的 <code>PRODUCT_PACKAGES</code> 里出现——除非它作为其它模块的 <code>shared_libs</code>/<code>static_libs</code>/<code>required</code> 被传递依赖带进去，<code>libbase</code>、<code>libprocessgroup</code> 就属此类。模块定义存在，不等于它会被装进某个产品——这是「找不到」的常见来源。</p>
+<p>安装路径是构建系统的约定。native 可执行文件默认落 <code>/system/bin</code>，依据是 Soong 的安装器：<code>build/soong/cc/binary.go:217</code> 给 cc_binary 装 <code>NewBaseInstaller(&quot;bin&quot;, &quot;&quot;, InstallInSystem)</code>，目录由 <code>build/soong/cc/installer.go:73</code> 的 <code>installDir()</code> 给出。<code>binary.go:313</code> 另有一处 <code>/system/bin/linker</code>，那是动态链接器路径（64 位为 <code>linker64</code>），与安装目录无因果，别拿它当依据。这是约定口径，本篇不冒充实测产物路径。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>先看 manifest 的双名：<code>&lt;project path=&quot;build/make&quot; name=&quot;platform/build&quot;&gt;</code>，<code>path</code> 是工作区路径，<code>name</code> 是 Gerrit 项目名，两者分离，<code>build/make</code> 的项目名是 <code>platform/build</code>。</p>
+<p>再看 <code>logcat</code>：模块定义在 <code>system/logging/logcat/Android.bp</code>，是 <code>cc_binary</code>，<code>name</code> 为 <code>logcat</code>，<code>shared_libs</code> 含 <code>libbase</code>、<code>libutils</code>、<code>libprocessgroup</code>、<code>libprotobuf-cpp-lite</code>，<code>static_libs</code> 含 <code>liblog</code>。目录名与模块名同名属巧合。</p>
+<p>它出现在 <code>base_system.mk</code> 的 <code>PRODUCT_PACKAGES</code> 里，落点按约定是 <code>/system/bin/logcat</code>。</p>
+<p>对照 <code>services.core</code>：定义在 <code>frameworks/base/services/core/Android.bp</code>，是 <code>java_library</code>，<code>name</code> 为 <code>services.core</code>；目录名 <code>core</code> 与模块名不同，落点是 framework jar。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P0-201 给出源码树的仓与分层，本篇给出「名字到路径」的读法。Soong/ninja 的构建机制归 AND-P11-101，本篇不展开。后续进入具体子系统时，本篇的查法会反复用到。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>manifest 双名</td><td><code>.repo/manifests/default.xml</code></td><td><code>&lt;project path= name=&gt;</code></td><td><code>path</code> 是工作区相对路径，<code>name</code> 是 Gerrit 项目名</td></tr><tr><td>native 模块定义</td><td><code>system/logging/logcat/Android.bp</code></td><td><code>cc_binary</code> <code>name: &quot;logcat&quot;</code></td><td>目录名与模块名相同，属巧合</td></tr><tr><td>安装清单</td><td><code>build/make/target/product/base_system.mk</code></td><td><code>PRODUCT_PACKAGES</code> 含 <code>logcat</code></td><td>进清单才进镜像</td></tr><tr><td>java 模块定义</td><td><code>frameworks/base/services/core/Android.bp</code></td><td><code>java_library</code> <code>name: &quot;services.core&quot;</code></td><td>目录名 <code>core</code> 与模块名不同</td></tr><tr><td>路径约定</td><td><code>build/soong/cc/binary.go</code></td><td><code>NewBaseInstaller(&quot;bin&quot;, &quot;&quot;, InstallInSystem)</code>（217 行）</td><td>目录由 <code>installer.go:73</code> 的 <code>installDir()</code> 给出</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/logging:d35ba620</p></blockquote>
+<p>验证方式：静态源码分析，在源码树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;build/make&quot; .repo/manifests/default.xml</code></pre>
+<p>期望看到 <code>path=&quot;build/make&quot;</code> 与 <code>name=&quot;platform/build&quot;</code> 同在一行，对上 §4.3。</p>
+<pre><code class="lang-bash">grep -n &quot;name:&quot; system/logging/logcat/Android.bp | head</code></pre>
+<p>期望看到 <code>name: &quot;logcat&quot;</code>，对上 §4.3。</p>
+<pre><code class="lang-bash">grep -n &quot;logcat&quot; build/make/target/product/base_system.mk</code></pre>
+<p>期望在 <code>PRODUCT_PACKAGES</code> 段内命中 <code>logcat</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;name:&quot; frameworks/base/services/core/Android.bp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>name: &quot;services.core&quot;</code>，目录名与模块名不同。</p>
+<pre><code class="lang-bash">grep -n &quot;NewBaseInstaller&quot; build/soong/cc/binary.go</code></pre>
+<p>期望在 217 行看到 <code>NewBaseInstaller(&quot;bin&quot;, &quot;&quot;, InstallInSystem)</code>，对上「路径靠约定」的口径。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>错</strong>：模块名就是目录名。<strong>对</strong>：<code>logcat</code> 两者相同只是巧合，<code>services.core</code> 的目录是 <code>frameworks/base/services/core</code>，名不同。</p>
+<p><strong>错</strong>：定义了模块就会装进系统。<strong>对</strong>：还要进产品的 <code>PRODUCT_PACKAGES</code>，或被其它模块以 <code>shared_libs</code>/<code>required</code> 传递依赖带上。</p>
+<p><strong>错</strong>：安装路径写在模块定义里。<strong>对</strong>：落点由构建系统约定推导，源码里通常不写死每个模块的路径。</p>
+<p><strong>看起来对其实错</strong>：manifest 的 <code>path</code> 就是项目名。<strong>对</strong>：<code>build/make</code> 的 <code>name</code> 是 <code>platform/build</code>，两者经常不同。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么我 grep 模块名找不到目录？<strong>答</strong>：模块名与目录名不同名是常态，改从 <code>PRODUCT_PACKAGES</code> 或全树 grep <code>name: &quot;xxx&quot;</code> 反查。<strong>追问</strong>：那怎么从目录找模块名？<strong>答</strong>：看该目录下的 <code>Android.bp</code> 或 <code>Android.mk</code> 的 <code>name</code> 字段。</p>
+<p><strong>问</strong>：只有一个 <code>Android.mk</code> 的目录是不是废弃了？<strong>答</strong>：不是，两套并存。<strong>追问</strong>：新写的用哪套？<strong>答</strong>：新代码用 <code>Android.bp</code>。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>模块名找不到目录</td><td><code>grep -rn 'name: &quot;logcat&quot;' --include=Android.bp .</code></td><td>命中的 <code>Android.bp</code> 所在目录</td><td>该目录即模块源码位置</td></tr><tr><td>模块未进镜像</td><td><code>grep -rn &quot;logcat&quot; build/make/target/product/*.mk</code></td><td>是否在 <code>PRODUCT_PACKAGES</code></td><td>不在就补进对应产品配置</td></tr><tr><td>目录只有 mk</td><td><code>ls frameworks/base/services/core/Android.*</code></td><td>出现的是 <code>Android.bp</code> 还是 <code>Android.mk</code></td><td>按对应语法读 <code>name</code></td></tr><tr><td>manifest 名对不上</td><td><code>grep -n &quot;build/make&quot; .repo/manifests/default.xml</code></td><td><code>path</code> 与 <code>name</code> 两列</td><td>用 <code>name</code> 去 Gerrit 检索</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Soong/ninja 构建机制本身归 AND-P11-101；产品配置的继承与变量展开不在本篇。</li><li><strong>本篇前置依赖</strong>：AND-P0-201。</li><li><strong>本篇后继</strong>：查具体模块源码的篇目；构建语法差异篇。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li><code>base_system.mk</code> 中 <code>logcat</code> 的位置约在 227 行附近（口径：本树实测行号，漂移即重锚）。</li><li><code>system/logging/logcat/Android.bp</code> 的模块定义约在 33–52 行（口径：本树实测，漂移即重锚）。</li><li><code>services.core</code> 的定义约在 321 行（口径：本树实测，漂移即重锚）。</li><li>AOSP 全树模块总数：暂无实测，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本</td><td>Soong 迁移期，<code>Android.mk</code> 渐退（source.android.com《Build System Changes for Android.mk Writers》）</td><td>老资料里的模块名多在 mk 里找</td></tr><tr><td>android17-release</td><td>本树实测：<code>Android.mk</code> 与 <code>Android.bp</code> 并存，新代码用 bp</td><td>找模块要同时看两种文件名</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>Android.bp</code>、<code>PRODUCT_PACKAGES</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>Android.bp</code>、<code>cc_binary</code>。</li><li>本仓关键路径：<code>system/logging/logcat/Android.bp</code>、<code>build/make/target/product/base_system.mk</code>、<code>.repo/manifests/default.xml</code>。</li><li>承接篇：AND-P0-201、AND-P11-101。</li></ul>
+</article>
+<footer>android-100 · AND-P0-202 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

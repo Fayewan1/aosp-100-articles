@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一个 App 进程的诞生：Zygote fork 到 ActivityThread</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>一个 App 进程的诞生：Zygote fork 到 ActivityThread</h1>
+<div class="kv"><span>ID：AND-P1-101</span><span>卷：P1</span><span>章：1.1</span><span>难度：3</span><span>核验：2026-10-14</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/core/java/com/android/internal/os/Zygote.java ；frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java ；frameworks/base/core/java/com/android/internal/os/ZygoteServer.java ；frameworks/base/core/java/com/android/internal/os/RuntimeInit.java ；frameworks/base/core/java/android/app/ActivityThread.java ；frameworks/base/core/java/android/app/Instrumentation.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键流程">4.2 关键流程</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>应用进程不是被「新建」出来的，而是从一个常驻的 Zygote 进程 <code>fork</code> 出来的。子进程沿 socket 收到启动参数后，走 <code>ZygoteInit.zygoteInit</code> 做进程级初始化，再由 <code>RuntimeInit.applicationInit</code> 反射进入 <code>ActivityThread.main</code>。主线程在那里建好消息循环，通过 <code>attach</code> 把本进程的 Binder 句柄交给 AMS，随后等待 AMS 下发「绑定 Application」和「启动首个 Activity」两条命令。整条路径的每一步都在一个具体函数里，可以逐段核验。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§4.1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-G01（本卷地图）、AND-P0-301（五条调用链，链②起点）。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/RuntimeInit.java</code></li><li><code>frameworks/base/core/java/android/app/ActivityThread.java</code></li><li><code>frameworks/base/core/java/android/app/Instrumentation.java</code></li></ul>
+<p><strong>环境要求</strong>：源码树加 git/grep。带 V3 档的可选实验需要一个与 API 37 对齐的模拟器或真机，用于观察新进程。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>想搞清楚「一个 App 是怎么起来的」，直觉上的问法是「谁调用了 <code>main</code>」。但应用进程里没有传统意义上的 <code>main</code> 被系统直接执行——它是被复制出来的。如果不知道这一点，就会在 <code>ActivityThread</code> 里找不到「谁创建了我」，也会在排查「进程被系统杀掉后为何重启变慢」时错判原因。这一篇把从 socket 收到命令到 <code>ActivityThread.main</code> 建好循环的每一步接起来。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个角色：Zygote（常驻模板进程）、socket（命令通道）、RuntimeInit（进程级初始化与反射入口）、ActivityThread（应用主线程宿主）。</p>
+<p>图 1：Zygote fork 到 ActivityThread.main 的主链路</p>
+<pre><code>  Zygote ──fork──▶ 子进程 ──socket──▶ zygoteInit
+                                        │
+                    ActivityThread.main ◀─ applicationInit</code></pre>
+<p>关键点：<code>fork</code> 之后父子进程共享已加载的类与资源，子进程省下大量初始化开销；这正是 Android 用 Zygote 而不是「每次 exec 一个新进程」的原因。</p>
+<h2 id="h6-4-2-关键流程">4.2 关键流程</h2>
+<p>子进程侧的主要跳转如下：</p>
+<p>图 2：同一条链路的函数级细化（含反射入口）</p>
+<pre><code>  Zygote ─fork─▶ 子进程 ─zygoteInit─▶ applicationInit
+                                   │
+                     ActivityThread.main ◀── 反射入口
+                                   │
+                    attach ──▶ AMS（下发绑定与启动）</code></pre>
+<p>主流程分四段。</p>
+<p>第一段，Zygote 就绪。<code>ZygoteInit.main</code> 预加载公共资源后创建 <code>ZygoteServer</code> 并进入 <code>runSelectLoop</code>，等待连接；系统服务进程由 <code>forkSystemServer</code> 另行派生。</p>
+<p>第二段，子进程特化。连接建立后，<code>ZygoteConnection.processCommand</code> 先从命令 socket 读入并解析启动参数（<code>ZygoteConnection.java</code> 约 123/126 行），再调 <code>Zygote.forkAndSpecialize</code>（约 250 行）完成真正的 <code>fork</code>，随即在子进程里经 <code>handleChildProc</code>（约 269 行）调用 <code>ZygoteInit.zygoteInit</code>。</p>
+<p>第三段，进程级初始化。<code>zygoteInit</code> 依次执行 <code>RuntimeInit.commonInit</code>、<code>nativeZygoteInit</code>（启动 Binder 线程池）、<code>RuntimeInit.applicationInit</code>。最后一项返回一个 <code>Runnable</code>，也就是 <code>RuntimeInit.findStaticMain</code> 造出的 <code>MethodAndArgsCaller</code>。</p>
+<p>第四段，进入应用主循环。<code>ZygoteInit.main</code> 在子进程返回后执行 <code>caller.run()</code>，反射调用目标类的静态 <code>main</code>；对应用进程而言，这个目标类就是 <code>ActivityThread</code>。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>启动参数里带的启动类是 <code>android.app.ActivityThread</code>。<code>ActivityThread.main</code> 先执行 <code>Looper.prepareMainLooper()</code> 建好主线程消息队列，再 <code>new ActivityThread()</code> 并调用 <code>attach(false, startSeq)</code>；<code>attach</code> 内部取出 AMS 代理，调用 <code>attachApplication(mAppThread, startSeq)</code> 把自己注册过去。注册完成后主线程进入 <code>Looper.loop()</code> 挂起等待。</p>
+<p>此后 AMS 通过对端 <code>ApplicationThread</code> 下发两条命令：<code>handleBindApplication</code> 负责创建 <code>Application</code> 对象（经 <code>Instrumentation.newApplication</code> 与 <code>callApplicationOnCreate</code>）；<code>performLaunchActivity</code> 负责创建并启动首个 <code>Activity</code>（经 <code>Instrumentation.callActivityOnCreate</code>）。到这一步，进程才算「可用」。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>forkAndSpecialize</code> 之前的 Zygote 自身启动（<code>init</code> 拉起 <code>app_process</code>、预加载清单）归 AND-P8-301，本篇不展开。进程建立之后的组件状态机见 AND-P1-102；AMS 侧如何决定启动顺序见 AND-P2-201；进程模型与 LMKD 回收见 AND-P2-401。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>环节</th><th>文件路径</th><th>关键符号</th><th>说明</th></tr></thead><tbody><tr><td>Zygote 主入口</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>main</code>（约 824 行）</td><td>预加载、起服务、等连接</td></tr><tr><td>等连接</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteServer.java</code></td><td><code>runSelectLoop</code>（约 394 行）</td><td>accept 循环，逐个接收命令</td></tr><tr><td>读命令</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteConnection.java</code></td><td><code>processCommand</code>（约 120 行）</td><td>读 socket 参数并触发 fork</td></tr><tr><td>进程特化</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>zygoteInit</code>（约 983 行）</td><td>子进程初始化并返回入口 Runnable</td></tr><tr><td>真正 fork</td><td><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td><code>forkAndSpecialize</code>（约 376 行）</td><td>调用 native 完成派生</td></tr><tr><td>反射入口</td><td><code>frameworks/base/core/java/com/android/internal/os/RuntimeInit.java</code></td><td><code>applicationInit</code>（约 372 行）</td><td>返回 <code>MethodAndArgsCaller</code></td></tr><tr><td>应用主线程</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>main</code>（约 9465 行）</td><td>建消息循环并 attach</td></tr><tr><td>注册到 AMS</td><td><code>frameworks/base/core/java/android/app/ActivityThread.java</code></td><td><code>attach</code>（约 9275 行）</td><td>调 <code>attachApplication</code></td></tr><tr><td>创建 Application</td><td><code>frameworks/base/core/java/android/app/Instrumentation.java</code></td><td><code>newApplication</code>（约 1358 行）</td><td>插桩层统一入口</td></tr></tbody></table>
+<p>Zygote 由 <code>app_process</code> 拉起，后者识别的启动开关同族集中如下：</p>
+<table><thead><tr><th>开关</th><th>归属</th><th>语义</th><th>出处</th></tr></thead><tbody><tr><td><code>--zygote</code></td><td><code>app_process</code></td><td>以 Zygote 模式启动</td><td><code>app_main.cpp</code> 约 266 行</td></tr><tr><td><code>--start-system-server</code></td><td><code>app_process</code></td><td>顺带派生系统服务进程</td><td><code>app_main.cpp</code> 约 269 行</td></tr><tr><td><code>--setuid</code> / <code>--setgid</code></td><td>子进程参数</td><td>指定目标用户与组</td><td><code>ZygoteInit.forkSystemServer</code> 参数表</td></tr><tr><td><code>--nice-name</code></td><td>子进程参数</td><td>设置进程名</td><td>同上</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析（含可选运行时观察）。前三组命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. Zygote 主入口与子进程准备函数
+grep -n &quot;public static void main\|public static Runnable zygoteInit&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+# 期望：命中 main（约 824 行）与 zygoteInit（约 983 行）
+
+# 2. 反射入口与 fork 调用
+grep -n &quot;protected static Runnable applicationInit&quot; \
+  frameworks/base/core/java/com/android/internal/os/RuntimeInit.java
+grep -n &quot;static int forkAndSpecialize&quot; \
+  frameworks/base/core/java/com/android/internal/os/Zygote.java
+# 期望：分别命中约 372 行与 376 行
+
+# 3. 应用主线程入口与 attach
+grep -n &quot;public static void main\|private void attach(boolean system&quot; \
+  frameworks/base/core/java/android/app/ActivityThread.java
+# 期望：命中 main（约 9465 行）与 attach（约 9275 行）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>可选运行时观察（V3，需模拟器，进程名换成实际包名）：</p>
+<pre><code class="lang-bash">adb shell ps -A | grep -i &lt;package&gt;
+# 期望：可见一条以该包名为主进程名的记录，列首为 pid
+
+adb shell am start -W -n &lt;package&gt;/&lt;activity&gt;
+# 期望：输出 ThisTime/TotalTime；再跑上面的 ps 可见 pid 变化</code></pre>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为应用进程由 AMS 直接创建。</strong> AMS 只发起请求并通过 socket 传参；真正创建进程的是 Zygote 的 <code>fork</code>。</p>
+<p><strong>误区二：以为 `ActivityThread.main` 里会创建 Activity。</strong> 它只建消息循环并注册到 AMS，Activity 的创建发生在后续下发的 <code>performLaunchActivity</code>。</p>
+<p><strong>误区三（看起来对其实是错的）：以为 `fork` 出来的进程会重新加载所有类。</strong> <code>fork</code> 之后子进程复用父进程已加载的类与预加载资源，这正是 Zygote 存在的意义；重新加载只发生在少数场景。</p>
+<p><strong>误区四：以为 `RuntimeInit` 是应用自己的类。</strong> 它是进程级引导代码，和业务无关；<code>MethodAndArgsCaller</code> 只做一次反射跳转。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：应用进程的入口到底是哪个函数？ <strong>答</strong>：从静态 <code>main</code> 看，入口是 <code>ActivityThread.main</code>，但它是被 <code>MethodAndArgsCaller.run()</code> 反射调进来的；再往上追是 <code>ZygoteInit.zygoteInit</code> 的返回 Runnable。</p>
+<p><strong>追问</strong>：为什么用反射而不是直接调用？ <strong>答</strong>：Zygote 是通用模板，启动类由参数决定，只能用反射在运行期绑定；同时反射调用可以把 fork 前的栈帧一次性清掉。</p>
+<p><strong>问</strong>：进程什么时候算「起来了」？ <strong>答</strong>：主线程进入 <code>Looper.loop()</code> 并在 AMS 完成 <code>attachApplication</code> 之后。此时进程可接收组件调度。</p>
+<p><strong>追问</strong>：怎么确认某进程确实注册成功？ <strong>答</strong>：看 <code>adb shell dumpsys activity processes</code> 中该进程是否出现在 AMS 的进程列表里。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>看不到应用进程</td><td><code>adb shell ps -A | grep &lt;package&gt;</code></td><td>是否有对应 pid</td><td>无则查 AMS 是否发起启动</td></tr><tr><td>进程起来但界面不显示</td><td><code>adb shell dumpsys activity activities</code></td><td>是否停在 <code>PAUSING</code></td><td>转到 102、202</td></tr><tr><td>启动明显变慢</td><td><code>adb shell am start -W -n &lt;package&gt;/&lt;activity&gt;</code></td><td><code>TotalTime</code> 是否偏大</td><td>对比 401 的帧耗时</td></tr><tr><td>启动即崩且栈在 <code>main</code></td><td><code>adb logcat | grep AndroidRuntime</code></td><td>异常类与首个应用栈帧</td><td>查 <code>Application.onCreate</code></td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Zygote 自身启动全过程（AND-P8-301）；组件状态机（AND-P1-102）；AMS 启动编排（AND-P2-201）；进程回收（AND-P2-401）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P1-G01</code>、<code>AND-P0-301</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P1-102</code>，并被 <code>AND-P2-201</code>、<code>AND-P2-401</code> 引用。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>Zygote 主入口 <code>ZygoteInit.main</code> 位于 <code>ZygoteInit.java</code> 约 824 行，口径为该文件符号位置，2026-10-14 实测。</li><li>应用主线程入口 <code>ActivityThread.main</code> 位于约 9465 行，口径同上。</li><li>Zygote 由 <code>app_process</code> 以 <code>--zygote</code> 形态拉起，口径为 <code>app_main.cpp</code> 约 266 行，2026-10-14 实测。</li><li>首帧耗时可读 <code>am start -W</code> 的 <code>TotalTime</code>（毫秒），口径为实测输出，具体数值随设备与包不同，暂无跨设备统一量级，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树）</td><td>入口链为 <code>zygoteInit → applicationInit → ActivityThread.main</code></td><td>读者按本篇命令可复现</td></tr><tr><td>早期版本</td><td>进程特化与入口类名大体沿用，行号与个别辅助类不同</td><td>按符号重锚，勿依赖行号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>zygote</code>、<code>app startup</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ZygoteInit</code>、<code>ActivityThread</code> 相关改动。</li><li>本仓关键路径：<code>frameworks/base/core/java/com/android/internal/os/</code>、<code>frameworks/base/core/java/android/app/</code>、<code>frameworks/base/cmds/app_process/</code>。</li><li>承接篇：<code>AND-P0-301</code>、<code>AND-P8-301</code>、<code>AND-P1-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P1-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

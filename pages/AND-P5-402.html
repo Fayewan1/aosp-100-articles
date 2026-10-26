@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>电源管理：suspend/resume、runtime PM 与 wakeup 源</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>电源管理：suspend/resume、runtime PM 与 wakeup 源</h1>
+<div class="kv"><span>ID：AND-P5-402</span><span>卷：P5</span><span>章：5.5</span><span>难度：3</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/libsuspend/autosuspend.c ；system/core/libsuspend/autosuspend_wakeup_count.cpp ；system/core/libsuspend/include/suspend/autosuspend.h ；system/core/libsuspend/Android.bp ；bionic/libc/kernel/uapi/linux/suspend_ioctls.h</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p><code>/sys/power/state</code> 写 <code>mem</code> 就挂起，写之前必须先回写 <code>/sys/power/wakeup_count</code>。这个「先回写计数、再写状态」的顺序不是仪式，而是消除竞争的唯一手段：计数写失败说明这段时间里已经出现新的唤醒事件，本轮必须放弃。libsuspend 的自动挂起循环把这两步包在 <code>sem_wait(&amp;suspend_lockout)</code> 之后，失败后睡眠时间翻倍，上限一分钟。想判断「谁阻止了睡眠」看 <code>/sys/power/wakeup_count</code> 与内核 wakeup 源计数；想判断「谁把它唤醒」只能靠事后计数对比与 wakeup 源统计，<code>/sys/power/state</code> 本身不告诉你答案。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P5-G01</code>，先建立 P5 卷在内核层与框架层之间的位置感，本篇只讲内核侧的睡与醒。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>system/core/libsuspend/autosuspend.c</code></li><li><code>system/core/libsuspend/autosuspend_wakeup_count.cpp</code></li><li><code>system/core/libsuspend/include/suspend/autosuspend.h</code></li><li><code>system/core/libsuspend/Android.bp</code></li><li><code>bionic/libc/kernel/uapi/linux/suspend_ioctls.h</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>设备放在桌上，屏幕灭了，电池却在一夜之间掉了两成。或者反过来：抓到的日志里系统明明已经进入挂起，几分钟后又自己醒了，却找不到是谁按的键。这两种现象在同一个路口分岔——内核到底有没有真的睡下去，以及是谁在最后一刻把计数改掉了。</p>
+<p>多数人第一步会去翻 <code>/sys/power/state</code> 和框架的唤醒锁记录，然后卡住：前者只有一个状态字符串，后者只能证明「某个进程持有锁」，不能证明「内核拒绝了挂起」。真正决定成败的是 <code>/sys/power/wakeup_count</code> 的读写顺序。</p>
+<p>本篇只走内核侧这条通路。上层省电策略归 P9/P10，唤醒锁在框架层的表达归 P2。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个概念构成一个闭环：<strong>系统睡眠状态</strong>（system sleep state，<code>mem</code> 这一类字符串）是写入 <code>/sys/power/state</code> 的目标；<strong>唤醒计数</strong>（wakeup count，<code>/sys/power/wakeup_count</code>）是可读可写的整数，任何唤醒事件发生都会让内核侧的计数增长；<strong>唤醒源</strong>（wakeup source）是内核里被标记为可唤醒系统的设备节点，它的 active 状态决定挂起请求会不会被拒。</p>
+<p>图 1：写状态与回写计数的先后关系</p>
+<pre><code>userspace                       kernel
+  |                               |
+  |-- read wakeup_count ---------&gt;|  snapshot N
+  |&lt;-- &quot;N&quot; -----------------------|
+  |                               |  (期间若有唤醒事件，计数变 N+k)
+  |-- write &quot;N&quot; to wakeup_count -&gt;|
+  |&lt;-- 成功: 挂起请求入队 ---------|
+  |&lt;-- 失败: EINVAL/短写 ---------|  N != 当前计数
+  |                               |
+  |-- write &quot;mem&quot; to state ------&gt;|  进入 suspend</code></pre>
+<p>先回写计数，成功才写状态。回写是「我认领 N 这个时刻」，内核在挂起流程末尾再比对一次；不一致就拒绝。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>libsuspend 对外只有四个入口，见 <code>system/core/libsuspend/include/suspend/autosuspend.h</code>。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>autosuspend_enable()</code></td><td>启动自动挂起循环线程</td><td><code>autosuspend.h</code></td></tr><tr><td><code>autosuspend_disable()</code></td><td>停止循环并退出挂起模式</td><td><code>autosuspend.h</code></td></tr><tr><td><code>autosuspend_force_suspend(int timeout_ms)</code></td><td>绕开循环，立即强制挂起一次</td><td><code>autosuspend.h</code></td></tr><tr><td><code>autosuspend_set_wakeup_callback(void (*func)(bool success))</code></td><td>注册唤醒回调，参数是上一次挂起是否成功</td><td><code>autosuspend.h</code></td></tr></tbody></table>
+<p>初始化路径唯一：<code>autosuspend_init()</code> 内 <code>autosuspend_ops = autosuspend_wakeup_count_init();</code>，拿不到即 <code>ALOGE(&quot;failed to initialize autosuspend&quot;)</code> 并返回 -1。也就是说 <code>wakeup_count</code> 方案不是多选项之一，而是唯一实现源。</p>
+<p>挂起循环的核心是顺序。<code>suspend_thread_func()</code> 先 <code>update_sleep_time(success)</code> 再 <code>usleep(sleep_time)</code>，然后 <code>lseek(wakeup_count_fd, 0, SEEK_SET)</code> 并 <code>ReadFdToString(wakeup_count_fd, &amp;wakeup_count)</code> 取快照。真正落笔前 <code>sem_wait(&amp;suspend_lockout)</code> 占住锁，随后先 <code>WriteStringToFd(wakeup_count, wakeup_count_fd)</code>，成功才 <code>WriteStringToFd(sleep_state, state_fd)</code>。</p>
+<p>写 <code>wakeup_count</code> 失败就是本轮放弃的信号：这段时间内出现了新唤醒事件，认领的时刻已经过期。失败分支不向调用方报错、也不重试，仅在用户态记一条 <code>PLOG(ERROR) &lt;&lt; &quot;error writing to &quot; &lt;&lt; sys_power_wakeup_count</code>（<code>autosuspend_wakeup_count.cpp:103</code>），随后回到循环顶部重新取快照——所以从 API 返回值上看不出这次失败，日志里才有。</p>
+<p>退避策略在 <code>update_sleep_time()</code> 里，注释原句 &quot;double sleep time after each failure up to one minute&quot;，<code>BASE_SLEEP_TIME 100000</code>、<code>MAX_SLEEP_TIME 60000000</code>，单位微秒。首次等待 0.1 秒，每失败一次翻倍，封顶 60 秒。</p>
+<p><code>force_suspend(int timeout_ms)</code> 走另一条路：先 <code>init_state_fd()</code> 再直接写 <code>sleep_state</code>，不经过唤醒计数比对。<code>init_state_fd()</code> 用 <code>TEMP_FAILURE_RETRY(open(sys_power_state, O_CLOEXEC | O_RDWR))</code> 打开状态节点。</p>
+<p>一轮循环的完整分支画出来，才看得出「放弃本轮」和「挂起被拒」是两个不同的出口：</p>
+<p>图 2：挂起循环一轮的两个失败出口</p>
+<pre><code>  一轮（suspend_thread_func）
+        |
+        v
+  读 /sys/power/wakeup_count -&gt; 快照 N
+        |
+        v
+  回写 &quot;N&quot; ---- 失败（期间有新唤醒事件）----&gt; 放弃本轮，回到顶部
+        |                                      sleep_time 翻倍
+      成功
+        |
+        v
+  写 &quot;mem&quot; 到 /sys/power/state
+        |
+        v
+  内核挂起流程末尾再比对一次
+        |
+        +--&gt; 一致   -&gt; 系统睡下
+        +--&gt; 不一致 -&gt; 挂起被拒，回调 success=false
+
+  退避：BASE_SLEEP_TIME 100000 us 起，每失败一次翻倍，
+        封顶 MAX_SLEEP_TIME 60000000 us（60 s）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>常量与路径集中在 <code>autosuspend_wakeup_count.cpp</code> 头部：<code>sleep_state[] = &quot;mem&quot;</code>、<code>/sys/power/state</code>、<code>/sys/power/wakeup_count</code>。三个字符串都是 <code>static constexpr char</code>，编译期定死，没有运行时配置入口。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某个后台任务每隔几秒唤醒一次。循环第一次：读计数得 N，回写 N 成功，写 <code>mem</code>。挂起流程末尾比对时计数已变成 N+1，挂起被拒，回调收到 <code>success=false</code>。<code>update_sleep_time</code> 把 100000 微秒翻成 200000。</p>
+<p>第二轮读计数得 N+1，回写失败（写进去的是 N+1，内核侧已是 N+2），本轮直接放弃，连 <code>mem</code> 都没写。再翻倍到 400000。如此下去，等到后台任务停下来，某轮回写终于成功，且比对时没有新增事件，系统真正睡下去。</p>
+<p>这解释了为什么「看起来系统一直在尝试挂起」但电没省下来：失败次数越多，重试间隔越长，日志里两次尝试之间的空档会拉大到一分钟。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P5-G01</code> 是本篇前置，给出卷内坐标。P9/P10 讲 Doze 与上层省电策略，那些决策最终都要落到这里的 <code>/sys/power/state</code> 写入上，但本篇不谈触发时机与策略阈值。P2 讲唤醒锁在框架层的表达，框架的锁与内核唤醒源不是同一层的对象，跨层对应关系归 P2 说明。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>初始化与对外 API</td><td><code>system/core/libsuspend/autosuspend.c</code></td><td><code>autosuspend_init()</code>、<code>autosuspend_wakeup_count_init()</code></td><td>唯一实现源，失败返回 -1</td></tr><tr><td>公共头文件</td><td><code>system/core/libsuspend/include/suspend/autosuspend.h</code></td><td>四个对外入口</td><td>调用方只看这里</td></tr><tr><td>挂起循环实现</td><td><code>system/core/libsuspend/autosuspend_wakeup_count.cpp</code></td><td><code>suspend_thread_func()</code>、<code>force_suspend()</code>、<code>update_sleep_time()</code></td><td>计数回写与退避都在此</td></tr><tr><td>构建定义</td><td><code>system/core/libsuspend/Android.bp</code></td><td>libsuspend 模块</td><td>谁链接它决定谁能挂起</td></tr><tr><td>另一条通道</td><td><code>bionic/libc/kernel/uapi/linux/suspend_ioctls.h</code></td><td><code>SNAPSHOT_IOC_MAGIC '3'</code>、<code>SNAPSHOT_FREEZE</code>、<code>SNAPSHOT_UNFREEZE</code>、<code>SNAPSHOT_ATOMIC_RESTORE</code>、<code>SNAPSHOT_S2RAM</code></td><td>快照/休眠 ioctl，与 <code>/sys/power/state</code> 不同层</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e381</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在 AOSP 树根执行。</p>
+<pre><code class="lang-bash">grep -n &quot;autosuspend_wakeup_count_init&quot; system/core/libsuspend/autosuspend.c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>autosuspend_init()</code> 中唯一一处赋值，对应「唯一实现源」这条。</p>
+<pre><code class="lang-bash">grep -n &quot;sleep_state\|sys_power_state\|sys_power_wakeup_count&quot; system/core/libsuspend/autosuspend_wakeup_count.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>&quot;mem&quot;</code>、<code>/sys/power/state</code>、<code>/sys/power/wakeup_count</code> 三个 <code>static constexpr char</code> 定义。</p>
+<pre><code class="lang-bash">grep -n &quot;BASE_SLEEP_TIME\|MAX_SLEEP_TIME\|double sleep time&quot; system/core/libsuspend/autosuspend_wakeup_count.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>100000</code>、<code>60000000</code> 与注释原句，对应退避策略。</p>
+<pre><code class="lang-bash">grep -n &quot;sem_wait(&amp;suspend_lockout)\|WriteStringToFd&quot; system/core/libsuspend/autosuspend_wakeup_count.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：循环里先写 <code>wakeup_count</code> 再写 <code>sleep_state</code> 的两次 <code>WriteStringToFd</code> 调用。</p>
+<pre><code class="lang-bash">grep -n &quot;SNAPSHOT_&quot; bionic/libc/kernel/uapi/linux/suspend_ioctls.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>SNAPSHOT_FREEZE</code>、<code>SNAPSHOT_UNFREEZE</code>、<code>SNAPSHOT_ATOMIC_RESTORE</code>、<code>SNAPSHOT_S2RAM</code> 等定义。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：写 `/sys/power/state` 成功就等于系统睡着了。</strong> 写进去只是发出请求，内核在挂起流程末尾还要比对唤醒计数与唤醒源状态，任何一处不满足都会中止。用户态看到的写成功不代表进入 <code>mem</code>。</p>
+<p><strong>误区二：`/sys/power/wakeup_count` 只能读。</strong> 它必须可写，回写是消除竞争的关键动作。只读不写的挂起实现存在时间窗：取快照到真正挂起之间出现的唤醒事件会被吞掉。</p>
+<p><strong>误区三：`autosuspend_force_suspend()` 是「更可靠的挂起」。</strong> 它跳过计数比对直接写状态，恰恰放弃了竞争保护。看起来对其实是错的——它适合的是有明确超时约束的一次性场景，不是日常通路的加速版。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：自动挂起循环失败后为什么要翻倍等待，而不是立刻重试？ <strong>答</strong>：立刻重试在一段持续有事件的时间里只会反复写失败，白耗 CPU；翻倍把重试频率压下去，上限一分钟，等事件潮过去。 <strong>追问</strong>：那怎么知道是「事件潮」还是「某个唤醒源一直 active」？ <strong>答</strong>：这两者用户态可观测现象不同。前者计数在涨但最终会停；后者计数稳定，挂起请求每次都卡在唤醒源检查上，需要去看具体唤醒源的 active 计数。</p>
+<p><strong>问</strong>：<code>SNAPSHOT_S2RAM</code> 和写 <code>mem</code> 是一回事吗？ <strong>答</strong>：不是。<code>suspend_ioctls.h</code> 里的这组 ioctl 走快照/休眠通道，与 <code>/sys/power/state</code> 不同层，语义是冻结进程加内存快照，不是本文讲的系统睡眠。 <strong>追问</strong>：那为什么两者都叫 suspend？ <strong>答</strong>：命名撞车，实现路径完全不同。排查问题时先确认是哪条通道，再谈现象。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>灭屏后长时间不进入挂起</td><td><code>cat /sys/power/wakeup_count</code> 连续两次</td><td>计数是否在增长</td><td>增长→有事件源活跃；不变→挂起请求被唤醒源拒绝</td></tr><tr><td>挂起后很快被唤醒</td><td><code>cat /sys/power/wakeup_count</code> 前后对比</td><td>唤醒前后差值</td><td>差值对应唤醒次数，配合唤醒源统计定位</td></tr><tr><td>怀疑强制挂起无效果</td><td><code>grep -n &quot;force_suspend&quot; system/core/libsuspend/autosuspend_wakeup_count.cpp</code></td><td>是否跳过计数比对</td><td>确认调用方是否误把它当日常通路</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：Doze 与上层省电策略见 P9/P10；唤醒锁在框架层的表达见 P2。</li><li><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>。</li><li><strong>本篇后继</strong>：P9、P10 的策略篇，以及 P2 的唤醒锁篇。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>首次退避 100000 微秒（0.1 秒），来源：源码常量 <code>BASE_SLEEP_TIME</code>。</li><li>退避上限 60000000 微秒（60 秒），来源：源码常量 <code>MAX_SLEEP_TIME</code>。</li><li>失败翻倍次数到上限约需 10 次，来源：本篇按常量推算，待实测。</li><li>唤醒计数为内核维护的单调量，无用户态可见上限，来源：内核契约，具体实现不在本树核验范围。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期 AOSP（未在本树核验）</td><td>libsuspend 据公开资料曾同时存在 autosuspend 与 autosuspend_deprecated 等多套实现路径</td><td>调用方需要区分目标路径；本树 <code>git log --all -- '*autosuspend_deprecated*'</code> 无记录，该历史描述未在本树逐版本核对</td></tr><tr><td>android17-release（本树实测）</td><td><code>autosuspend_init()</code> 只调用 <code>autosuspend_wakeup_count_init()</code>，失败即 <code>ALOGE(&quot;failed to initialize autosuspend&quot;)</code> 并返回 -1</td><td>实现源收窄为单一路径，四个对外入口就是全部门面</td></tr></tbody></table>
+<p>驱动实现不在本树核验范围。上表中早期版本一行的历史描述未在本树 git 历史中验证，内核侧行为亦未逐版本核对，仅作背景参考。</p>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>suspend</code>、<code>power management</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>libsuspend</code>、<code>autosuspend_wakeup_count</code>、<code>wakeup_count</code>。</li><li>本仓关键路径：<code>system/core/libsuspend/autosuspend_wakeup_count.cpp</code>（循环与竞争处理）、<code>bionic/libc/kernel/uapi/linux/suspend_ioctls.h</code>（另一条通道的边界）。</li><li>承接篇：P2（唤醒锁在框架层的表达）、P9/P10（上层省电策略）。</li></ul>
+</article>
+<footer>android-100 · AND-P5-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

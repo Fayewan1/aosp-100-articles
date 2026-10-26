@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Android 安全架构全景与威胁模型</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Android 安全架构全景与威胁模型</h1>
+<div class="kv"><span>ID：AND-P9-101</span><span>卷：P9</span><span>章：9.1</span><span>难度：3</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/sepolicy/private ；system/sepolicy/public ；system/sepolicy/prebuilts/api/202604 ；system/sepolicy/compat ；frameworks/base/core/res/AndroidManifest.xml ；system/core/init/selinux.cpp ；bionic/libc/seccomp/seccomp_policy.cpp ；hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Android 的安全不是一道门，是若干道门串成的一条链：bootloader 验镜像、内核与 SELinux 限权、HAL 与 TEE 守住密钥、框架层管权限与签名、应用侧靠沙箱隔离。每一层只负责「挡住什么」，不负责「兜住全部」；任何一层的价值都在于失守后下一层仍在。理解这套架构的关键不是记住有多少机制，而是记住每层边界的划定物：<code>neverallow</code> 规则、<code>protectionLevel</code>、<code>SecurityLevel</code> 枚举、签名白名单。本篇只讲分层的组织方式与威胁模型，不拆任何一层的实现细节。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P9-G01</code>，理由：卷导读先给出九篇的分工，本篇的层与层之间的归属靠它定位。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/sepolicy/private</code></li><li><code>system/sepolicy/public</code></li><li><code>system/sepolicy/prebuilts/api/202604</code></li><li><code>system/sepolicy/compat</code></li><li><code>frameworks/base/core/res/AndroidManifest.xml</code></li><li><code>system/core/init/selinux.cpp</code></li><li><code>bionic/libc/seccomp/seccomp_policy.cpp</code></li><li><code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机——本篇验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>一个应用进程为什么只能读自己的 <code>/data/data/&lt;pkg&gt;</code>，为什么读不了别的应用的私有目录，为什么即使拿到 root 也未必能改某个分区？这三个问题常被当成同一个问题，其实答案分布在不同层。反过来，碰到「某个文件明明有权限却打不开」「某个系统属性读不到」「某个 HAL 服务连不上」时，很多人的排查路径是从报错往回猜，而不是先判断这件事该由哪一层裁决。分层认不清，排查就只能靠试。本篇先把层的顺序与每层的裁决点摆出来。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个关键概念：</p>
+<ul><li><strong>强制访问控制（Mandatory Access Control，MAC）</strong>：SELinux 在自主权限（DAC）之外再加一道判定，主体类型与客体类型不匹配就拒绝，root 也不例外。</li><li><strong>自主访问控制（Discretionary Access Control，DAC）</strong>：传统 Unix 的 uid/gid/权限位，由属主自行决定。</li><li><strong>信任根（Root of Trust）</strong>：一段不可被上层修改的代码或密钥，作为验证的起点；本树内只能看到它向下的接口（KeyMint 的 <code>SecurityLevel</code>），不包含它自身。</li><li><strong>攻击面分层</strong>：按「谁能被谁触达」切层，而不是按代码模块切；同一模块可以横跨两层。</li></ul>
+<p>关系不是「串成一条链、上一层失守由下一层兜住」。层与层之间是<strong>依赖</strong>加<strong>独立信任边界</strong>两种关系，混着看才会判断错：某一层失守，哪些机制跟着一起失效、哪些仍能独立成立，才是威胁模型要回答的问题。</p>
+<p>图 1：六层的依赖关系与共同失效面（实线＝上游依赖，虚线＝相对独立）</p>
+<pre><code>bootloader / AVB（不在本树）──依赖──&gt; 其后所有「镜像未被篡改」的推断
+                                        │（vbmeta 同时是 APEX 验签的信任根，见 302）
+内核 DAC + SELinux + seccomp + FBE  ── 同一执行环境：内核失守则四条一起失效
+                                        ⋮ 相对独立
+TEE / StrongBox（KeyMint SecurityLevel）── 独立执行环境，密钥材料不进内核可达范围
+                                        ⋮ 但 KEYSTORE=100 这档由 Keystore 进程强制，
+                                        ⋮ 会随内核/Keystore 进程失守而失效（见 §4.2）
+HAL / Binder 接口（@VintfStability）──依赖──&gt; 内核与框架的调用可达性
+框架（protectionLevel / 签名白名单 / 权限状态）──依赖──&gt; 内核保护其存储与进程边界
+应用沙箱（uid + SELinux 域）── uid 侧依赖框架（zygote fork 时设定）；
+                               域侧依赖内核策略（进程无法自选）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>这张图的读法有三条。第一，<strong>上游依赖不可自证</strong>：bootloader/AVB 不成立，后面关于「镜像可信」的一切推断都不成立，而不是「由内核兜住」。第二，<strong>同一执行环境里的机制会一起失效</strong>：内核被攻破，SELinux、seccomp、DAC、卷加密密钥的保护同时崩塌，它们之间不存在互相兜底；此时仍成立的只有 TEE/StrongBox 里的密钥材料不可导出这一条。第三，<strong>标了「依赖框架」的机制，其强度止于框架进程</strong>：权限授予状态、app op 状态都存在 system_server 里，能改这些状态就改了判定结果，SELinux 只能约束「哪个进程能改」，不能保证「改不了」。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>威胁模型按攻击面分层组织，顺序固定：bootloader（不在本树）→ TEE/StrongBox → 内核 → HAL → 框架 → 应用。每层要回答三个问题：边界用什么划定、越过边界需要什么、越过后下一层是什么。</p>
+<p><strong>内核层的划定物是 `.te` 策略文件。</strong> 平台策略源在 <code>system/sepolicy/private</code> 与 <code>system/sepolicy/public</code> 两个目录下，共 501 个 <code>.te</code>（private 356 ＋ public 145）；若把 vendor 89 个、microdroid 61 个也数进来，全树非 prebuilt 是 652 个——本篇后续所有计数都按前一口径，换口径要连数一起换。策略不是靠数量取胜，而是靠三类语句的分工：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>allow</code></td><td>放行某类型主体对某类型客体的操作，共 4591 条</td><td>private＋public 的 <code>.te</code>，行首锚定</td></tr><tr><td><code>neverallow</code></td><td>编译期断言，任何 <code>allow</code> 与它冲突即构建失败，共 1172 条</td><td>同上</td></tr><tr><td><code>type</code></td><td>定义 SELinux 类型，共 1594 个</td><td>同上</td></tr></tbody></table>
+<p>这三个数只在「只数 <code>.te</code>、行首锚定」的口径下成立；同一批文件里还有 148 条 <code>allowx</code> 一类的变体，放宽或不放宽差出几百条，所以引用时必须带命令（见 §6）。</p>
+<p><code>neverallow</code> 的作用方式值得强调：它不是运行时判定，而是构建期把「不该存在的放行」变成编译错误。这意味着策略的防线有一部分前移到了构建环节。</p>
+<p><strong>public 与 private 的目录切分本身就是架构边界。</strong> <code>system/sepolicy/public</code> 是 vendor 可见面，<code>system/sepolicy/private</code> 是平台自有面。vendor 只能依赖 public 里的类型与属性；平台想在 private 里改动，不必担心破坏 vendor 的编译。<code>system/sepolicy/compat/</code> 下的 <code>plat_sepolicy_genfs_202504.cil</code>、<code>_202604.cil</code>、<code>_202704.cil</code> 三个文件不是「让不同 target API 的模块共存」的映射表，而是 <strong>genfs 标签的版本化产物</strong>：<code>system/sepolicy/Android.bp:580-594</code> 按 <code>BOARD_GENFS_LABELS_VERSION</code> 生成版本号文件，<code>:673-676</code> 按同一个变量把对应的 <code>.cil</code> 选进 <code>device_first_srcs</code>；运行时由 <code>system/core/init/selinux.cpp:333-347</code> 读 <code>/system/etc/selinux/plat_sepolicy_genfs_&lt;版本&gt;.cil</code>，读不到就记日志跳过（<code>202504</code> 及以上才报错）。也就是说，选哪个文件由<strong>板级变量</strong>决定，与应用的 target SDK 无关。</p>
+<p><strong>API 分层同样有版本快照。</strong> <code>system/sepolicy/prebuilts/api/202604/</code> 保存 private 349 ＋ public 145 个 <code>.te</code> 的快照。快照存在的原因与 <code>neverallow</code> 同源：策略是跨版本契约，得有一个「当时长什么样」的基准。</p>
+<p><strong>框架层的划定物是权限等级。</strong> <code>frameworks/base/core/res/AndroidManifest.xml</code> 里有 1160 个 <code>&lt;permission&gt;</code> 元素、19 个 <code>&lt;permission-group&gt;</code> 元素（按行 <code>grep -c '&lt;permission '</code> 只得 1116，漏掉 44 个属性换行书写的标签；<code>grep -o 'protectionLevel=' | wc -l</code> 得 1160，可交叉印证）。<code>protectionLevel</code> 按<strong>完整串</strong>计：<code>normal</code> 87、<code>dangerous</code> 42、<code>signature</code> 298、<code>signature|privileged</code> 298、<code>internal|role</code> 114、<code>signature|role</code> 48；若按首个 flag 分族，则是 signature 864、internal 133、normal 108、dangerous 51，两种口径差在几十种带附加 flag 的组合上（如 <code>signature|privileged|role</code> 34、<code>signature|privileged|development</code> 24、<code>dangerous|instant</code> 8、<code>normal|instant</code> 18）。</p>
+<p>等级越高，授出条件越苛刻，但<strong>苛刻的方式不是「并且」而是「或」</strong>。<code>signature</code> 一档要求申请方与声明方签名一致；<code>signature|privileged</code> 的判定在 <code>AppIdPermissionPolicy.kt:1143-1160</code> 写得清楚：先算 <code>mayGrantByPrivileged</code>（不在特权档，或过了特权白名单检查），再算 <code>shouldGrantBySignature</code> 与 <code>shouldGrantByProtectionFlags</code>，最后取 <code>mayGrantByPrivileged &amp;&amp; (shouldGrantBySignature || shouldGrantByProtectionFlags)</code>。也就是说签名与 protection flags 是<strong>两条并列通道</strong>，特权白名单是与它们相乘的门控；把 <code>signature|privileged</code> 读成「签名一致<strong>并且</strong>还得在特权分区」会把其中一条通道漏掉。</p>
+<p><strong>签名白名单把「谁签的」接进 SELinux。</strong> <code>system/sepolicy/private/mac_permissions.xml</code> 共 77 行，做的是 MMAC：把 seinfo 与签名证书对应起来。于是「同一签名」这件事不只影响权限授予，也影响进程落在哪个 SELinux 域。</p>
+<p>数这份白名单要小心注释：<code>grep -c '&lt;signer'</code> 得 10，但文件开头 <code>:4-47</code> 是一整块注释，里面放了 4 个示例 <code>&lt;signer&gt;</code>；真正生效的只有 6 个，分别在 <code>:50</code>（<code>@PLATFORM</code>）、<code>:55</code>（<code>@SDK_SANDBOX</code>）、<code>:60</code>（<code>@BLUETOOTH</code>）、<code>:65</code>（<code>@MEDIA</code>）、<code>:69</code>（<code>@NETWORK_STACK</code>）、<code>:74</code>（<code>@NFC</code>）。本篇后续提到条数时按 6 个计，并给出排除注释的取法（见 §6）。</p>
+<p><strong>init 负责把策略装上并决定是否强制。</strong> <code>system/core/init/selinux.cpp</code> 共 844 行；<code>EnforcingStatus</code> 枚举在 :101（<code>SELINUX_PERMISSIVE</code>/<code>SELINUX_ENFORCING</code>），<code>IsEnforcing()</code> 在 :114，kernel_enforcing 判定在 :433（<code>security_getenforce() == 1</code>）。这一步发生在任何应用进程被拉起之前。</p>
+<p><strong>seccomp 是 SELinux 之内再收一层系统调用面。</strong> <code>bionic/libc/seccomp/seccomp_policy.cpp</code> 共 319 行，<code>install_filter</code> 在 :193。SELinux 管「能不能对某类型客体做某操作」，seccomp 管「这个系统调用能不能进内核」，粒度不同。</p>
+<p><strong>密钥安全等级不是「密钥放在哪」这一个刻度，而是两种用法。</strong> <code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl:20-29</code> 写明了：一是由 <code>IKeyMintDevice::getHardwareInfo</code> 返回，刻画<strong>实现本身</strong>跑在什么环境里；二是与单个授权 Tag 关联，刻画<strong>强制这个 Tag 的最弱环境</strong>——即攻击者要攻破哪一层才能破坏该 Tag 的强制。枚举值仍是 <code>SOFTWARE</code>=0、<code>TRUSTED_ENVIRONMENT</code>=1、<code>STRONGBOX</code>=2、<code>KEYSTORE</code>=100，注释引 CDD 9.11.1 [C-1-2] 与 CDD 9.11.2 作为合规依据。</p>
+<p><code>KEYSTORE</code> 这一档是两种用法分家的证据：<code>:67-75</code> 明确「KeyMint 实现<strong>永远不得</strong>从 getHardwareInfo 返回 KEYSTORE」，它只用于那些<strong>不由 IKeyMintDevice 强制、而由 Keystore 自己强制</strong>的 Tag，并且注释直说「能攻破 keystore 进程、拿到 root 或攻破内核的人，就能阻止这些 Tag 被正确强制」。所以这一档不代表更强的硬件，反而代表保护强度止于 Keystore 进程——它是 §4.1 里「依赖框架」那一条的现成例子。框架层能问的只有「这把密钥/这个 Tag 落在哪一级」，问不到它具体在哪块硬件里。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设一个应用要存一把用于签名的私钥。</p>
+<p>它调用 Keystore 2，请求生成的密钥带强绑定要求。这条链的关键在于：<strong>安全等级不是 KeyMint 事后「回答」的，而是调用方选定、Keystore 2 在构造期就备好的</strong>。顺序如下：</p>
+<p>第一步，Keystore 2 服务启动时就构造两级实例——<code>service.rs:70-90</code> 先建<strong>必选</strong>的 <code>TRUSTED_ENVIRONMENT</code> 实例（建不出来整个服务直接返回错误，日志会问「Does the device have a /default Keymaster or KeyMint instance?」），再<strong>可选</strong>地建 <code>STRONGBOX</code>（失败就忽略）。第二步，<code>service.rs:402-407</code> 的 <code>IKeystoreService::getSecurityLevel(security_level)</code> 按调用方请求的等级，把对应的 <code>IKeystoreSecurityLevel</code> 实例交出去。第三步，主路径 <code>generate_key</code>（<code>security_level.rs:684</code> 起）的三个出口（:750/:766/:805）都不直接碰 HAL，而是交给重试助手 <code>generate_key_and_retry_on_att_id_mismatch</code>（<code>:623</code>）——常规调用落在 <code>:633</code> 的 <code>self.keymint.generateKey(params, attest_key)</code>，只有报 <code>CANNOT_ATTEST_IDS</code> 一类错误且版本与 IMEI 标签俱备时，才在 <code>:680</code> 用交换过 IMEI 的参数再试一次；返回的 <code>KeyMetadata</code> 在 <code>:229-235</code> 里把 <code>keySecurityLevel</code> 填成<strong>这个实例自己的</strong>等级——所以元数据里的等级是实例的既定属性，不是验算出来的结论。第四步，密钥材料始终不进入应用进程地址空间，应用拿到的是句柄；若应用进程被攻破，攻击者能拿到句柄但不能导出材料。</p>
+<p>至于「谁能连上 Keystore」：普通应用域是在策略里显式放行的——<code>system/sepolicy/private/app.te:186-190</code> 给出 <code>keystore:keystore2_key</code> 的一组操作与 <code>use_keystore(...)</code>，<code>system/sepolicy/public/te_macros:680-688</code> 把这个宏展开成 <code>apc_service</code>/<code>keystore_service</code>/<code>legacykeystore_service</code> 三个 <code>service_manager find</code> 与双向 <code>binder_call</code>（宏体 :683-687）。真正的 uid、SID 与 key permission 检查发生在 <strong>Keystore 进程内部</strong>，不在这几条 allow 里。</p>
+<p>把这些层拆开看：没有框架层判定，任意应用都能请求；没有 TEE 实例，密钥材料会由软件实现落地；没有 SELinux，被攻破的进程连不到服务（但反过来说，SELinux 只管「连得上连不上」，管不了「连上之后 Keystore 自己怎么判」）。这正是 §4.1 那张依赖图的实际含义——每一层管的事不一样，失守的后果也不一样。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P9-102</code> 承接 bootloader 与验证启动，本篇只把它列为攻击面的第一层。</li><li><code>AND-P9-201</code> 展开权限模型，本篇只用 <code>protectionLevel</code> 分布说明框架层裁决点的形态。</li><li><code>AND-P9-202</code> 展开应用沙箱，本篇的「uid + SELinux 域」只作为链条末端一句。</li><li><code>AND-P9-301</code> 展开 APK 签名验证，本篇只用 <code>mac_permissions.xml</code> 的 6 个生效 <code>&lt;signer&gt;</code> 说明签名如何接入 SELinux。</li><li><code>AND-P9-401</code> 展开密钥存储，本篇只用 <code>SecurityLevel</code> 枚举说明 TEE 层的抽象粒度。</li></ul>
+<p>分工原则：本篇给顺序与边界，后续篇给每层内部的机制与失败形态。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>平台自有策略面</td><td><code>system/sepolicy/private</code></td><td>356 个 <code>.te</code></td><td>vendor 不可见面</td></tr><tr><td>vendor 可见策略面</td><td><code>system/sepolicy/public</code></td><td>145 个 <code>.te</code></td><td>跨分区契约面</td></tr><tr><td>策略版本快照</td><td><code>system/sepolicy/prebuilts/api/202604</code></td><td>private 349 ＋ public 145</td><td>跨版本基准</td></tr><tr><td>genfs 标签版本化产物</td><td><code>system/sepolicy/compat</code></td><td><code>plat_sepolicy_genfs_202504.cil</code> 等三个</td><td>由 <code>BOARD_GENFS_LABELS_VERSION</code> 板级变量选中（<code>selinux.cpp:333-347</code> 读取），与应用 target SDK 无关</td></tr><tr><td>权限声明</td><td><code>frameworks/base/core/res/AndroidManifest.xml</code></td><td>1160 个 <code>&lt;permission&gt;</code> 元素（行计数 1116）</td><td><code>protectionLevel</code> 分布来源</td></tr><tr><td>SELinux 加载</td><td><code>system/core/init/selinux.cpp</code></td><td><code>EnforcingStatus</code>、<code>IsEnforcing()</code></td><td>应用进程之前完成</td></tr><tr><td>系统调用过滤</td><td><code>bionic/libc/seccomp/seccomp_policy.cpp</code></td><td><code>install_filter</code></td><td>内核入口再收一层</td></tr><tr><td>密钥安全等级</td><td><code>hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl</code></td><td><code>SOFTWARE</code>/<code>TRUSTED_ENVIRONMENT</code>/<code>STRONGBOX</code>/<code>KEYSTORE</code></td><td>TEE 层抽象刻度</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/sepolicy:e066568e98d8</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash"># 1. 数非 prebuilt 口径的 .te 文件，期望 private 356 行、public 145 行
+find system/sepolicy/private -name '*.te' | wc -l
+find system/sepolicy/public  -name '*.te' | wc -l
+
+# 2. 数 vendor 与 microdroid 的 .te，期望 89 与 61
+find system/sepolicy/vendor -name '*.te' | wc -l
+find system/sepolicy/microdroid -name '*.te' | wc -l
+
+# 3. 数三类语句，期望 4591 / 1172 / 1594
+#    口径：private＋public、只数 .te、行首锚定（allowx 一类变体 148 条不计入）
+grep -rhE '^\s*allow '      --include='*.te' system/sepolicy/private system/sepolicy/public | wc -l
+grep -rhE '^\s*neverallow'  --include='*.te' system/sepolicy/private system/sepolicy/public | wc -l
+grep -rhE '^\s*type '       --include='*.te' system/sepolicy/private system/sepolicy/public | wc -l
+
+# 4. 看 API 分层快照规模，期望 private 349、public 145
+find system/sepolicy/prebuilts/api/202604/private -name '*.te' | wc -l
+find system/sepolicy/prebuilts/api/202604/public  -name '*.te' | wc -l
+
+# 5. 看 genfs 版本化产物，期望三个 _202504/_202604/_202704；并看它由哪个板级变量选中
+ls system/sepolicy/compat/ | grep plat_sepolicy_genfs
+grep -n 'BOARD_GENFS_LABELS_VERSION' system/sepolicy/Android.bp
+grep -n 'plat_sepolicy_genfs_' system/core/init/selinux.cpp
+
+# 6. 看权限声明与分组规模：行计数 1116 与 19；元素口径 1160（用 protectionLevel 交叉印证）
+grep -c '&lt;permission ' frameworks/base/core/res/AndroidManifest.xml
+grep -c '&lt;permission-group' frameworks/base/core/res/AndroidManifest.xml
+grep -o 'protectionLevel=' frameworks/base/core/res/AndroidManifest.xml | wc -l
+
+# 7. 看签名白名单规模：77 行；生效 signer 6 个（注释块 :4-47 里还有 4 个示例）
+wc -l system/sepolicy/private/mac_permissions.xml
+sed -n '48,$p' system/sepolicy/private/mac_permissions.xml | grep -c '&lt;signer'
+
+# 8. 定位 init 侧判定符号，期望 101 行 EnforcingStatus、114 行 IsEnforcing
+grep -n 'EnforcingStatus\|IsEnforcing\|security_getenforce' system/core/init/selinux.cpp
+
+# 9. 定位 seccomp 入口，期望 193 行
+grep -n 'install_filter' bionic/libc/seccomp/seccomp_policy.cpp
+
+# 10. 看密钥安全等级枚举值，期望 0/1/2/100 四档；并读它的两种用法与 KEYSTORE 的排除条款
+grep -n 'SOFTWARE\|TRUSTED_ENVIRONMENT\|STRONGBOX\|KEYSTORE' \
+  hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl
+sed -n '20,29p;67,75p' \
+  hardware/interfaces/security/keymint/aidl/android/hardware/security/keymint/SecurityLevel.aidl
+
+# 11. 看 signature|privileged 的「或」分支（签名 与 protection flags 并列）
+sed -n '1143,1160p' \
+  frameworks/base/services/permission/java/com/android/server/permission/access/permission/AppIdPermissionPolicy.kt
+
+# 12. 看 Keystore 2 的实例构造与调用链（等级是实例属性，不是验算结论）
+grep -n 'SecurityLevel::TRUSTED_ENVIRONMENT\|SecurityLevel::STRONGBOX' \
+  system/security/keystore2/src/service.rs
+grep -n 'fn getSecurityLevel\|fn generateKey\|keySecurityLevel' \
+  system/security/keystore2/src/service.rs system/security/keystore2/src/security_level.rs</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区 1：以为开了 SELinux 就等于应用被隔开了。</strong> 纠正：SELinux 管的是类型之间的操作许可，应用之间的隔离首先由 uid 决定。两层判定顺序不同、粒度不同，缺一层都会留下空档。</p>
+<p><strong>误区 2：以为 `neverallow` 是运行时拦截。</strong> 纠正：它在构建期让冲突的 <code>allow</code> 直接编译失败。策略的一部分防线前移到了构建环节，所以「线上没报错」不能证明策略没问题。</p>
+<p><strong>误区 3：以为 KeyMint 的 `SecurityLevel` 是在描述密钥有多强。</strong> 纠正两层。第一层，它刻画的不是「强度」而是「环境」：<code>SecurityLevel.aidl:20-29</code> 明说它有两种用法——<code>getHardwareInfo</code> 返回的是实现所在的执行环境，与单个 Tag 关联时表示的是强制该 Tag 的<strong>最弱</strong>环境。第二层，<code>KEYSTORE</code>=100 不是更强的硬件：<code>:67-75</code> 规定它永不由 <code>getHardwareInfo</code> 返回，只用于由 Keystore 自己强制的 Tag，注释直承「攻破 keystore 进程或内核即可阻止这些 Tag 被正确强制」。所以这四个值既不是强度排序，也不都是位置；<code>KEYSTORE</code> 是保护边界止于进程的那一档。</p>
+<p><strong>误区 4（看起来对其实是错的）：以为 public 与 private 只是目录整理习惯。</strong> 纠正：public 是 vendor 可见面、private 是平台自有面，这个切分是跨分区契约的物理载体。把平台内部类型挪进 public 会扩大 vendor 的依赖面，改动成本随之锁定。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>signature</code> 与 <code>signature|privileged</code> 数量都是 298，是不是统计重复了？ <strong>答</strong>：不是重复，是两个不同的 <code>protectionLevel</code> 取值碰巧同为 298 条。但不能反过来推断「它们是同一批权限的两种版本」——<code>signature|privileged</code> 的判定是 <code>mayGrantByPrivileged &amp;&amp; (签名一致 ‖ protection flags)</code>（<code>AppIdPermissionPolicy.kt:1143-1160</code>），与纯 <code>signature</code> 走的是不同分支；而且带附加 flag 的组合另有几十种（如 <code>signature|privileged|role</code> 34 条），不在两个 298 里。 <strong>追问</strong>：那应用该申请哪一档？ <strong>答</strong>：本篇只解释等级语义，具体申请策略属于权限模型的边界，见 <code>AND-P9-201</code>。</p>
+<p><strong>问</strong>：<code>system/sepolicy/compat/</code> 下三个 <code>.cil</code> 是不是对应三次发版？ <strong>答</strong>：不是按发版轮次准备的。它们是 genfs 标签的版本化产物，选哪个由板级变量 <code>BOARD_GENFS_LABELS_VERSION</code> 决定（<code>Android.bp:580-594</code> 生成版本号、<code>:673-676</code> 选文件），运行时 <code>selinux.cpp:333-347</code> 读 <code>/system/etc/selinux/plat_sepolicy_genfs_&lt;版本&gt;.cil</code>，读不到就记日志跳过。与应用 target SDK 无关。 <strong>追问</strong>：为什么不直接改策略源？ <strong>答</strong>：策略源是跨版本契约，快照与版本化产物的存在就是为了让旧基准不被改写。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑策略规模对不上</td><td><code>grep -rhE '^\s*neverallow' --include='*.te' system/sepolicy/private system/sepolicy/public | wc -l</code></td><td>是否 1172</td><td>口径差异先查是否混入 prebuilt 目录、是否放宽成任意位置匹配</td></tr><tr><td>怀疑权限条数与预期不符</td><td><code>grep -c '&lt;permission ' frameworks/base/core/res/AndroidManifest.xml</code></td><td>是否 1116（行计数；元素口径 1160）</td><td>确认是否统计了 <code>&lt;permission-group</code>，以及是否有属性换行的标签被漏掉</td></tr><tr><td>怀疑签名白名单条数</td><td><code>sed -n '48,$p' system/sepolicy/private/mac_permissions.xml | grep -c '&lt;signer'</code></td><td>是否 6</td><td>直接 <code>grep -c '&lt;signer'</code> 会得到 10，因为文件开头注释里有 4 个示例</td></tr><tr><td>怀疑签名白名单被改过</td><td><code>grep -c '&lt;signer&gt;' system/sepolicy/private/mac_permissions.xml</code></td><td>是否 10</td><td>比对 <code>git log -p</code> 该文件</td></tr><tr><td>怀疑强制状态未生效</td><td><code>grep -n 'security_getenforce' system/core/init/selinux.cpp</code></td><td>是否命中 :433</td><td>顺着 <code>IsEnforcing()</code> 往上追调用点</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：启动链细节见 <code>AND-P9-102</code>；权限模型见 <code>AND-P9-201</code>；沙箱见 <code>AND-P9-202</code>；签名见 <code>AND-P9-301</code>；密钥见 <code>AND-P9-401</code>。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P9-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P9-102</code>、<code>AND-P9-201</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>平台策略源 private＋public 共 501 个 <code>.te</code>（private 356 ＋ public 145）；全树非 prebuilt 为 652 个（多出 vendor 89、microdroid 61 等）——来源：源码实测，本篇口径一律为 private＋public。</li><li><code>allow</code> 4591 条、<code>neverallow</code> 1172 条、<code>type</code> 1594 个——来源：策略源计数，口径为「只数 <code>.te</code>、行首锚定、private＋public」；另有 <code>allowx</code> 一类变体 148 条未计入。</li><li>权限 1160 个 <code>&lt;permission&gt;</code> 元素（行计数 1116）——来源：manifest 元数据；<code>protectionLevel</code> 按完整串的六档合计 887，按首 flag 分族为 signature 864／internal 133／normal 108／dangerous 51，两种口径的差额来自带附加 flag 的组合，本篇不逐一枚举其余组合，列为待补。</li><li>签名白名单生效条目 6 个（含注释示例共 10 处 <code>&lt;signer</code>）——来源：<code>mac_permissions.xml</code>。</li><li><code>SecurityLevel</code> 四档取值 0/1/2/100——来源：AIDL 常量声明，100 与前三档间距之大说明 <code>KEYSTORE</code> 是与硬件环境不同维度的取值。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>android17-release（本树）</td><td>private＋public 501 个 <code>.te</code>；<code>prebuilts/api/202604</code> 快照 private 349 ＋ public 145；<code>compat</code> 下三个 <code>plat_sepolicy_genfs_*.cil</code>，由 <code>BOARD_GENFS_LABELS_VERSION</code> 选中</td><td>策略面规模与版本化基准的当前实测状态</td></tr><tr><td>更早版本</td><td>工单未提供可比数据，本篇不对早于本树的快照规模与映射文件名做断言</td><td>跨版本比较需在对应树内重跑 §6 命令</td></tr><tr><td>未来版本</td><td><code>_202704.cil</code> 表明映射目标已排到后续版本</td><td>策略源改动需同步新增映射，否则旧 target API 模块可能失配</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>security</code>、<code>SELinux</code>、<code>verified boot</code>、<code>Keystore</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>sepolicy neverallow</code>、<code>mac_permissions</code>、<code>keymint SecurityLevel</code>。</li><li>本仓关键路径：<code>system/sepolicy/public</code>、<code>system/sepolicy/private</code>、<code>system/sepolicy/compat</code>。</li><li>承接篇：<code>AND-P9-G01</code>、<code>AND-P9-102</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

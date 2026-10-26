@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bootloader 到 init：设备树、启动镜像与 Verified Boot</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>bootloader 到 init：设备树、启动镜像与 Verified Boot</h1>
+<div class="kv"><span>ID：AND-P8-101</span><span>卷：P8</span><span>章：8.1</span><span>难度：4</span><span>核验：2026-10-19</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/core/init/first_stage_init.cpp ；system/core/init/first_stage_mount.cpp ；system/core/init/first_stage_mount_android.cpp ；system/core/init/first_stage_main.cpp ；system/core/init/init.cpp ；system/fs/fs_mgr/libfstab/fstab.cpp ；system/fs/fs_mgr/libfs_avb/fs_avb.cpp ；system/fs/fs_mgr/libfs_avb/avb_ops.cpp ；external/avb/libavb/avb_slot_verify.c ；external/avb/libavb/avb_slot_verify.h ；system/libufdt/ufdt_overlay.c ；bootable/recovery/bootloader_message/bootloader_message.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>bootloader 交棒时只保证一件事：把内核、ramdisk 和设备树（device tree，DT）放进内存并把控制权交给内核。接下来的一阶段 init 不再问 bootloader 要信息，它自己读 <code>/proc/device-tree</code>、自己选 fstab、自己触发校验。启动镜像里最容易被误解的一环是校验：<code>avb_slot_verify</code> 并不在一阶段 init 的 <code>main</code> 入口被调用，而是由 <code>FirstStageMount</code> 在挂载分区前经 libfs_avb 拉起来。设备树在运行时由 <code>system/libufdt</code> 的 <code>ufdt_apply_overlay</code> 打补丁，一阶段 init 只消费结果。二阶段 init 拿到的一阶段起始时刻靠环境变量传递，不是靠重新计时。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P8-G01</code>（本卷导读），本篇按「一阶段 init 之前」这一段切进启动链路，导读给出全卷位置。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/core/init/first_stage_main.cpp</code></li><li><code>system/core/init/first_stage_init.cpp</code></li><li><code>system/core/init/first_stage_mount.cpp</code></li><li><code>system/core/init/first_stage_mount_android.cpp</code></li><li><code>system/fs/fs_mgr/libfs_avb/fs_avb.cpp</code></li><li><code>external/avb/libavb/avb_slot_verify.c</code></li><li><code>system/libufdt/ufdt_overlay.c</code></li><li><code>system/core/init/init.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机；验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>手机黑屏卡住，串口日志停在 <code>First stage mount skipped</code>，然后系统就没下文了。把 fstab 塞进 ramdisk 里再烧一次，日志变成 dm-verity 失败。同一个人还在问第三个问题：<code>ro.boot.verifiedbootstate</code> 明明是 bootloader 设的，为什么我在一阶段 init 里 <code>getenv</code> 拿不到、非得走属性服务？</p>
+<p>这三个问题指向同一条链：内核起来之后的第一个用户态进程能看见什么、能读什么、什么时候校验。这条链上每一环的输入来源都不一样，混在一起就会判断错层。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>一阶段 init 是 <code>init</code> 二进制的第一个执行分支。它的输入只有四类：kernel 命令行（含 bootconfig）、<code>/proc/device-tree</code> 下的 DT 节点、ramdisk 里的 fstab、以及分区本身的内容。四类输入经不同代码路径汇入，最后交出一个挂载好的 <code>/system</code> 并切到二阶段。</p>
+<p>图 1：一阶段 init 的四类输入与出口</p>
+<pre><code>kernel cmdline / bootconfig  --&gt; ProcessKernelCmdline
+/proc/device-tree            --&gt; avf,strict-boot / DT overlay
+ramdisk fstab                --&gt; ReadDefaultFstab
+分区内容                     --&gt; libfs_avb --&gt; avb_slot_verify
+                                   |
+                                   v
+                          DoFirstStageMount -&gt; 二阶段 init
+                                   |
+                    MountPartitions 有两处 MountPartition 入口：
+                      :291  TrySwitchSystemAsRoot 内挂 /system（条件性，早于循环）
+                      :371  常规逐分区循环（:349-352 显式跳过 /system）</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><code>FirstStageMain</code>（<code>first_stage_main.cpp:19</code> 的 <code>int main(int argc, char** argv)</code> 转入）负责搭起最小环境；<code>FirstStageMount</code> 负责选分区、建 dm 设备、调校验；<code>libfs_avb</code> 是 libavb 在一阶段挂载场景下的适配层。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>入口到挂载的调用次序。</strong> <code>first_stage_init.cpp</code> 全文件 599 行，<code>fsm-&gt;DoFirstStageMount()</code> 出现在 <code>:551</code>，是这一阶段的主干动作。<code>DoFirstStageMount</code> 定义在 <code>first_stage_mount.cpp:101</code>，文件 553 行。</p>
+<p><strong>fstab 从哪来。</strong> 一阶段不解析 <code>init.rc</code>，它只读 fstab。入口是 <code>first_stage_mount_android.cpp:50</code> 的 <code>ReadDefaultFstab(&amp;fstab)</code>，该文件 362 行。<code>ReadDefaultFstab</code> 本身定义在 <code>system/fs/fs_mgr/libfstab/fstab.cpp:765</code>，文件共 902 行，底层解析函数 <code>ReadFstabFromFile</code> 在 <code>:674</code>。fstab 为空时还要看 dm-linear：<code>DoFirstStageMount</code> 在 <code>:102</code> 的早返回条件是 <code>!IsDmLinearEnabled() &amp;&amp; fstab_.empty()</code> 二者同时成立（既没有 dm-linear 逻辑分区、fstab 也是空的），记录 <code>First stage mount skipped</code> 后直接返回，不再往下走。</p>
+<p><strong>DT 上的严格启动标记。</strong> <code>first_stage_mount.cpp:114-116</code> 的静态函数 <code>IsMicrodroidStrictBoot</code> 用 <code>access(&quot;/proc/device-tree/chosen/avf,strict-boot&quot;, F_OK)</code> 探测该节点是否存在（探测语句在 <code>:115</code>）。它只有一个调用点：<code>:135</code>，在 <code>InitDevices</code> 内、且外层套着 <code>IsMicrodroid() &amp;&amp; IsOpenDiceChangesFlagEnabled()</code> 的条件分支里，用来初始化 <code>open-dice0</code> 平台设备。也就是说，这条分支只服务虚拟化（microdroid）场景的平台设备准备，并不是一阶段挂载主干的「严格启动开关」。</p>
+<p><strong>系统作为根（system-as-root）切换。</strong> <code>TrySwitchSystemAsRoot</code> 定义在 <code>:278</code>，由 <code>MountPartitions</code> 在 <code>:339</code> 首句调用。dm-linear 是否启用的判断在 <code>IsDmLinearEnabled</code>（<code>:157-162</code>）：它只遍历 <code>fstab_</code>，只要有任一条目带 <code>fs_mgr_flags.logical</code> 就返回 true——这是动态分区（super 分区）布局的开关，与 <code>system</code>、<code>vendor</code> 是否同分区无直接关系。</p>
+<p><strong>挂载与校验的分层。</strong> 挂载主体 <code>MountPartitions</code> <code>:338</code>；收集需要 dm-verity 的分区 <code>GetDmVerityDevices</code> <code>:415</code>（由 <code>InitDevices</code> 在 <code>:127</code> 调用，属建设备阶段，不是挂载阶段）；建立 dm-verity 设备 <code>SetUpDmVerity</code> <code>:473</code>；AVB 句柄初始化 <code>InitAvbHandle</code> <code>:538</code>。这四个函数按名字前缀可分三族：<code>*DmVerity*</code>、<code>*Mount*</code>、<code>Init*</code>，是查这一层的关键词。</p>
+<p><strong>libavb 的校验入口。</strong> <code>avb_slot_verify.c</code> 共 1819 行，<code>AvbSlotVerifyResult avb_slot_verify(AvbOps* ops, ...)</code> 在 <code>:1417</code>。成功返回值 <code>AVB_SLOT_VERIFY_RESULT_OK</code> 定义在 <code>avb_slot_verify.h:49</code>。libfs_avb 侧的胶水在 <code>fs_avb.cpp</code>（606 行）和 <code>avb_ops.cpp</code>（288 行），后者 <code>read_from_partition</code>（:52）是 <code>FsManagerAvbOps::GetInstanceFromAvbOps</code> 的首个使用点（:54），而该符号本身是定义在 <code>avb_ops.h:53</code> 的类内 inline static 成员；辅助逻辑在 <code>avb_util.cpp</code>（604 行）。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>DoFirstStageMount</code></td><td>一阶段挂载总入口</td><td><code>first_stage_mount.cpp:101</code></td></tr><tr><td><code>TrySwitchSystemAsRoot</code></td><td>system-as-root 布局切换</td><td><code>first_stage_mount.cpp:278</code></td></tr><tr><td><code>MountPartitions</code></td><td>逐分区挂载</td><td><code>first_stage_mount.cpp:338</code></td></tr><tr><td><code>SetUpDmVerity</code></td><td>建立 dm-verity 设备</td><td><code>first_stage_mount.cpp:473</code></td></tr><tr><td><code>InitAvbHandle</code></td><td>初始化 AVB 句柄（<code>:539</code> 的 <code>if (avb_handle_) return true;</code> 先短路，<code>:541</code> 才调 <code>AvbHandle::Open()</code>，故 Open() 最多执行一次）</td><td><code>first_stage_mount.cpp:538</code></td></tr><tr><td><code>avb_slot_verify</code></td><td>槽位校验主函数</td><td><code>avb_slot_verify.c:1417</code></td></tr><tr><td><code>AVB_SLOT_VERIFY_RESULT_OK</code></td><td>校验成功枚举</td><td><code>avb_slot_verify.h:49</code></td></tr></tbody></table>
+<p><strong>kernel 命令行到属性。</strong> <code>property_service.cpp:1388</code> 的 <code>ProcessKernelCmdline</code> 把 <code>androidboot.*</code> 映射成 <code>ro.boot.*</code>，前缀常量 <code>ANDROIDBOOT_PREFIX = &quot;androidboot.&quot;sv</code> 在 <code>:1386</code>；<code>:1397</code> 的 <code>ProcessBootconfig</code> 对 bootconfig 做同样处理。这是 §3 第三个问题的答案：bootloader 给的值不是环境变量，是命令行字符串，一阶段 init 阶段还读不到，要等属性服务起来。</p>
+<p><strong>DT overlay。</strong> <code>system/libufdt/ufdt_overlay.c</code> 共 795 行，<code>ufdt_apply_overlay</code> 在 <code>:642</code>；<code>ufdt_convert.c</code> 497 行负责 DT 二进制与树之间转换。</p>
+<p><strong>bootloader 通信块。</strong> <code>bootloader_message.cpp</code> 定义 misc 分区里的 BCB 结构，是 bootloader 与 recovery/fastboot 之间的消息契约，不参与一阶段挂载判断。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设一台设备 fstab 里 <code>system</code> 分区带 <code>avb</code> 标志，bootloader 已把 <code>androidboot.verifiedbootstate=green</code> 写进命令行。</p>
+<p>一阶段 <code>main</code> 进 <code>FirstStageMain</code>，先完成 <code>/proc</code> 挂载等最小环境准备，然后按三步走。这三步的边界要划清，尤其是「收集设备名单」和「建立 dm 设备」不在同一个函数里。</p>
+<p>第一步，<code>:539</code> 调 <code>CreateFirstStageMount(cmdline)</code>——它转 <code>FirstStageMount::Create</code>，<code>first_stage_mount_android.cpp:50</code> 的 <code>ReadDefaultFstab(&amp;fstab)</code> 在这里被调，实现在 <code>fstab.cpp:765</code>，fstab 在这一步读进对象。<code>:539</code> 是 <code>if (!fsm)</code> 守护下的常规入口；<code>console_on_failure</code> 模式下首次进入点更早，在 <code>:479</code>（<code>want_console == CONSOLE_ON_FAILURE</code> 分支内先建 <code>fsm</code> 并调 <code>DoCreateDevices</code>）。</p>
+<p>第二步，<code>:545</code> 调 <code>DoCreateDevices</code>（定义在 <code>first_stage_mount.cpp:97</code>）：它转进 <code>InitDevices</code>（:118），<code>:127</code> 在 <code>InitDevices</code> 内调 <code>GetDmVerityDevices</code>（定义在 <code>:415</code>），把需要 dm-verity 的分区名收集成名单。这一步不是每次都会执行——<code>first_stage_init.cpp:476</code> 先置 <code>created_devices = false</code>，<code>:479-481</code> 在 <code>console_on_failure</code> 分支里已经建过一次并置真，所以 <code>:545</code> 写的是 <code>if (!created_devices &amp;&amp; !fsm-&gt;DoCreateDevices())</code>，走 console 路径时这里会被短路，不会重复建设备。这一步到此为止——不建 dm 设备、也不做 AVB 校验。把 <code>GetDmVerityDevices</code> 与 <code>SetUpDmVerity</code> 焊成同一条链，是最常见的读法错误。</p>
+<p>第三步，<code>:551</code> 调 <code>DoFirstStageMount</code>（定义在 <code>:101</code>）：先过 <code>:102</code> 的早返回条件 <code>!IsDmLinearEnabled() &amp;&amp; fstab_.empty()</code>，二者不同时成立才继续；<code>MountPartitions</code>（:338）第一句是 <code>TrySwitchSystemAsRoot</code>（调用点 <code>:339</code>，定义在 <code>:278</code>）。这里要特别注意：<code>MountPartition</code> 在 <code>MountPartitions</code> 里有两个入口，不是只有一个。第一个在 <code>TrySwitchSystemAsRoot</code> 内部——<code>:291</code> 对 <code>/system</code> 单独调一次 <code>MountPartition</code>，所以 system-as-root 设备上 <code>/system</code> 的 dm-verity 建立与 AVB 校验就发生在这一步，早于后面的循环；这条入口是有条件的：<code>:287</code> 的 <code>if (system_partition == fstab_.end()) return true;</code> 先挡住「fstab 里没有 /system 条目」的情况。第二个才是常规循环——<code>:371</code> 逐分区调 <code>MountPartition</code>（定义在 <code>:186</code>），而循环体内 <code>:349-352</code> 会显式跳过 <code>mount_point == &quot;/system&quot;</code>（注释写明上方已挂过），所以两个入口不是重复劳动。两条路径都走 <code>MountPartition</code> 的 <code>:205</code>：调 <code>SetUpDmVerity</code>（定义在 <code>:473</code>）建 dm-verity 设备，建完才 <code>fs_mgr_do_mount_one</code>（:210）。</p>
+<p>AVB 校验挂在这一步的 <code>SetUpDmVerity</code> 之下：它在内部 <code>:479</code>/<code>:502</code>/<code>:508</code> 调 <code>InitAvbHandle</code>（定义在 <code>:538</code>），后者经 <code>AvbHandle::Open()</code>（<code>fs_avb.cpp:454</code>）完成校验——<code>Open()</code> 的方法体从 <code>:454</code> 延伸到 <code>:536</code>（<code>:537</code> 是闭合花括号），<code>:467-468</code> 先调 <code>avb_ops.AvbSlotVerify(...)</code>，随后 <code>:500-536</code> 又按 <code>verification_disabled</code>／<code>hashtree_disabled</code> 两个标志定状态，其间还有 <code>AvbVerifier::Create</code> 与 <code>VerifyVbmetaImages</code> 的 vbmeta digest 二次校验。所以校验发生在 <code>Open()</code> 之内、且不止一次调用点，不是「打开句柄之后另起一步」。<code>FsManagerAvbOps::AvbSlotVerify</code> 定义在 <code>avb_ops.cpp:255</code>，它的实现里 <code>:270</code> 才是那句 <code>avb_slot_verify(&amp;avb_ops_, ...)</code>（<code>avb_slot_verify.c:1417</code>）。ops 适配层的符号 <code>FsManagerAvbOps::GetInstanceFromAvbOps</code> 定义在 <code>avb_ops.h:53</code>，<code>avb_ops.cpp:54</code> 是它在 <code>read_from_partition</code> 里的首个使用点。返回 <code>AVB_SLOT_VERIFY_RESULT_OK</code> 后挂载成立。</p>
+<p><code>main</code> 结束前在 <code>first_stage_init.cpp:568</code> 用 <code>setenv(kEnvFirstStageStartedAt, ...)</code> 把一阶段起始时刻塞进环境变量，带进二阶段。</p>
+<p>二阶段 <code>init.cpp</code>（1346 行）的次序要记准：<code>:1126</code> 的 <code>PropertyInit()</code>（<code>property_service.cpp:1405</code> 定义）先把 <code>androidboot.*</code> → <code>ro.boot.*</code> 的映射做完（其内部 <code>:1423</code> 调 <code>ProcessKernelCmdline</code>），<code>:1155</code> 才 <code>StartPropertyService</code> 起服务，所以 <code>:1159</code> 的 <code>GetIntProperty(&quot;ro.boot.boot_timeout&quot;)</code> 与 <code>:1187</code> 的 <code>GetBoolProperty(&quot;ro.boot.wait_for_udc&quot;)</code> 就已经能读到 <code>ro.boot.*</code>；<code>:1208</code> 的 <code>LoadBootScripts</code>（定义在 <code>:347</code>）只是又晚一步，它读的是 <code>:350</code> 的 <code>GetProperty(&quot;ro.boot.init_rc&quot;)</code> 来选 rc 路径。把「第一次读 ro.boot」记在 <code>:1208</code> 是常见的次序误判。<code>:1166</code> 调用 <code>:904</code> 的 <code>RecordStageBoottimes</code>，经环境变量设 <code>ro.boottime.init</code>、<code>ro.boottime.init.first_stage</code>、<code>ro.boottime.init.selinux</code>、<code>ro.boottime.init.modules</code>。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>前置 <code>AND-P8-G01</code> 给全卷定位。后继 <code>AND-P8-102</code> 接走镜像文件格式与 fastboot 交互，本篇只到「bootloader 交棒」为止。<code>AND-P8-201</code> 接 init.rc 解析，本篇提到的 <code>LoadBootScripts</code> 只是一笔带过。bootloader 本体不在本树，本篇只按 misc BCB 与 <code>androidboot.*</code> 这几个接口契约口径核。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>一阶段入口</td><td><code>system/core/init/first_stage_main.cpp</code></td><td><code>main</code></td><td>21 行；第 19 行定义 main，第 20 行调用 <code>FirstStageMain</code></td></tr><tr><td>一阶段主干</td><td><code>system/core/init/first_stage_init.cpp</code></td><td><code>DoFirstStageMount</code>、<code>kEnvFirstStageStartedAt</code></td><td>599 行，539–568 段是过渡区</td></tr><tr><td>一阶段挂载</td><td><code>system/core/init/first_stage_mount.cpp</code></td><td><code>TrySwitchSystemAsRoot</code>、<code>SetUpDmVerity</code>、<code>InitAvbHandle</code></td><td>553 行，主线在这</td></tr><tr><td>fstab 读取</td><td><code>system/core/init/first_stage_mount_android.cpp</code></td><td><code>ReadDefaultFstab</code></td><td>一阶段挂载路径的入口在 <code>:50</code>；同文件 <code>:330</code> 另有一处，属 <code>SetInitAvbVersionInRecovery</code> 的 recovery 分支</td></tr><tr><td>fstab 解析</td><td><code>system/fs/fs_mgr/libfstab/fstab.cpp</code></td><td><code>ReadFstabFromFile</code></td><td><code>ReadDefaultFstab</code> 定义在此</td></tr><tr><td>AVB 适配</td><td><code>system/fs/fs_mgr/libfs_avb/fs_avb.cpp</code></td><td>libfs_avb 主体</td><td>606 行</td></tr><tr><td>AVB ops</td><td><code>system/fs/fs_mgr/libfs_avb/avb_ops.cpp</code></td><td><code>GetInstanceFromAvbOps</code>（首个使用点）、<code>read_from_partition</code></td><td>288 行；该符号定义在 <code>avb_ops.h:53</code></td></tr><tr><td>校验核心</td><td><code>external/avb/libavb/avb_slot_verify.c</code></td><td><code>avb_slot_verify</code></td><td>1819 行</td></tr><tr><td>DT overlay</td><td><code>system/libufdt/ufdt_overlay.c</code></td><td><code>ufdt_apply_overlay</code></td><td>795 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/core:545d2487e381</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">wc -l system/core/init/first_stage_init.cpp \
+      system/core/init/first_stage_mount.cpp \
+      system/core/init/first_stage_mount_android.cpp \
+      system/core/init/init.cpp \
+      system/fs/fs_mgr/libfstab/fstab.cpp</code></pre>
+<p>期望输出：<code>599</code>、<code>553</code>、<code>362</code>、<code>1346</code>、<code>902</code>，对应 §4.2 各文件的规模口径。</p>
+<pre><code class="lang-bash">grep -n &quot;DoFirstStageMount\|kEnvFirstStageStartedAt&quot; \
+  system/core/init/first_stage_init.cpp system/core/init/first_stage_mount.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：<code>first_stage_mount.cpp:101</code> 的 <code>DoFirstStageMount</code> 定义，<code>first_stage_init.cpp:551</code> 的调用点，<code>first_stage_init.cpp:568</code> 的 <code>setenv(kEnvFirstStageStartedAt, ...)</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;ReadDefaultFstab&quot; system/core/init/first_stage_mount_android.cpp
+grep -n &quot;^Fstab::Fstab\|ReadDefaultFstab\|ReadFstabFromFile&quot; system/fs/fs_mgr/libfstab/fstab.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：前者命中 <code>:50</code> 与 <code>:330</code> 两处——<code>:50</code> 是一阶段挂载路径的入口，<code>:330</code> 在 <code>SetInitAvbVersionInRecovery</code> 内、前面 <code>:324</code> 有 <code>IsRecoveryMode()</code> 早返回，属 recovery 分支，不是常规路径也不要漏；后者能定位 <code>ReadFstabFromFile</code> 在 <code>:674</code>、<code>ReadDefaultFstab</code> 在 <code>:765</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;avf,strict-boot&quot; system/core/init/first_stage_mount.cpp
+grep -n &quot;TrySwitchSystemAsRoot\|MountPartitions\|GetDmVerityDevices\|SetUpDmVerity\|InitAvbHandle\|IsDmLinearEnabled&quot; \
+  system/core/init/first_stage_mount.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：第一条第 <code>:115</code>；第二条第 <code>:157</code>、<code>:278</code>、<code>:338</code>、<code>:415</code>、<code>:473</code>、<code>:538</code>。</p>
+<pre><code class="lang-bash">grep -n &quot;AvbSlotVerifyResult avb_slot_verify&quot; external/avb/libavb/avb_slot_verify.c
+grep -n &quot;AVB_SLOT_VERIFY_RESULT_OK&quot; external/avb/libavb/avb_slot_verify.h
+grep -n &quot;GetInstanceFromAvbOps&quot; system/fs/fs_mgr/libfs_avb/avb_ops.h system/fs/fs_mgr/libfs_avb/avb_ops.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：前两条分别命中 <code>:1417</code>、<code>:49</code>；第三条在两个文件里各命中一次——<code>avb_ops.h</code> 命中 <code>:53</code>（类内 inline static 定义），<code>avb_ops.cpp</code> 命中 <code>:54</code>（<code>read_from_partition</code> 内的首个使用点）。</p>
+<pre><code class="lang-bash">grep -n &quot;ProcessKernelCmdline\|ANDROIDBOOT_PREFIX\|ProcessBootconfig&quot; system/core/init/property_service.cpp
+grep -n &quot;RecordStageBoottimes\|LoadBootScripts&quot; system/core/init/init.cpp
+grep -n &quot;ufdt_apply_overlay&quot; system/libufdt/ufdt_overlay.c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出：前一组命中 <code>:1386</code>、<code>:1388</code>、<code>:1397</code>；中一组里 <code>LoadBootScripts</code> 的定义行 <code>:347</code> 与调用点 <code>:1208</code>、<code>RecordStageBoottimes</code> 的定义行 <code>:904</code> 与调用点 <code>:1166</code> 各出现一次（定义行与调用点要分开数）；最后一条命中 <code>:642</code>。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为一阶段 init 会解析 fstab 里的每一行去判断分区合法性。</strong> 一阶段只做「取默认 fstab → 按标志挂载」两件事，合法性由 AVB 与 dm-verity 兜底。</p>
+<p><strong>误区二：以为 `ro.boot.verifiedbootstate` 在一阶段就能读。</strong> 它来自 kernel 命令行的 <code>androidboot.*</code> 前缀映射，映射发生在 <code>property_service.cpp:1388</code>，而属性服务要二阶段才起。一阶段该值只是命令行里的一个字符串。</p>
+<p><strong>误区三（看起来对其实是错的）：以为 `avb_slot_verify` 的调用者是一阶段 init 的 `main` 入口。</strong> <code>main</code> 只负责环境与过渡；真正的校验在 <code>DoFirstStageMount</code>（:551）→ <code>MountPartitions</code>（:338）→ <code>MountPartition</code>（:371）→ <code>:205</code> 的 <code>SetUpDmVerity</code> 之下，经 <code>InitAvbHandle</code> 进 <code>AvbHandle::Open()</code>（<code>fs_avb.cpp:454</code>），<code>Open()</code> 内部 <code>:467-468</code> 直接调 <code>FsManagerAvbOps::AvbSlotVerify</code>（<code>avb_ops.cpp:270</code>）落到 <code>avb_slot_verify</code>。辨析要点：<code>Open()</code> 本身就做校验，不存在「先打开、后校验」两步；而收集分区名单的 <code>GetDmVerityDevices</code> 属建设备阶段，与校验不在同一条链上。</p>
+<p><strong>误区四：以为设备树必须由 bootloader 完整给出、init 不会改。</strong> <code>system/libufdt</code> 的 <code>ufdt_apply_overlay</code> 在运行时对 DT 施加 overlay，init 读到的是补丁后的结果。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：日志里只有 <code>First stage mount skipped</code>，怎么判断是 fstab 缺失还是别的？ <strong>答</strong>：先看日志后缀，这句话有两个出处。<code>first_stage_mount.cpp:104</code> 打的是 <code>First stage mount skipped (missing/incompatible/empty fstab in device tree)</code>，对应 <code>DoFirstStageMount</code> 在 <code>:102</code> 的早返回，条件是 <code>!IsDmLinearEnabled() &amp;&amp; fstab_.empty()</code> 同时成立，直接原因通常是 <code>ReadDefaultFstab</code> 没拿到 fstab（或 fstab 为空）。<code>first_stage_init.cpp:536</code> 打的是 <code>First stage mount skipped (recovery mode)</code>，那是 recovery 模式下的分支——此时 <code>fsm</code> 根本不会被创建，<code>DoFirstStageMount</code> 也不执行。两条日志字面相同，排障方向完全相反。 <strong>追问</strong>：那 ramdisk 里有 fstab 但内容为空呢？ <strong>答</strong>：同样走到早返回，因为判断的是 fstab 是否为空而不是文件是否存在；但若 fstab 里存在 dm-linear 逻辑分区条目，<code>IsDmLinearEnabled()</code> 为真，这条早返回就不会触发。</p>
+<p><strong>问</strong>：<code>ro.boottime.init.first_stage</code> 的值为什么和我从内核日志算出来的不一致？ <strong>答</strong>：它是两个纳秒时刻的差值，起点是一阶段 <code>setenv(kEnvFirstStageStartedAt, ...)</code>（<code>first_stage_init.cpp:568</code>）携带的时刻，终点是 SELinux 起始时刻（<code>init.cpp:922-923</code>，<code>selinux_start_time_ns - first_stage_start_time_ns</code>）——两个端点都不是内核启动时刻，也不是二阶段 <code>RecordStageBoottimes</code> 被调用的时刻；后者定义在 <code>init.cpp:904</code>、调用点在 <code>:1166</code>，它只是把一阶段经环境变量传来的时刻读出来做差写进属性。 <strong>追问</strong>：那二阶段怎么不重新打点？ <strong>答</strong>：一阶段已经打过点，二阶段经环境变量接续，避免重复计时。</p>
+<p><strong>问</strong>：<code>/proc/device-tree/chosen/avf,strict-boot</code> 存在代表什么？ <strong>答</strong>：它只被 <code>IsMicrodroidStrictBoot</code>（<code>first_stage_mount.cpp:114-116</code>）探测，唯一调用点 <code>:135</code> 在 <code>InitDevices</code> 内、外层条件是 <code>IsMicrodroid() &amp;&amp; IsOpenDiceChangesFlagEnabled()</code>，用途是初始化 <code>open-dice0</code> 平台设备——属虚拟化场景，与常规设备的「严格启动开关」不是一回事。 <strong>追问</strong>：谁写这个节点？ <strong>答</strong>：本树不含写入方，按接口契约口径，这是虚拟化相关启动路径的标记。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>一阶段挂载被跳过</td><td><code>grep -rn &quot;First stage mount skipped&quot; system/core/init/</code></td><td>命中 <code>first_stage_mount.cpp:104</code> 还是 <code>first_stage_init.cpp:536</code></td><td>前者核 <code>ReadDefaultFstab</code> 输出与 dm-linear 开关；后者是 recovery 模式，属预期行为（<code>fsm</code> 未创建）</td></tr><tr><td>卡在 dm-verity</td><td><code>grep -n &quot;SetUpDmVerity|GetDmVerityDevices&quot; system/core/init/first_stage_mount.cpp</code></td><td>分区标志收集范围</td><td>核 fstab 里该分区的 avb 标志</td></tr><tr><td>校验返回非 OK</td><td><code>grep -n &quot;AVB_SLOT_VERIFY_RESULT_&quot; external/avb/libavb/avb_slot_verify.h</code></td><td>枚举全集</td><td>对照返回值定位失败环节</td></tr><tr><td>属性缺失</td><td><code>grep -n &quot;ANDROIDBOOT_PREFIX&quot; system/core/init/property_service.cpp</code></td><td>前缀常量定义</td><td>核命令行里是否真有该键</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：镜像文件格式与 fastboot 交互，见 <code>AND-P8-102</code>；init.rc 解析与 rc 触发时序，见 <code>AND-P8-201</code>；bootloader 本体。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P8-G01</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P8-102</code>、<code>AND-P8-201</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>一阶段挂载主干 <code>first_stage_mount.cpp</code> 553 行；<code>DoFirstStageMount</code>（:101）到 <code>InitAvbHandle</code>（:538）的行距是 437 行，但这只是两个函数首行的差，不等于「执行跨度」——两者之间还隔着 <code>MountPartitions</code>、<code>MountPartition</code>、<code>TrySwitchSystemAsRoot</code> 等一整套函数体，实际规模要看函数体累加，不能拿行距当指标。</li><li><code>avb_slot_verify.c</code> 1819 行，单文件承载全部槽位校验分支——口径同上。</li><li><code>first_stage_mount_android.cpp</code> 仅 362 行，一阶段 Android 特化的全部逻辑都在这——口径同上。</li><li>一阶段起始时刻到二阶段记录之间的实际耗时占开机总时长比例：暂无实测，列为待补。</li><li>DT overlay 应用耗时：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树实测）</td><td><code>first_stage_init.cpp</code> 599 行，<code>DoFirstStageMount</code> 调用在 <code>:551</code>，<code>setenv(kEnvFirstStageStartedAt, ...)</code> 在 <code>:568</code></td><td>一阶段与二阶段的启动时刻经环境变量衔接</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>first_stage_mount.cpp:114-116</code> 存在 <code>IsMicrodroidStrictBoot</code> 的 <code>avf,strict-boot</code> 探测</td><td>虚拟化场景的平台设备准备可与常规路径分辨</td></tr><tr><td>更早版本</td><td>本篇不断言</td><td>本树未提供可比对的历史事实</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>boot flow</code>、<code>Verified Boot</code>、<code>device tree overlay</code>。</li><li>Gerrit：android-review.googlesource.com 检索 <code>first_stage_mount</code>、<code>libfs_avb</code>、<code>avb_slot_verify</code>。</li><li>本仓关键路径：<code>system/core/init/first_stage_mount.cpp</code>、<code>system/fs/fs_mgr/libfs_avb/fs_avb.cpp</code>、<code>external/avb/libavb/avb_slot_verify.c</code>。</li><li>承接篇：<code>AND-P8-102</code>、<code>AND-P8-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P8-101 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

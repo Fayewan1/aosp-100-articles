@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gralloc 与内存分配：ion/dma-buf/memfd 的演进</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>gralloc 与内存分配：ion/dma-buf/memfd 的演进</h1>
+<div class="kv"><span>ID：AND-P4-201</span><span>卷：P4</span><span>章：4.2</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/ui/Gralloc5.cpp ；frameworks/native/libs/ui/GraphicBufferAllocator.cpp ；hardware/interfaces/graphics/mapper/stable-c/README.md ；hardware/interfaces/graphics/allocator/aidl/android/hardware/graphics/allocator/IAllocator.aidl ；system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h ；system/memory/libion/ion.c</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:14px"><a href="#h7-imapper-为什么是-c-api">IMapper 为什么是 C API</a></li><li style="margin-left:14px"><a href="#h8-库的落点与后缀">库的落点与后缀</a></li><li style="margin-left:14px"><a href="#h9-加载入口">加载入口</a></li><li style="margin-left:14px"><a href="#h10-分配入口">分配入口</a></li><li style="margin-left:14px"><a href="#h11-dma-buf-heap-用户态分配器">dma-buf heap 用户态分配器</a></li><li style="margin-left:14px"><a href="#h12-ion-的现状">ion 的现状</a></li><li style="margin-left:0px"><a href="#h13-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h14-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h15-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h16-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h17-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h18-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h19-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h20-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h21-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h22-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h23-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>gralloc 负责「缓冲从哪来」。到 gralloc 5，它的映射接口 <code>IMapper</code> 已经不是 HIDL/AIDL，而是 stable C API：经 <code>dlsym</code> 从 <code>mapper.&lt;suffix&gt;.so</code> 里取一张函数表。分配动作由 AIDL 的 <code>IAllocator</code> 承担，<code>GraphicBufferAllocator</code> 是统一入口。三种载体分工明确：ion 在本树已全桩化，dma-buf heap 是当前用户态分配与缓存同步的正路，memfd 提供匿名文件的 fd 语义。读完后你应能判断：一个缓冲该找 <code>IAllocator</code> 还是 <code>IMapper</code>，以及为什么手里还调得动 <code>ion_alloc</code> 却一定拿不到 fd。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P4-G01</code>——先建立「HAL 接口形态从 HIDL 到 AIDL 到 stable C」的判断框架，本篇的 <code>IMapper</code> 是 stable C 这一支的具体案例。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/libs/ui/Gralloc5.cpp</code></li><li><code>frameworks/native/libs/ui/GraphicBufferAllocator.cpp</code></li><li><code>hardware/interfaces/graphics/mapper/stable-c/README.md</code></li><li><code>hardware/interfaces/graphics/allocator/aidl/android/hardware/graphics/allocator/IAllocator.aidl</code></li><li><code>system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h</code></li><li><code>system/memory/libion/ion.c</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>、<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>你在写一个相机或视频后处理链路，需要把一块 YUV 缓冲从 HAL 进程送到另一个进程。第一个问题是：这块内存谁分配、用什么接口分配。第二个问题是：拿到 fd 之后，另一半代码还在调 <code>ion_alloc</code>，编译通过、运行返回 <code>-1</code>，而错误日志里没有任何解释。第三个问题是：升级到新版本后，原来按 HIDL 写的 <code>IMapper</code> 客户端整段编译不过。</p>
+<p>这三个问题其实指向同一件事：图形缓冲的「分配契约」在近几个版本被拆成了几层，而且载体从 ion 迁到了 dma-buf heap。下面按「谁来分配、谁来映射、fd 怎么传」三层拆开。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>三个角色，别混：</p>
+<ul><li><strong>`IAllocator`</strong>：AIDL 接口，回答「给我分配一块满足这些描述符要求的缓冲」。</li><li><strong>`IMapper`</strong>：stable C API，回答「把这块缓冲映射进我的地址空间」「这块缓冲的布局是什么」。</li><li><strong>载体</strong>：分配出来的东西在用户态表现为一个 fd，底层可能是 dma-buf heap、memfd 或（历史上）ion。</li></ul>
+<p>图 1：分配与映射的两条调用链</p>
+<pre><code>App / system service
+   |
+   +-- allocate ---&gt; GraphicBufferAllocator
+   |                     |
+   |                     +--&gt; IAllocator (AIDL) --&gt; vendor allocator HAL
+   |
+   +-- lock/map ----&gt; Gralloc5.cpp
+                         |
+                         +--&gt; dlsym(mapper.&lt;suffix&gt;.so)
+                              AIMapper_loadIMapperFn
+                              -&gt; AIMapper_loadIMapper
+                              -&gt; IMapper 函数表</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>关键点：分配走 AIDL，映射走 stable C。两条链的加载方式不同，失败形态也不同。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<h3 id="h7-imapper-为什么是-c-api">IMapper 为什么是 C API</h3>
+<p><code>hardware/interfaces/graphics/mapper/stable-c/README.md</code> 首段直接写明：<code>Starting with gralloc version 5, IMapper is now exposed as a C API instead of through HIDL or AIDL.</code> 这一句是整篇的地基。C API 意味着没有 Binder 事务、没有版本化接口描述，只有一张函数表加一套结构体。</p>
+<h3 id="h8-库的落点与后缀">库的落点与后缀</h3>
+<p>实现库放在 <code>/vendor/lib[64]/hw/mapper.&lt;imapper_suffix&gt;.so</code>。<code>&lt;imapper_suffix&gt;</code> 不是编译期定死的，而是由 VINTF manifest 的 <code>&lt;instance&gt;</code> 指定。同一份 README 给的示例是 <code>&lt;name&gt;mapper&lt;/name&gt;</code>、<code>&lt;version&gt;5.0&lt;/version&gt;</code>、<code>&lt;instance&gt;minigbm&lt;/instance&gt;</code>——于是加载的就是 <code>mapper.minigbm.so</code>。</p>
+<p>这是本篇最容易被忽略的契约：<strong>换一个 `&lt;instance&gt;` 值，框架加载的就是另一个 so</strong>。多套 gralloc 实现共存靠的是 manifest，不是链接期符号。</p>
+<h3 id="h9-加载入口">加载入口</h3>
+<p><code>frameworks/native/libs/ui/Gralloc5.cpp</code> 里这条链是：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>AIMapper_loadIMapperFn</code></td><td>加载函数的函数指针类型</td><td><code>Gralloc5.cpp:58</code></td></tr><tr><td><code>loadIMapperLibrary()</code></td><td>组装 so 路径并完成加载</td><td><code>Gralloc5.cpp:92</code></td></tr><tr><td><code>dlsym(so, &quot;AIMapper_loadIMapper&quot;)</code></td><td>取符号</td><td><code>Gralloc5.cpp:128</code></td></tr><tr><td>调用点</td><td>真正调用取到的函数</td><td><code>Gralloc5.cpp:130</code></td></tr></tbody></table>
+<p>这里还有一层版本分叉：<code>loadIMapperLibrary()</code> 在 <code>__builtin_available(android __ANDROID_API_V__)</code> 成立时改走 <code>AServiceManager_openDeclaredPassthroughHal(&quot;mapper&quot;, mapperSuffix, ...)</code>（<code>Gralloc5.cpp:103-105</code>），只有老分支才拼 <code>android_load_sphal_library(&quot;mapper.&lt;suffix&gt;.so&quot;)</code>（<code>:107-108</code>）。所以 V 之后加载失败要先去查 servicemanager 的 declared 声明与 <code>service_contexts</code>，而不是查 <code>dlsym</code>。</p>
+<h3 id="h10-分配入口">分配入口</h3>
+<p>框架侧的单一入口是 <code>GraphicBufferAllocator::allocate(const AllocationRequest&amp;)</code>（<code>GraphicBufferAllocator.cpp:119</code>），内部走 <code>mAllocator-&gt;allocate(request)</code>（<code>:140</code>）。旧签名还有一条回落分支在 <code>:149</code>——这意味着同一进程里可能存在两条分配路径，排查时要确认走的是哪条。</p>
+<p><code>IAllocator</code> 本身在 <code>hardware/interfaces/graphics/allocator/aidl/android/hardware/graphics/allocator/IAllocator.aidl:23</code> 声明为 <code>interface IAllocator</code>，文件 <code>:71</code> 的注释明确交代了它与 <code>IMapper</code> stable-C 的分工关系。</p>
+<h3 id="h11-dma-buf-heap-用户态分配器">dma-buf heap 用户态分配器</h3>
+<p><code>system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h:33</code> 定义 <code>class BufferAllocator</code>。核心方法：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>Alloc(heap_name, len, heap_flags)</code></td><td>按 heap 名分配</td><td><code>BufferAllocator.h:50</code></td></tr><tr><td><code>CpuSyncStart</code></td><td>CPU 访问前开始缓存同步</td><td><code>BufferAllocator.h:75</code></td></tr><tr><td><code>CpuSyncEnd</code></td><td>CPU 访问后结束缓存同步</td><td><code>BufferAllocator.h:85</code></td></tr><tr><td><code>kDmabufSystemHeapName[]</code> = <code>&quot;system&quot;</code></td><td>带缓存系统 heap 名</td><td><code>dmabufheap-defs.h:22</code></td></tr><tr><td><code>kDmabufSystemUncachedHeapName[]</code> = <code>&quot;system-uncached&quot;</code></td><td>不带缓存系统 heap 名</td><td><code>dmabufheap-defs.h:23</code></td></tr></tbody></table>
+<p>配置文件按设备节点组织，键直接写成 <code>/dev/dma_heap/system</code>（<code>configs/example.json</code>）。也就是说 heap 名与设备节点是两套命名，配置里认节点，代码里认常量。</p>
+<h3 id="h12-ion-的现状">ion 的现状</h3>
+<p><code>system/memory/libion/ion.c</code> 在本树已经全桩化：分配类入口 <code>ion_open</code>（<code>:22</code>）、<code>ion_alloc</code>（<code>:28</code>）、<code>ion_alloc_fd</code>（<code>:32</code>）、<code>ion_share</code>（<code>:46</code>）一律 <code>return -1</code>；只有 <code>ion_is_legacy</code>（<code>:62</code>）与 <code>ion_is_using_modular_heaps</code>（<code>:65</code>）这两个语义查询桩返回 0。头文件 <code>system/memory/libion/include/ion/ion.h</code> 仍然导出同名声明（<code>:32</code> / <code>:42</code> / <code>:56</code>）。</p>
+<p>这是一个典型的「编译通过、运行必失败」形态：符号在，语义没了。任何仍走 ion 的旧代码路径都不会有编译告警，只会在运行期拿到 <code>-1</code>。</p>
+<p>图 2：三种载体在上层都表现为一个 fd</p>
+<pre><code>            上层只看到 fd
+                 |
+   +-------------+-------------+
+   |             |             |
+dma-buf heap   memfd         ion
+/dev/dma_heap/system  memfd_create   库全桩 return -1
+BufferAllocator::Alloc  MFD_CLOEXEC</code></pre>
+<h2 id="h13-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设设备 manifest 里写 <code>&lt;instance&gt;minigbm&lt;/instance&gt;</code>，那么：</p>
+<ol><li>框架启动后首次映射缓冲，<code>Gralloc5.cpp:92</code> 的 <code>loadIMapperLibrary()</code> 拼出 <code>/vendor/lib64/hw/mapper.minigbm.so</code>。</li><li><code>:128</code> 用 <code>dlsym(so, &quot;AIMapper_loadIMapper&quot;)</code> 取符号，<code>:130</code> 调用，得到 <code>IMapper</code> 函数表。</li><li>分配侧走另一条路：<code>GraphicBufferAllocator::allocate</code>（<code>GraphicBufferAllocator.cpp:119</code>）→ <code>mAllocator-&gt;allocate(request)</code>（<code>:140</code>）→ <code>IAllocator</code> 的 Binder 调用。</li><li>vendor 侧实现用 dma-buf heap 落地：<code>BufferAllocator::Alloc(&quot;system&quot;, len, flags)</code>（<code>BufferAllocator.h:50</code>），带缓存选 <code>&quot;system&quot;</code>，不需要 CPU 读选 <code>&quot;system-uncached&quot;</code>。</li><li>CPU 要读这块缓冲，先 <code>CpuSyncStart</code>（<code>:75</code>），读完 <code>CpuSyncEnd</code>（<code>:85</code>）。</li><li>如果这一路上有人改调 <code>ion_alloc</code>（<code>ion.c:29</code>），得到的是 <code>-1</code>，链路断在分配这一步，而不是映射。</li></ol>
+<h2 id="h14-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li>上游：<code>AND-P4-G01</code> 给 HAL 接口形态的总图，本篇是其中「stable C」这一支的展开。</li><li>下游：<code>AND-P4-202</code> 讲缓冲怎么进 BufferQueue、怎么出队；本篇只回答「缓冲从哪来」。</li><li>边界：<code>P6-201</code> 讲合成策略，本篇不涉及合成；内核侧 dma-buf 驱动实现本系列未单列篇目，本篇只用它的用户态契约。</li><li>memfd 的 API 版本问题在 <code>P3-401</code> 已核，本篇只引用结论。</li></ul>
+<h1 id="h15-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>stable C 契约</td><td><code>hardware/interfaces/graphics/mapper/stable-c/README.md</code></td><td><code>IMapper</code> 为 C API、so 落点与 <code>&lt;instance&gt;</code> 后缀</td><td>全篇地基</td></tr><tr><td>映射加载</td><td><code>frameworks/native/libs/ui/Gralloc5.cpp</code></td><td><code>AIMapper_loadIMapperFn</code>、<code>loadIMapperLibrary</code>、<code>dlsym</code></td><td>决定加载哪个 so</td></tr><tr><td>分配入口</td><td><code>frameworks/native/libs/ui/GraphicBufferAllocator.cpp</code></td><td><code>allocate(const AllocationRequest&amp;)</code>、旧签名回落</td><td>框架侧单一入口</td></tr><tr><td>分配接口</td><td><code>hardware/interfaces/graphics/allocator/aidl/android/hardware/graphics/allocator/IAllocator.aidl</code></td><td><code>interface IAllocator</code> 及与 <code>IMapper</code> 关系注释</td><td>AIDL 一侧</td></tr><tr><td>heap 分配器</td><td><code>system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h</code></td><td><code>class BufferAllocator</code>、<code>Alloc</code>、<code>CpuSyncStart/End</code></td><td>当前正路</td></tr><tr><td>ion 桩</td><td><code>system/memory/libion/ion.c</code></td><td><code>ion_open</code>/<code>ion_alloc</code>/<code>ion_alloc_fd</code>/<code>ion_share</code> 全 <code>return -1</code></td><td>旧接口的失败形态</td></tr></tbody></table>
+<h1 id="h16-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash"># 1. 确认 IMapper 已改为 C API
+grep -n &quot;exposed as a C API&quot; hardware/interfaces/graphics/mapper/stable-c/README.md
+# 期望：命中首段那一句，与事实清单第 1 条一致
+
+# 2. 看 so 落点与 instance 示例
+grep -n &quot;mapper\.\|&lt;instance&gt;&quot; hardware/interfaces/graphics/mapper/stable-c/README.md
+# 期望：出现 /vendor/lib[64]/hw/mapper.&lt;suffix&gt;.so 与 minigbm 示例
+
+# 3. 定位加载函数与 dlsym
+grep -n &quot;AIMapper_loadIMapperFn\|loadIMapperLibrary\|AIMapper_loadIMapper&quot; frameworks/native/libs/ui/Gralloc5.cpp
+# 期望：:58 类型、:92 函数、:128 dlsym、:130 调用
+
+# 4. 定位分配入口与回落分支
+grep -n &quot;GraphicBufferAllocator::allocate\|mAllocator-&gt;allocate&quot; frameworks/native/libs/ui/GraphicBufferAllocator.cpp
+# 期望：:119 入口签名、:140 转发调用
+
+# 5. 看 IAllocator 声明
+grep -n &quot;interface IAllocator\|IMapper&quot; hardware/interfaces/graphics/allocator/aidl/android/hardware/graphics/allocator/IAllocator.aidl
+# 期望：:23 接口声明，:71 附近关系注释
+
+# 6. 看 heap 分配器接口
+grep -n &quot;class BufferAllocator\|Alloc(\|CpuSyncStart\|CpuSyncEnd&quot; system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h
+# 期望：:33 类、:50 Alloc、:75 与 :85 同步方法
+
+# 7. 看 heap 名常量
+grep -n &quot;system-uncached\|kDmabufSystemHeapName&quot; system/memory/libdmabufheap/include/BufferAllocator/dmabufheap-defs.h
+# 期望：:22 与 :23 两个常量
+
+# 8. 看 ion 是否已桩化
+grep -n -A2 &quot;int ion_alloc\|int ion_open\|int ion_alloc_fd&quot; system/memory/libion/ion.c
+# 期望：每个函数体为 return -1
+
+# 9. 确认头文件仍导出旧声明
+grep -n &quot;ion_open\|ion_alloc\|ion_share&quot; system/memory/libion/include/ion/ion.h
+# 期望：:32 / :42 / :56 仍有声明
+
+# 10. 看 heap 配置样例的键
+grep -n &quot;dma_heap&quot; system/memory/libdmabufheap/configs/example.json
+# 期望：出现 /dev/dma_heap/system</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h17-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h18-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：以为 gralloc 5 的 `IMapper` 还是 AIDL，照旧写 AIDL 客户端。</strong> 纠正：<code>IMapper</code> 自 gralloc 5 起是 stable C API（<code>stable-c/README.md</code> 首段）。AIDL 那一侧只剩 <code>IAllocator</code>（<code>IAllocator.aidl:23</code>）。两者不是同一个接口的两个版本，是两件事：一个负责分配，一个负责映射。</p>
+<p><strong>误区二：以为 `extract()` 出来的 fd 就是「分配器里那块内存」，只是同一个对象的两个名字。</strong> 纠正：这是看起来对、其实需要限定的说法。fd 是传递载体，跨进程传的是 fd 不是指针；持有 fd 的进程要访问，仍然要经 <code>IMapper</code> 做映射并拿到布局描述。把 fd 当成共享内存起始地址，是跨进程图形链路最常见的翻车点。</p>
+<p><strong>误区三：以为 `libion` 还能用，因为头文件和符号都在。</strong> 纠正：<code>system/memory/libion/ion.c</code> 的 <code>ion_open</code>（<code>:22</code>）、<code>ion_alloc</code>（<code>:28</code>）、<code>ion_alloc_fd</code>（<code>:32</code>）、<code>ion_share</code>（<code>:46</code>）全部 <code>return -1</code>。声明还在（<code>ion.h:32/42/56</code>）只说明源码兼容，不说明语义存在。任何依赖返回值的旧路径都会在运行期断掉。</p>
+<p><strong>误区四：以为 heap 名就是设备节点名。</strong> 纠正：代码里认的是 <code>&quot;system&quot;</code> 与 <code>&quot;system-uncached&quot;</code> 两个常量（<code>dmabufheap-defs.h:22/23</code>），配置文件里认的是 <code>/dev/dma_heap/system</code> 这样的节点键（<code>configs/example.json</code>）。字符串写错不会编译报错，只会分配失败。</p>
+<h2 id="h19-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：我要新加一种 gralloc 实现，框架怎么知道加载哪一个？ <strong>答</strong>：由 VINTF manifest 里的 <code>&lt;instance&gt;</code> 决定，框架拼出 <code>/vendor/lib[64]/hw/mapper.&lt;instance&gt;.so</code> 去 <code>dlsym</code>。示例中 <code>&lt;instance&gt;minigbm&lt;/instance&gt;</code> 对应 <code>mapper.minigbm.so</code>。 <strong>追问</strong>：那能不能只改 so 不放 manifest？ <strong>答</strong>：不行。后缀来自 manifest 的 <code>&lt;instance&gt;</code>，so 文件名必须与之对齐，否则 <code>loadIMapperLibrary()</code> 拼出来的路径根本不存在。</p>
+<p><strong>问</strong>：分配一块带 CPU 缓存的缓冲，我该写哪个名字？ <strong>答</strong>：<code>kDmabufSystemHeapName[]</code>，值为 <code>&quot;system&quot;</code>（<code>dmabufheap-defs.h:22</code>）。不需要 CPU 读写的场景用 <code>kDmabufSystemUncachedHeapName[]</code>，值为 <code>&quot;system-uncached&quot;</code>。 <strong>追问</strong>：我选错了会怎样？ <strong>答</strong>：不会编译失败。要么多付缓存维护开销，要么在 CPU 访问时撞上一致性问题——所以 CPU 访问前后要配 <code>CpuSyncStart</code>（<code>BufferAllocator.h:75</code>）与 <code>CpuSyncEnd</code>（<code>:85</code>）。</p>
+<p><strong>问</strong>：为什么 <code>GraphicBufferAllocator</code> 里有一条旧签名回落分支？ <strong>答</strong>：<code>GraphicBufferAllocator.cpp:149</code> 的回落分支用于兼容旧调用形态，主路径是 <code>:140</code> 的 <code>mAllocator-&gt;allocate(request)</code>。排查分配行为时先确认实际走的是哪条。</p>
+<h2 id="h20-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>映射阶段加载失败</td><td><code>grep -n &quot;loadIMapperLibrary|dlsym&quot; frameworks/native/libs/ui/Gralloc5.cpp</code></td><td><code>:92</code> 拼路径、<code>:128</code> 取符号</td><td>比对 manifest <code>&lt;instance&gt;</code> 与 <code>/vendor/lib[64]/hw/</code> 下实际 so 名</td></tr><tr><td>分配返回失败但无日志</td><td><code>grep -n &quot;mAllocator-&gt;allocate&quot; frameworks/native/libs/ui/GraphicBufferAllocator.cpp</code></td><td><code>:140</code> 是否为主路径</td><td>确认是否走了 <code>:149</code> 的旧签名回落</td></tr><tr><td>旧代码拿到 <code>-1</code></td><td><code>grep -n -A2 &quot;int ion_alloc&quot; system/memory/libion/ion.c</code></td><td>函数体是否 <code>return -1</code></td><td>迁到 <code>BufferAllocator::Alloc</code></td></tr><tr><td>分配成功但 CPU 读到脏数据</td><td><code>grep -n &quot;CpuSyncStart|CpuSyncEnd&quot; system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h</code></td><td><code>:75</code> / <code>:85</code> 是否被调用</td><td>补齐同步调用，或改用 uncached heap</td></tr></tbody></table>
+<h1 id="h21-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：BufferQueue 槽位与进出队见 <code>AND-P4-202</code>；SurfaceFlinger 合成见 <code>P6-201</code>；内核 dma-buf 驱动实现本系列无对应篇目。</li><li><strong>本篇前置依赖</strong>：<code>AND-P4-G01</code>。</li><li><strong>本篇后继</strong>：<code>AND-P4-202</code>。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>gralloc stable C API 的起始版本为 5，口径为 <code>hardware/interfaces/graphics/mapper/stable-c/README.md</code> 首段。</li><li>manifest 示例版本写作 <code>&lt;version&gt;5.0&lt;/version&gt;</code>，口径同上 README 示例，非全部实现的通用约束。</li><li>heap 名常量两个（<code>&quot;system&quot;</code> / <code>&quot;system-uncached&quot;</code>），口径为 <code>dmabufheap-defs.h:22/23</code>。</li><li>ion 桩化的具体函数数目本篇不断言，只列 <code>ion_open</code>/<code>ion_alloc</code>/<code>ion_alloc_fd</code>/<code>ion_share</code> 四个；完整清单暂无实测，列为待补。</li></ul></ul>
+<h1 id="h22-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>gralloc 5 之前</td><td><code>IMapper</code> 经 HIDL 或 AIDL 暴露</td><td>客户端按版本化接口描述编译，跨版本需重新适配</td></tr><tr><td>gralloc 5 起</td><td><code>IMapper</code> 改为 stable C API</td><td>客户端通过 <code>dlsym</code> 取函数表，接口描述不再参与版本协商</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>IMapper</code> 为 stable C API；<code>libion</code> 全桩化，分配类 <code>ion_*</code> 一律 <code>return -1</code>（两个 <code>ion_is_*</code> 查询桩返回 0）</td><td>仍走 ion 的旧路径运行期必定失败；映射侧按 <code>&lt;instance&gt;</code> 加载 so</td></tr></tbody></table>
+<h1 id="h23-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>gralloc mapper stable c</code>；source.android.com 站内检索 <code>dma-buf heap</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>mapper stable-c</code>、<code>libdmabufheap</code>、<code>ion stub</code>。</li><li>本仓关键路径：<code>frameworks/native/libs/ui/Gralloc5.cpp</code>、<code>system/memory/libdmabufheap/include/BufferAllocator/BufferAllocator.h</code>、<code>hardware/interfaces/graphics/mapper/stable-c/README.md</code>。</li><li>承接篇：<code>AND-P4-202</code>（缓冲排队与出队）、<code>AND-P4-G01</code>（HAL 接口形态总图）。</li></ul>
+</article>
+<footer>android-100 · AND-P4-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>权限体系：安装期/运行期、权限组与特殊权限</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>权限体系：安装期/运行期、权限组与特殊权限</h1>
+<div class="kv"><span>ID：AND-P9-201</span><span>卷：P9</span><span>章：9.2</span><span>难度：3</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java ；frameworks/base/services/core/java/com/android/server/policy/PermissionPolicyService.java ；frameworks/base/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java ；packages/modules/Permission/PermissionController/src/com/android/permissioncontroller/permission/ui/GrantPermissionsActivity.java ；frameworks/base/services/core/java/com/android/server/pm/permission/OneTimePermissionUserManager.java ；frameworks/base/services/core/java/com/android/server/appop/AppOpsService.java ；frameworks/base/core/java/android/app/AppOpsManager.java ；frameworks/base/core/res/AndroidManifest.xml</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>权限分成两层：安装期决定「有没有」，运行期决定「此刻给不给」。<code>normal</code> 与 <code>signature</code>/<code>signature|privileged</code> 走安装期判定，只有 <code>dangerous</code> 需要运行期弹窗。权限组只影响弹窗如何归并与用户心智，不构成放行单位。特殊权限（如悬浮窗）没有 grant 授权状态，检查发生在调用时：<code>checkPermission</code> 遇 <code>isAppOp</code> 权限转交 app op 检查，窗口侧再以 <code>noteOpNoThrow</code> 现查一次——op 非 <code>MODE_DEFAULT</code> 时按 op 模式判定，只有 <code>MODE_DEFAULT</code> 才回退查 <code>checkPermission</code>。判定权在 system_server 进程，UI 与默认授予策略只是提案方。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P2-302</code>，那里讲 <code>checkPermission</code> 的框架侧调用路径，本篇从服务侧接管同一问题的「谁判定、判定依据是什么」。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/policy/PermissionPolicyService.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java</code></li><li><code>packages/modules/Permission/PermissionController/src/com/android/permissioncontroller/permission/ui/GrantPermissionsActivity.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/pm/permission/OneTimePermissionUserManager.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/appop/AppOpsService.java</code></li><li><code>frameworks/base/core/java/android/app/AppOpsManager.java</code></li><li><code>frameworks/base/core/res/AndroidManifest.xml</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>应用声明了 <code>SYSTEM_ALERT_WINDOW</code>，用户在设置中找不到「悬浮窗权限」这一项，代码里 <code>checkSelfPermission</code> 却返回拒绝。另一个场景：用户给了一个权限组里的某个权限，同组另一个权限似乎「顺带」也被放行了。还有人发现 <code>dangerous</code> 权限被授予后，某个 API 调用仍然被拒。这三个现象指向同一个结构问题：权限不是一个布尔量，而是「安装期承诺 + 运行期状态 + 操作级管控」三层拼起来的判定链。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个关键概念。<strong>权限条目</strong>（permission）是 <code>AndroidManifest.xml</code> 里的一条 <code>&lt;permission</code>，带 protectionLevel。<strong>权限组</strong>（permission-group）是弹窗与设置页的归并单位。<strong>授权状态</strong>（grant）记录某包在某用户下是否已获某权限，由 PermissionManagerService 持有。<strong>应用操作</strong>（app op）是操作级开关，由 AppOpsService 按每次调用现查。</p>
+<p>图 1：权限判定的三层结构与同步方向</p>
+<pre><code>manifest 声明 ---- 安装期判定 (protectionLevel)
+                        |
+                        v
+                 授权状态 (grant) ---- 运行期弹窗 / 默认授予
+                        |   ^
+                        |   |  PermissionPolicyService 按 grant 推导并回写
+                        v   |  （PermissionToOpSynchroniser）
+               app op 开关 ---- 每次敏感操作现查</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>三层不是串联放行，两层状态也<strong>不是各自独立演化</strong>。grant 存在 PermissionManagerService、app op 模式存在 AppOpsService，两处分开存；但 <code>PermissionPolicyService</code> 会把前者推导成后者并回写——<code>synchronizeUidPermissionsAndAppOps(uid)</code>（:623）与 <code>synchronizePermissionsAndAppOpsForUser(userId)</code>（:649）造一个内部类 <code>PermissionToOpSynchroniser</code>（:732），收齐包后调 <code>syncPackages()</code>（:819）逐个翻转。</p>
+<p>同步的覆盖边界分三层，不是所有包、所有权限都参与：包级 <code>addPackage</code> 先挑包——拿不到包信息或 <code>requestedPermissions</code> 为空直接返回（:1013-1024），<code>ROOT_UID</code>/<code>SYSTEM_UID</code> 的包整体不同步（:1026-1030，注释说明这两个 uid 永远通过权限检查，动它们的 app op 只会破坏兼容性）；权限级 <code>addAppOps</code> 再查映射表，<code>mRuntimeAndTheirBgPermissionInfos</code> 缺项即返回（:874-877）；最后 <code>addPermissionAppOp</code>（:882）在三种情况下跳过——非 runtime 权限（:884）、带 <code>FLAG_PERMISSION_REVIEW_REQUIRED</code> 待复核（:893）、<code>getSwitchOp()</code> 返回 <code>OP_NONE</code> 即没有关联 op 的（:901，:902 的注释点明后台权限没有关联 op）。<code>addAppOps</code> 还经 <code>addExtraAppOp</code>（:879 调用、:971 定义）为 soft-restricted 权限另排 extra op，按 <code>mayAllowExtraAppOp()</code>/<code>mayDenyExtraAppOpIfGranted()</code> 分流（:993-997）；这里的 ignoreIfNotAllowed 不是 mode 常量（<code>AppOpsManager</code> 只定义 <code>MODE_ALLOWED</code>/<code>MODE_IGNORED</code>/<code>MODE_ERRORED</code>/<code>MODE_DEFAULT</code>/<code>MODE_FOREGROUND</code> 五种），而是队列 <code>mOpsToIgnoreIfNotAllowed</code>（:761）——<code>setUidModeIgnoredIfNotAllowed</code>（:1046）只在当前 op 模式非 <code>MODE_ALLOWED</code> 时把它落成 <code>MODE_IGNORED</code>（:1053）。推导出的模式按 <code>MODE_ALLOWED</code>/<code>MODE_FOREGROUND</code>/<code>MODE_IGNORED</code> 三档入队，<code>syncPackages()</code> 按 allow → foreground → ignore → ignoreIfNotAllowed 的顺序写，先写到的胜出（:820-823 的注释：两条变更撞同一个 op 时取最宽松的一档）。</p>
+<p>所以「权限授予了但操作仍被拒」主要落在三类地方：不在同步覆盖范围里的权限（特殊权限走 app op 而非 runtime 权限）、没有关联 op 的权限、以及 grant 刚变、同步尚未跑完的窗口期。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>安装期与运行期的分界由 protectionLevel 决定。<code>frameworks/base/core/res/AndroidManifest.xml</code> 里有 1160 个 <code>&lt;permission&gt;</code> 元素（按行 <code>grep -c '&lt;permission '</code> 只得 1116，漏掉 44 个属性换行书写的标签）。其中 <code>normal</code> 87 条、<code>dangerous</code> 42 条、<code>signature</code> 298 条、<code>signature|privileged</code> 298 条，这四组是 <code>protectionLevel</code> 的<strong>完整串</strong>计数。若按首个 flag 分族，则是 signature 864、internal 133、normal 108、dangerous 51（余 4 条不以这四族开头：<code>signatureOrSystem</code>、<code>system|signature|role</code>、<code>role|signature|privileged</code>、<code>module|signature|role</code> 各 1），差额来自几十种带附加 flag 的组合（<code>signature|role</code> 48、<code>signature|privileged|role</code> 34、<code>signature|privileged|development</code> 24、<code>dangerous|instant</code> 8、<code>dangerous|runtime</code> 1、<code>normal|instant</code> 18 等）。</p>
+<p><code>normal</code> 安装即授；完整串为 <code>dangerous</code> 的 42 条构成运行时弹窗主体，连 <code>dangerous|instant</code>、<code>dangerous|runtime</code> 一起是 51 条；<code>signature</code>/<code>signature|privileged</code> 各 298 条按签名与特权门槛放行，用户界面不参与——但「596 条签名族」这个加法只在这两个完整串的口径下成立，不能当成签名类权限的全部（按首 flag 算是 864 条）。</p>
+<p>同族 OP 常量集中在 <code>AppOpsManager.java</code>，该文件共 184 个 <code>public static final int OP_</code> 常量。<code>OP_SYSTEM_ALERT_WINDOW = AppOpEnums.APP_OP_SYSTEM_ALERT_WINDOW</code> 位于 :1021。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>OP_SYSTEM_ALERT_WINDOW</code></td><td>系统级悬浮窗操作开关</td><td><code>AppOpsManager.java</code>:1021</td></tr><tr><td><code>OP_</code> 常量族</td><td>操作级细粒度管控点，共 184 个</td><td><code>AppOpsManager.java</code></td></tr><tr><td><code>normal</code></td><td>安装期直接授予</td><td><code>AndroidManifest.xml</code> 元数据</td></tr><tr><td><code>dangerous</code></td><td>安装期不授予，需运行期确认</td><td><code>AndroidManifest.xml</code> 元数据</td></tr><tr><td><code>signature</code></td><td>同签名才放行</td><td><code>AndroidManifest.xml</code> 元数据</td></tr><tr><td><code>signature|privileged</code></td><td>同签名或特权位置才放行</td><td><code>AndroidManifest.xml</code> 元数据</td></tr></tbody></table>
+<p>职责分工要分清。PermissionManagerService 是授权的唯一写者，1790 行。PermissionPolicyService 承载系统策略侧权限角色，1388 行。DefaultPermissionGrantPolicy 决定默认授权，2103 行（默认授予主流程的安装侧细节归 <code>AND-P2-203</code>）。GrantPermissionsActivity 是运行期弹窗 UI，1388 行，它只提交用户选择，不做最终判定。OneTimePermissionUserManager 管一次性权限的时效，499 行。AppOpsService 8304 行，管操作级开关。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>取 <code>OP_SYSTEM_ALERT_WINDOW</code> 走一遍。<code>SYSTEM_ALERT_WINDOW</code> 在 manifest 里的 protectionLevel 不在 <code>dangerous</code> 42 条之内，所以安装完成后用户不会看到运行期弹窗，GrantPermissionsActivity 不参与。应用调用悬浮窗 API 时，窗口侧 <code>noteOpNoThrow</code> 现查 <code>OP_SYSTEM_ALERT_WINDOW</code>（<code>PhoneWindowManager.java:3200-3220</code>）：<code>MODE_ALLOWED</code> 放行；<code>MODE_IGNORED</code> 也返回 <code>ADD_OKAY</code>，但窗口会在 WindowManagerService 里被隐藏（:3205-3208 注释）；<code>MODE_ERRORED</code> 对 <code>targetSdkVersion &lt; M</code> 的应用放行、否则 <code>ADD_PERMISSION_DENIED</code>；只有 <code>MODE_DEFAULT</code> 才回退 <code>checkPermission</code>（<code>ActivityTaskManagerService.java:1119-1128</code>）。用户在设置页开关的其实是这个 app op，不是一条权限授权状态。</p>
+<p>对比一个 <code>dangerous</code> 权限：安装时不授，第一次用到时 GrantPermissionsActivity 弹出会话。用户允许后 PermissionManagerService 写入授权状态，<code>checkSelfPermission</code> 从此返回已授予。若该权限同时绑定了 app op（例如相机类操作），AppOpsService 侧还需对应开关为允许，两层都过才真正可用。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P2-302</code> 覆盖 <code>checkPermission</code> 在框架侧的调用路径，本篇只讲服务侧判定与状态。<code>AND-P2-203</code> 覆盖安装与授予的 PackageManagerService 主流程，本篇只交代分界与职责。沙箱域归 <code>AND-P9-202</code>，与权限判定是两条独立的门。默认授予策略的具体匹配算法不展开，只说明它存在。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>授权状态唯一写者</td><td><code>frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code></td><td>授权与回收的入口</td><td>1790 行</td></tr><tr><td>系统策略权限角色</td><td><code>frameworks/base/services/core/java/com/android/server/policy/PermissionPolicyService.java</code></td><td>策略侧约束</td><td>1388 行</td></tr><tr><td>默认授权策略</td><td><code>frameworks/base/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java</code></td><td>默认授予规则</td><td>2103 行</td></tr><tr><td>运行期弹窗 UI</td><td><code>packages/modules/Permission/PermissionController/src/com/android/permissioncontroller/permission/ui/GrantPermissionsActivity.java</code></td><td>会话与用户选择</td><td>1388 行，仅提案</td></tr><tr><td>一次性权限时效</td><td><code>frameworks/base/services/core/java/com/android/server/pm/permission/OneTimePermissionUserManager.java</code></td><td>到期回收</td><td>499 行</td></tr><tr><td>操作级管控</td><td><code>frameworks/base/services/core/java/com/android/server/appop/AppOpsService.java</code></td><td>app op 状态与查询</td><td>8304 行</td></tr><tr><td>OP 常量定义</td><td><code>frameworks/base/core/java/android/app/AppOpsManager.java</code></td><td>184 个 <code>OP_</code> 常量</td><td><code>OP_SYSTEM_ALERT_WINDOW</code> 在 :1021</td></tr><tr><td>权限声明规模</td><td><code>frameworks/base/core/res/AndroidManifest.xml</code></td><td>1160 个 <code>&lt;permission&gt;</code> 元素（行计数 1116）、19 个 <code>&lt;permission-group</code></td><td>protectionLevel 分布见 §4.2</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/services/core/java/com/android/server/pm/permission/PermissionManagerService.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 1790，对应 PermissionManagerService 的行数事实。</p>
+<pre><code class="lang-bash">wc -l frameworks/base/services/core/java/com/android/server/appop/AppOpsService.java \
+      frameworks/base/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望分别输出 8304 与 2103，对应 AppOpsService 与默认授予策略的行数事实。</p>
+<pre><code class="lang-bash">grep -c '&lt;permission ' frameworks/base/core/res/AndroidManifest.xml
+grep -c '&lt;permission-group ' frameworks/base/core/res/AndroidManifest.xml
+grep -o 'protectionLevel=' frameworks/base/core/res/AndroidManifest.xml | wc -l</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望输出 1116 与 19（行计数），第三行得 1160——每个 <code>&lt;permission&gt;</code> 元素都带 <code>protectionLevel</code>，所以它是元素口径的交叉印证，差值 44 来自属性换行书写的标签。</p>
+<pre><code class="lang-bash">grep -c 'public static final int OP_' frameworks/base/core/java/android/app/AppOpsManager.java
+grep -n 'OP_SYSTEM_ALERT_WINDOW = AppOpEnums.APP_OP_SYSTEM_ALERT_WINDOW' \
+  frameworks/base/core/java/android/app/AppOpsManager.java</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望第一条输出 184；第二条命中 :1021 一行。</p>
+<pre><code class="lang-bash">grep -o 'protectionLevel=&quot;signature|privileged&quot;' frameworks/base/core/res/AndroidManifest.xml | wc -l
+grep -o 'protectionLevel=&quot;dangerous&quot;' frameworks/base/core/res/AndroidManifest.xml | wc -l
+grep -o 'protectionLevel=&quot;dangerous[^&quot;]*&quot;' frameworks/base/core/res/AndroidManifest.xml | sort | uniq -c</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望前两条分别得 298 与 42；第三条给出 <code>dangerous</code> 的变体分布（42 + <code>dangerous|instant</code> 8 + <code>dangerous|runtime</code> 1）。注意不能写成 <code>grep -c 'signature|privileged'</code>：那是子串匹配，会把注释与 <code>signature|privileged|role</code> 等变体一并计入，得 504。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。<code>adb shell dumpsys package</code>、<code>appops get</code> 可在真机叠加观测，本篇不断言真机输出。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：每个权限都能在设置页里找到开关。</strong> 用户可交互的主体是 <code>dangerous</code> 那一族——完整串 42 条，连 <code>dangerous|instant</code> 8 条、<code>dangerous|runtime</code> 1 条一起是 51 条；<code>signature</code>/<code>signature|privileged</code> 与 <code>normal</code> 不出现在运行期界面，<code>OP_SYSTEM_ALERT_WINDOW</code> 这类走的是 app op 开关而非权限项——但 op 处于 <code>MODE_DEFAULT</code> 时，判定会回退到 <code>checkPermission</code>（见 §4.3），不是「永远不查权限」。</p>
+<p><strong>误区二：权限组是授权单位。</strong> 权限组只决定弹窗如何归并展示，授权状态仍按单条权限记录。同组放行是弹窗与默认策略的表现，不是判定规则本身。</p>
+<p><strong>误区三：权限授予了，敏感操作就一定成功。</strong> 这句话错在方向，不在结论。grant 与 app op 分两处存，但 <code>PermissionPolicyService</code> 会按 grant 推导 app op 并回写（见 §4.1），所以「授予了却仍被拒」不是常态，而是落在几类边界上：包级就被跳过（<code>ROOT_UID</code>/<code>SYSTEM_UID</code>、<code>requestedPermissions</code> 为空）、该权限不在同步覆盖范围（非 runtime 权限、<code>getSwitchOp()</code> 为 <code>OP_NONE</code>、映射表缺项）、待复核（review required 被跳过）、或同步还没跑完。排查要先分清是被哪一层拒的，再看它属不属于上述三类。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么运行时权限的弹窗代码在 PermissionController 模块而不是 frameworks/base？ <strong>答</strong>：弹窗是可独立更新的 UI 模块，<code>GrantPermissionsActivity</code> 只提交用户选择，最终状态仍写回 system_server 进程里的 PermissionManagerService。 <strong>追问</strong>：那弹窗被禁用或卸载会怎样？ <strong>答</strong>：授权入口失效，但已写入的授权状态不受影响；默认授予与策略侧判定不依赖该 UI。</p>
+<p><strong>问</strong>：一次性权限到期由谁回收？</p>
+<p><strong>答</strong>：<code>OneTimePermissionUserManager</code> 管理时效并在到期时发起回收，回收动作仍落在 PermissionManagerService 授权状态上。</p>
+<p><strong>追问</strong>：回收后 app op 会同步变吗？</p>
+<p><strong>答</strong>：会联动。<code>PermissionPolicyService</code> 在构造时注册了 <code>addOnPermissionsChangeListener</code>（:232-233，回调 <code>synchronizeUidPermissionsAndAppOpsAsync</code>），grant 变更（含回收）即触发同步；未授权的 runtime 权限在 <code>addPermissionAppOp</code> 里把 <code>appOpMode</code> 判成 <code>MODE_IGNORED</code>（:919），再经 <code>switch</code> 入 <code>mOpsToIgnore</code> 队列（:931-932），对应 app op 被翻成忽略。只有不在同步覆盖范围内的——非 runtime、<code>OP_NONE</code>、待复核——才不联动。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>声明了权限但界面无开关</td><td><code>grep -n 'protectionLevel' frameworks/base/core/res/AndroidManifest.xml | grep -A1 '&lt;permission '</code></td><td>该权限的 protectionLevel 是否 <code>dangerous</code></td><td>非 <code>dangerous</code> 就查 app op 那条路</td></tr><tr><td>权限已授予但调用被拒</td><td><code>grep -n 'OP_SYSTEM_ALERT_WINDOW' frameworks/base/core/java/android/app/AppOpsManager.java</code></td><td>对应 OP 常量与操作码</td><td>转去 AppOpsService 查该 op 的默认模式</td></tr><tr><td>换签名后权限不再生效</td><td><code>grep -o 'protectionLevel=&quot;signature|privileged&quot;' frameworks/base/core/res/AndroidManifest.xml | wc -l</code></td><td>是否属 298 条该档（子串 <code>grep -c</code> 会得 504，含注释与组合变体）</td><td>检查签名一致性与特权位置</td></tr><tr><td>同组权限被一并放行</td><td><code>grep -c '&lt;permission-group ' frameworks/base/core/res/AndroidManifest.xml</code></td><td>该权限所属组</td><td>回到单条权限的 grant 记录确认</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：<code>checkPermission</code> 的框架侧调用路径见 <code>AND-P2-302</code>；安装与授予的 PackageManagerService 主流程见 <code>AND-P2-203</code>；沙箱域见 <code>AND-P9-202</code>。</li><li><strong>本篇前置依赖</strong>：<code>AND-P2-302</code>。</li><li><strong>本篇后继</strong>：本卷内讲密钥与存储、SELinux 的篇目。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>系统权限条目 1160 个 <code>&lt;permission&gt;</code> 元素（行计数 1116），其中完整串为 <code>dangerous</code> 的 42 条、连变体一起 51 条（来源：<code>AndroidManifest.xml</code> 元数据）。</li><li><code>signature</code> 与 <code>signature|privileged</code> 的完整串各 298 条、合计 596 条；按首个 flag 分族则 signature 864、normal 108、internal 133、dangerous 51（余 4 条不以四族开头，构成见 §4.2；来源：同上，两种口径须择一并声明）。</li><li>权限组 19 个（来源：<code>AndroidManifest.xml</code> 元数据）。</li><li>OP 常量 184 个（来源：<code>AppOpsManager.java</code> 源码常量计数）。</li><li>AppOpsService 单个文件 8304 行，暂无实测拆分比例，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>模块化之前（早期版本）</td><td>权限弹窗与授权逻辑位于源码树内的 PackageInstaller 应用（历史路径有 <code>packages/apps/PackageInstaller</code> 与 <code>frameworks/base/packages/PackageInstaller</code> 两种形态）</td><td>本树仅 android17-release 可核，无早期版本实测；按「模块化前在树内」的间接口径表述，具体迁移时点暂无官方出处，列为待补</td></tr><tr><td>android17-release（本树实测）</td><td><code>GrantPermissionsActivity</code> 位于 <code>packages/modules/Permission</code>，共 1388 行</td><td>弹窗可独立更新，授权状态仍由 PermissionManagerService 持有</td></tr><tr><td>android17-release（本树实测）</td><td><code>AppOpsManager.java</code> 共 184 个 <code>OP_</code> 常量</td><td>操作级管控点规模以此为准，跨版本需重数</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>permissions</code>、<code>app ops</code>、<code>one-time permission</code>。</li><li>Gerrit：android-review.googlesource.com 检索 <code>PermissionManagerService</code>、<code>AppOpsService</code>、<code>grantRuntimePermission</code>。</li><li>本仓关键路径：<code>frameworks/base/services/core/java/com/android/server/pm/permission/</code>、<code>frameworks/base/services/core/java/com/android/server/appop/</code>、<code>packages/modules/Permission/PermissionController/src/</code>。</li><li>承接篇：<code>AND-P2-302</code>、<code>AND-P2-203</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-201 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

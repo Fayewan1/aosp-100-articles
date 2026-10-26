@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VNDK 与 vendor 分区：镜像、符号与稳定边界</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>VNDK 与 vendor 分区：镜像、符号与稳定边界</h1>
+<div class="kv"><span>ID：AND-P3-402</span><span>卷：P3</span><span>章：3.4</span><span>难度：3</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：build/make/core/board_config.mk ；build/make/core/config.mk ；build/make/core/soong_config.mk ；build/soong/cc/llndk_library.go ；build/soong/android/variable.go ；system/linkerconfig/contents/context/context.cc ；system/linkerconfig/contents/common/system_links.cc ；system/linkerconfig/main.cc ；bionic/linker/linker.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>VNDK 版本号不是一句口头约定：<code>check_vndk_version</code> 以版本号为参数校验 <code>prebuilts/vndk/v&lt;版本&gt;</code> 目录的存在性，缺目录就报错，本树中它的调用点是 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 的遍历（<code>board_config.mk:1029</code>）。VNDK 的运行时形态是一组 <code>com.android.vndk.*</code> APEX，linkerconfig 读得到这些 APEX 才启用 vndk 段；读不到也不致命，链接器按 apex 专属配置、<code>/system/etc/ld.config.&lt;abi&gt;.txt</code> → <code>/linkerconfig/ld.config.txt</code> → <code>/system/etc/ld.config.&lt;vndk 版本&gt;.txt</code> → <code>/system/etc/ld.config.txt</code> 的顺序逐级回落（五级，见 §8）。<code>/system/etc/ld.config.vndk_lite.txt</code> 是另一条通道：由 <code>ro.vndk.lite</code> 属性选择，服务的是 vndk-lite 旧设备，与「有没有 VNDK APEX」无关。稳定边界由两类东西承担：<code>llndk_libraries_txt</code> 生成的 <code>llndk.libraries.txt</code> 列表与 <code>llndk</code> 属性块（<code>Symbol_file</code>、<code>Export_llndk_headers</code>）声明的符号白名单，以及链接器为 vndk 段与 default 段生成的链接关系。判断一个 vendor 链接失败是配置问题还是符号问题，先看命名空间生成，再看符号表。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P3-401</code>，先建立 Native 层进程内视角，本篇才好把视角切到分区与链接边界。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>build/make/core/board_config.mk</code></li><li><code>build/make/core/config.mk</code></li><li><code>build/make/core/soong_config.mk</code></li><li><code>build/soong/cc/llndk_library.go</code></li><li><code>build/soong/android/variable.go</code></li><li><code>system/linkerconfig/contents/context/context.cc</code></li><li><code>system/linkerconfig/contents/common/system_links.cc</code></li><li><code>system/linkerconfig/main.cc</code></li><li><code>bionic/linker/linker.cpp</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>、<code>grep</code>。不需要编译，不需要真机，验证方式为静态源码分析。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>给 vendor 侧加一个依赖系统库的二进制，编译过了，刷机后启动即失败，日志只有一行找不到符号。另一类现象更难排查：同一份 vendor 代码，换一个系统版本重编就报缺少库，而库就在 <code>/system/lib64</code> 下。还有人在移植时把 VNDK 版本号配置写错，构建直接停在 board 配置阶段，报错只说某个路径不存在，看不出它要的是什么。</p>
+<p>这三种现象背后是同一套东西：分区边界、VNDK 快照、链接器命名空间。它们分别在不同的阶段生效——构建配置期、soong 模块定义期、运行时链接期，所以报错形态完全不同。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念构成一条链：</p>
+<ul><li>系统分区提供实现，vendor 分区只看到被允许看到的接口。</li><li>VNDK 是系统库中「允许 vendor 依赖」的子集快照，以版本号区分。</li><li>LLNDK 是这份子集里更窄的一层，以列表产物与符号表形式显式声明。</li><li>链接器命名空间是上面这些声明在运行时的落地物，决定谁可以链谁。</li></ul>
+<p>图 1：从构建配置到运行时链接的四段边界</p>
+<pre><code>build time                          runtime
+PRODUCT_EXTRA_VNDK_VERSIONS
+        |
+check_vndk_version  --&gt;  com.android.vndk.* APEX
+        |                        |
+prebuilts/vndk/v&lt;ver&gt;    linkerconfig
+        |                        |
+llndk_libraries_txt  -----&gt; namespace links
+        |                        |
+ llndk.libraries.txt       ld.config.*.txt
+ + Symbol_file</code></pre>
+<p>这条链上任一环断开都会表现成「找不到库/符号」，但修法完全不同：配置环要在 board 配置里补，符号环要在模块定义里补声明。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>构建期的第一道闸在 board 配置。<code>check_vndk_version</code>（<code>build/make/core/board_config.mk:1020</code> 定义）把传入的版本号展开成 <code>prebuilts/vndk/v&lt;版本&gt;</code> 路径并检查存在性，缺目录即报错。本树中它的调用点只有一处：<code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 非空时的逐版本遍历（同文件 <code>:1029</code>）。这一步发生在编译任何代码之前，所以版本号写错时看到的是路径不存在，不是链接错误。</p>
+<p><code>BOARD_VNDK_VERSION</code> 与 <code>PLATFORM_VNDK_VERSION</code> 这两个变量在 <code>config.mk</code> 里的命运是「被置空即终止」：<code>config.mk:1331</code> 与 <code>:1334</code> 在变量已定义时把它清空，<code>build/make</code> 全树再没有对它们的重新赋值，版本语义改由 soong config 承接——<code>soong_config.mk:162</code> 把 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 汇总成 <code>ExtraVndkVersions</code>，落进 build/soong 的配置结构（<code>android/variable.go:383</code>）供构建期消费。留意这条链的终点不是 linkerconfig：它对 <code>ExtraVndkVersions</code> 全树零引用，版本号经 <code>--vndk</code>/<code>--product_vndk</code> 参数传入（<code>system/linkerconfig/main.cc:87-88</code>）。所以看到这两个变量在配置后期读不到值，是设计如此，不是变量没生效。</p>
+<p>模块侧的声明由 soong 的 <code>llndk</code> 属性块与 <code>llndk_libraries_txt</code> 承担：<code>Symbol_file</code>（<code>build/soong/cc/llndk_library.go:33</code>）指定符号白名单文件，<code>Export_llndk_headers</code>（同文件 <code>:43</code>）导出 LLNDK 头文件，LLNDK 库产物统一带 <code>.llndk</code> 后缀（同文件 <code>:26</code> 的 <code>llndkLibrarySuffix</code> 常量），而 <code>llndk_libraries_txt</code> 模块类型（同文件 <code>:111</code> 注册）产出 <code>llndk.libraries.txt</code> 列表文件，把这一组库显式列出来。</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>llndk_libraries_txt</code></td><td>生成 LLNDK 库列表 <code>llndk.libraries.txt</code> 的模块类型</td><td><code>build/soong/cc/llndk_library.go:111</code></td></tr><tr><td><code>.llndk</code></td><td>LLNDK 库产物后缀</td><td><code>build/soong/cc/llndk_library.go:26</code></td></tr><tr><td><code>Symbol_file</code></td><td>指定符号白名单文件的属性（bp 名 <code>llndk.symbol_file</code>）</td><td><code>build/soong/cc/llndk_library.go:33</code></td></tr><tr><td><code>Export_llndk_headers</code></td><td>导出 LLNDK 头文件的属性</td><td><code>build/soong/cc/llndk_library.go:43</code></td></tr><tr><td><code>TARGET_COPY_OUT_VENDOR</code></td><td>vendor 分区出口目录变量</td><td><code>build/make/core/envsetup.mk:278</code></td></tr></tbody></table>
+<p>运行时的第一判断是 VNDK APEX 在不在。<code>context.cc</code> 用 <code>com.android.vndk.</code> 前缀识别 APEX 名，是否找到这类 APEX 直接决定 vndk 段是否启用。即便没有生成配置，链接器也不会就此失败：<code>get_ld_config_file_path</code>（<code>linker.cpp:3607</code> 起）按顺序查找 apex 专属配置（<code>get_ld_config_file_apex_path</code>，<code>:3617</code>）、<code>/system/etc/ld.config.&lt;abi&gt;.txt</code>（<code>:3626</code>）、<code>/linkerconfig/ld.config.txt</code>（<code>:3631</code>）、vndk 版本配置（<code>get_ld_config_file_vndk_path</code>，<code>:3640</code> 起），最后兜底 <code>/system/etc/ld.config.txt</code>（<code>:3645</code>）。<code>/system/etc/ld.config.vndk_lite.txt</code> 不在这条回落链上——它只由 <code>ro.vndk.lite</code> 属性为 true 时选中（<code>:3577-3579</code>），对应 vndk-lite 旧设备。</p>
+<p>命名空间之间的链接关系不是手写配置文件，而是 linkerconfig 算出来的。<code>system_links.cc</code> 计算 vndk 段与 default 段的链接关系，其中用到 <code>VndkUserPartition</code> 参数来区分发起方所在分区。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>设想 vendor 侧一个二进制需要链接某系统库：</p>
+<ol><li>构建期，<code>board_config.mk</code> 的 <code>check_vndk_version</code> 被 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 遍历触发，核对 <code>prebuilts/vndk/v&lt;版本&gt;</code> 是否存在。不存在，构建停在这里。</li><li>配置阶段，<code>BOARD_VNDK_VERSION</code>/<code>PLATFORM_VNDK_VERSION</code> 在 <code>config.mk</code> 中被置空后不再重赋值，版本语义经 soong config 向下传递。</li><li>模块解析阶段，目标库若带 <code>llndk</code> 属性块，其 <code>.llndk</code> 产物与 <code>Symbol_file</code> 决定 vendor 可见的符号集合，<code>llndk_libraries_txt</code> 把集合列成 <code>llndk.libraries.txt</code>。</li><li>运行时，linkerconfig 扫到 <code>com.android.vndk.</code> 前缀的 APEX，启用 vndk 段，<code>system_links.cc</code> 生成 vndk 段与 default 段的链接边。</li><li>链接该二进制时，bionic 的链接器按生成的配置找库。找不到符号，问题在第 3 步的符号表；找不到库，问题在第 4、5 步的命名空间。</li></ol>
+<p>同一个「起不来」的现象，被拆成四个互不重叠的检查点，这就是排查顺序的来源。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P3-401</code> 讲进程守护与 ashmem 共享内存，是同一个进程内部的机制；本篇把尺度换成分区之间。HAL 契约、VINTF manifest 与 matrix 的内容归 <code>AND-P4-101</code>、<code>AND-P4-102</code>，本篇只说「边界存在」不说「边界上签什么协议」。vendor 镜像构建细节与产品变体归 P11，本篇只用到出口变量 <code>TARGET_COPY_OUT_VENDOR</code> 这一项。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>版本校验</td><td><code>build/make/core/board_config.mk</code></td><td><code>check_vndk_version</code>、<code>prebuilts/vndk/v&lt;版本&gt;</code></td><td>构建期第一道闸，调用者为 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code></td></tr><tr><td>配置置空</td><td><code>build/make/core/config.mk</code></td><td><code>BOARD_VNDK_VERSION</code>、<code>PLATFORM_VNDK_VERSION</code></td><td>仅置空、无重赋值</td></tr><tr><td>模块声明</td><td><code>build/soong/cc/llndk_library.go</code></td><td><code>llndk_libraries_txt</code>、<code>Symbol_file</code>、<code>.llndk</code></td><td>LLNDK 列表与符号白名单</td></tr><tr><td>APEX 识别</td><td><code>system/linkerconfig/contents/context/context.cc</code></td><td><code>com.android.vndk.</code></td><td>决定 vndk 段启用</td></tr><tr><td>命名空间链接</td><td><code>system/linkerconfig/contents/common/system_links.cc</code></td><td><code>VndkUserPartition</code></td><td>生成段间链接关系</td></tr><tr><td>配置查找</td><td><code>bionic/linker/linker.cpp</code></td><td><code>get_ld_config_file_path</code>、<code>get_ld_config_file_vndk_path</code></td><td>运行时配置的逐级查找顺序</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：build/make:5ce6f787337d</p></blockquote>
+<p>验证方式：静态源码分析。以下命令在源码树根执行。</p>
+<pre><code class="lang-bash">sed -n '1015,1032p' build/make/core/board_config.mk</code></pre>
+<p>期望看到 <code>check_vndk_version</code> 的定义与 <code>prebuilts/vndk/v&lt;版本&gt;</code> 路径拼接，以及 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 的遍历校验（<code>:1029</code>）。</p>
+<pre><code class="lang-bash">sed -n '1326,1338p' build/make/core/config.mk</code></pre>
+<p>期望看到 <code>BOARD_VNDK_VERSION</code>、<code>PLATFORM_VNDK_VERSION</code> 在 <code>ifdef</code> 内置空；这两行之后没有对它们的重新赋值。</p>
+<pre><code class="lang-bash">grep -n 'llndk' build/soong/cc/llndk_library.go | sed -n '1,20p'</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>llndkLibrarySuffix</code>、<code>Symbol_file</code>、<code>Export_llndk_headers</code> 与 <code>llndk_libraries_txt</code> 注册（<code>:110-111</code>）。</p>
+<pre><code class="lang-bash">grep -n 'com.android.vndk' system/linkerconfig/contents/context/context.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>com.android.vndk.</code> 前缀识别，以及随后启用 vndk 段的判断分支。</p>
+<pre><code class="lang-bash">grep -n 'VndkUserPartition' system/linkerconfig/contents/common/system_links.cc</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 vndk 段与 default 段链接关系计算中该参数的用法。</p>
+<pre><code class="lang-bash">sed -n '3608,3646p' bionic/linker/linker.cpp</code></pre>
+<p>期望看到配置查找顺序（五级）：apex 专属路径 → <code>ld.config.&lt;abi&gt;.txt</code> → <code>/linkerconfig/ld.config.txt</code> → vndk 版本配置 → <code>ld.config.txt</code>；另在 <code>:3577-3579</code> 看到 <code>ro.vndk.lite</code> 属性选中 <code>ld.config.vndk_lite.txt</code> 的分支。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>「VNDK 版本号设了就能用」</strong>。设了只过第一关，而且过闸的方式是遍历：<code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 里出现的每个版本号都会被 <code>check_vndk_version</code> 核对 <code>prebuilts/vndk/v&lt;版本&gt;</code>，缺一个就整体报错。该报错发生在编译之前，与链接无关。</p>
+<p><strong>「vendor 能链接系统库，是因为库在 `/system/lib64` 下」</strong>。位置不产生权限。可见性来自 <code>llndk</code> 属性块声明的符号白名单与 <code>.llndk</code> 产物，以及 linkerconfig 生成的命名空间链接关系。这条是「看起来对其实是错的」：路径存在和能链上是两件事。</p>
+<p><strong>「没有 VNDK APEX 就走 vndk_lite 配置」</strong>。两件事没有因果关系。<code>ld.config.vndk_lite.txt</code> 由 <code>ro.vndk.lite</code> 属性选中，服务 vndk-lite 旧设备；没有 VNDK APEX 时，链接器走的是 apex 专属配置前置、<code>ld.config.&lt;abi&gt;.txt</code> → <code>/linkerconfig/ld.config.txt</code> → vndk 版本配置 → <code>ld.config.txt</code> 的逐级回落（共五级），设备照样能起来。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：构建时提示 <code>prebuilts/vndk/v&lt;版本&gt;</code> 不存在，但我不想用 VNDK。<strong>答</strong>：校验由 <code>check_vndk_version</code> 触发，调用者是 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 的遍历。先去核对版本号是从哪条配置带进来的，而不是往 <code>prebuilts/vndk</code> 下塞目录。<strong>追问</strong>：那我把版本号配置都删掉会不会绕过？<strong>答</strong>：可以，删掉后 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code> 为空，这轮校验就不跑；但与此同时 <code>BOARD_VNDK_VERSION</code>/<code>PLATFORM_VNDK_VERSION</code> 在 <code>config.mk</code> 中本来就会被置空，版本语义改由 soong config 传递，要确认下游不依赖这两个变量。</p>
+<p><strong>问</strong>：vendor 二进制报找不到符号，库确实在。<strong>答</strong>：先分清是库不可见还是符号未导出。库不可见看命名空间生成，符号未导出看 <code>Symbol_file</code> 白名单。<strong>追问</strong>：怎么快速区分？<strong>答</strong>：换成链接一个确定在 LLNDK 集合里的库做对照，能链上说明命名空间没问题，问题在目标库的符号声明。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>构建停在 board 配置</td><td><code>grep -n 'check_vndk_version' build/make/core/board_config.mk</code></td><td>校验函数定义（:1020）与调用点（:1029）</td><td>核对版本号来自哪条配置</td></tr><tr><td>版本号相关变量读不到值</td><td><code>sed -n '1326,1338p' build/make/core/config.mk</code></td><td>置空的位置与之后有无重赋值</td><td>查 soong config 的版本传递</td></tr><tr><td>vendor 库链不上</td><td><code>grep -n 'VndkUserPartition' system/linkerconfig/contents/common/system_links.cc</code></td><td>段间链接关系如何生成</td><td>查发起方分区判定</td></tr><tr><td>符号报未定义</td><td><code>grep -n 'Symbol_file' build/soong/cc/llndk_library.go</code></td><td>符号白名单属性定义</td><td>补声明后重编</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：HAL 契约与 VINTF manifest/matrix（<code>AND-P4-101</code>、<code>AND-P4-102</code>）；vendor 镜像构建与产品变体（P11）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P3-401</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P4-101</code>、<code>AND-P4-102</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>VNDK 版本路径只有一层版本号目录 <code>prebuilts/vndk/v&lt;版本&gt;</code>（口径：源码常量，<code>build/make/core/board_config.mk:1021</code>）。</li><li>LLNDK 产物后缀固定为 <code>.llndk</code>，符号文件属性名固定为 <code>llndk.symbol_file</code>（口径：源码常量，<code>build/soong/cc/llndk_library.go:26</code>、<code>:33</code>）。</li><li>APEX 名以前缀 <code>com.android.vndk.</code> 识别，无版本上限断言（口径：源码常量，<code>context.cc</code>）。</li><li>运行时配置按 5 级顺序查找：apex 专属配置（<code>get_ld_config_file_apex_path</code>，<code>linker.cpp:3617</code>）→ <code>ld.config.&lt;abi&gt;.txt</code>（<code>:3626</code>）→ <code>/linkerconfig/ld.config.txt</code>（<code>:3631</code>）→ vndk 版本配置（<code>:3640</code>）→ 兜底 <code>/system/etc/ld.config.txt</code>（<code>:3645</code>）；兜底文件名唯一（口径：源码常量，<code>bionic/linker/linker.cpp:3607-3646</code>）。</li><li><code>ro.vndk.lite</code> 为 true 时选中 <code>/system/etc/ld.config.vndk_lite.txt</code>，与 VNDK APEX 是否存在无关（口径：源码常量，<code>bionic/linker/linker.cpp:3577-3579</code>）。</li><li>单个 VNDK 版本对应的具体库数量：暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期 Treble 方案</td><td>VNDK 以系统分区内独立目录承载，无 APEX 形态</td><td>边界靠目录与配置文件约束</td></tr><tr><td>引入 VNDK APEX 后</td><td><code>com.android.vndk.*</code> 成为识别入口</td><td>是否存在决定 vndk 段启用</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td>校验在 <code>board_config.mk</code>（调用者为 <code>PRODUCT_EXTRA_VNDK_VERSIONS</code>），置空在 <code>config.mk</code>，运行时配置按五级顺序查找</td><td>四个检查点全部落在源码里可核验</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>vndk</code>、<code>linker namespaces</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>linkerconfig vndk</code>、<code>llndk_library</code>。</li><li>本仓关键路径：<code>system/linkerconfig/contents/</code>、<code>build/soong/cc/llndk_library.go</code>、<code>bionic/linker/</code>。</li><li>承接篇：<code>AND-P3-401</code>、<code>AND-P4-101</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P3-402 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

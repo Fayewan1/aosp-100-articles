@@ -1,0 +1,11 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python residue (if any tooling runs here)
+__pycache__/
+*.pyc
+
+# Local-only notes
+*.local.md

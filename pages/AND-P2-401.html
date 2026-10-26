@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>进程模型：Zygote、fork、COW 与进程优先级 adj</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>进程模型：Zygote、fork、COW 与进程优先级 adj</h1>
+<div class="kv"><span>ID：AND-P2-401</span><span>卷：P2</span><span>章：2.4</span><span>难度：3</span><span>核验：2026-10-15</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/com/android/internal/os/Zygote.java ；frameworks/base/core/java/com/android/internal/os/ZygoteInit.java ；frameworks/base/services/core/java/com/android/server/am/ProcessList.java ；frameworks/base/services/core/java/com/android/server/am/psc/OomAdjuster.java ；frameworks/base/services/core/java/com/android/server/am/psc/Constants.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>App 进程不是「启动」出来的，是 Zygote 进程（Zygote）预载完成后 fork 出来的；预载的类与资源靠 Linux 写时复制（copy-on-write，COW）在父子进程间共享，父子都不写就永不复制。fork 面向调用方的两个常规入口是 <code>Zygote.forkAndSpecialize</code> 与 <code>Zygote.forkSystemServer</code>，两侧都要过 <code>ZygoteHooks.preFork()</code> 与 <code>ZygoteHooks.postForkCommon()</code>。进程生下来之后，杀谁不杀谁由 adj 决定：常量从 <code>SYSTEM_ADJ = -900</code> 一路排到 <code>CACHED_APP_MAX_ADJ = 999</code>，值越大越先被杀。adj 由 <code>OomAdjuster</code> 算，经 <code>ProcessList.setOomAdj</code> 封装成 LMK_PROCPRIO 消息写进 Unix 域套接字 <code>lmkd</code>，由 LMKD（守护进程 lmkd）代写内核的 <code>oom_score_adj</code>。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：AND-P1-101（进程诞生后的初始化），否则「fork 之后子进程为什么能直接跑 Java」会缺一块。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></li><li><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/ProcessList.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/psc/OomAdjuster.java</code></li><li><code>frameworks/base/services/core/java/com/android/server/am/psc/Constants.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（本篇验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>同一个手机，微信在后台挂着没被杀，刚切走的一个小工具 App 一分钟后点回来已经冷启动了。开发者看着 <code>dumpsys</code> 里一堆进程，分不清哪个是「前台」哪个是「缓存」，更不知道系统按什么顺序挑人下手。还有一类困惑更底层：App 进程的 Java 堆里，为什么一开机就有一批类是可用的，这些类是每个进程各加载一遍，还是大家共用一份？把进程怎么被造出来、优先级怎么被定下来这两件事讲清，上面两类问题就有答案了。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念。Zygote 是「预载完 Java 运行时的模板进程」，只等 fork。fork 是 Linux 系统调用，复制父进程地址空间并在写时复制。COW 是 kernel 侧的页共享策略，谁写谁复制。adj 是 Android 给每个进程贴的优先级数字，取值最终落到内核的 <code>oom_score_adj</code>，决定被杀顺序。</p>
+<p>图 1：进程诞生与优先级落值两条链路</p>
+<pre><code>ZygoteInit.preload
+   └─ fork ──&gt; App 进程（COW 共享预载结果）
+                   │
+OomAdjuster 算 adj │
+   └─ ProcessList.setOomAdj
+          └─ writeLmkd ──&gt; lmkd ──&gt; oom_score_adj</code></pre>
+<p>注意这是两条链路，不是一条：fork 决定「进程怎么存在」，adj 决定「进程多容易被回收」，两者在时间上没有调用关系。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p>fork 侧的关键是「先备料、后分裂」。<code>ZygoteInit.preload</code>（ZygoteInit.java:128）先跑 <code>preloadClasses()</code>（134 行），类清单固定读 <code>/system/etc/preloaded-classes</code>，路径常量 <code>PRELOADED_CLASSES</code> 在同一文件 112 行；再跑 <code>Resources.preloadResources()</code>（140 行）。预载完成后才进入 fork 循环。子进程拿到的是一份「已经加载好常用类和公共资源」的地址空间，靠 COW 与父进程共享物理页——注意这是 Linux fork 语义，不是 AOSP 自己发明的机制。</p>
+<p>面向调用方的常规入口有两个，系统进程走一条，App 走另一条：</p>
+<table><thead><tr><th>用途</th><th>入口</th><th>native 落点</th><th>同族钩子</th></tr></thead><tbody><tr><td>App 进程</td><td><code>Zygote.forkAndSpecialize</code>（Zygote.java:376）</td><td><code>nativeForkAndSpecialize</code>（407）</td><td><code>ZygoteHooks.preFork()</code> / <code>postForkCommon()</code></td></tr><tr><td>系统进程</td><td><code>Zygote.forkSystemServer</code>（Zygote.java:510）</td><td><code>nativeForkSystemServer</code>（526）</td><td><code>ZygoteHooks.preFork()</code> / <code>postForkCommon()</code></td></tr></tbody></table>
+<p>两侧都成对调用 <code>ZygoteHooks.preFork()</code> 与 <code>ZygoteHooks.postForkCommon()</code>，说明 fork 前后要做一致的运行时状态处理。此外还有 USAP（非专用进程池）路径的 <code>forkUsap</code>（Zygote.java:677），同样落到 native fork，归 USAP 专题展开，不属上面两个常规入口。</p>
+<p>adj 侧的关键是「常量分段 + 计算 + 落值」。常量定义集中在 <code>services/core/java/com/android/server/am/psc/Constants.java</code>，按值从大到小排列（<code>CACHED_APP_MAX_ADJ = 999</code> 在前、<code>NATIVE_ADJ = -1000</code> 收尾）：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>SYSTEM_ADJ = -900</code></td><td>系统进程</td><td>Constants.java</td></tr><tr><td><code>PERSISTENT_PROC_ADJ = -800</code></td><td>常驻进程</td><td>Constants.java</td></tr><tr><td><code>PERSISTENT_SERVICE_ADJ = -700</code></td><td>常驻服务</td><td>Constants.java</td></tr><tr><td><code>FOREGROUND_APP_ADJ = 0</code></td><td>前台</td><td>Constants.java</td></tr><tr><td><code>PERCEPTIBLE_RECENT_FOREGROUND_APP_ADJ = 50</code></td><td>刚从前台退下来</td><td>Constants.java</td></tr><tr><td><code>VISIBLE_APP_ADJ = 100</code></td><td>可见</td><td>Constants.java</td></tr><tr><td><code>PERCEPTIBLE_APP_ADJ = 200</code></td><td>可感知</td><td>Constants.java</td></tr><tr><td><code>PERCEPTIBLE_MEDIUM_APP_ADJ = 225</code></td><td>可感知中等</td><td>Constants.java</td></tr><tr><td><code>PERCEPTIBLE_LOW_APP_ADJ = 250</code></td><td>可感知较低</td><td>Constants.java</td></tr><tr><td><code>BACKUP_APP_ADJ = 300</code></td><td>备份</td><td>Constants.java</td></tr><tr><td><code>HEAVY_WEIGHT_APP_ADJ = 400</code></td><td>重量级</td><td>Constants.java</td></tr><tr><td><code>SERVICE_ADJ = 500</code></td><td>服务</td><td>Constants.java</td></tr><tr><td><code>HOME_APP_ADJ = 600</code></td><td>桌面</td><td>Constants.java</td></tr><tr><td><code>PREVIOUS_APP_ADJ = 700</code></td><td>上一个 App</td><td>Constants.java</td></tr><tr><td><code>SERVICE_B_ADJ = 800</code></td><td>B 类服务</td><td>Constants.java</td></tr><tr><td><code>CACHED_APP_MIN_ADJ = 900</code></td><td>缓存下限</td><td>Constants.java</td></tr><tr><td><code>CACHED_APP_LMK_FIRST_ADJ = 950</code></td><td>缓存中首批可回收</td><td>Constants.java</td></tr><tr><td><code>CACHED_APP_MAX_ADJ = 999</code></td><td>缓存上限</td><td>Constants.java</td></tr></tbody></table>
+<p>规律一眼可见：负值给「不能动」的，0 到 999 给「可以动」的，900 以上全是缓存。<code>CACHED_APP_LMK_FIRST_ADJ = 950</code> 单独标出来，说明缓存区间内部还分了两截。</p>
+<p>计算与更新落在 <code>services/core/java/com/android/server/am/psc/OomAdjuster.java</code>：<code>performUpdateOomAdjLSP</code>（888 行抽象声明，879/920 处调用）为更新主径，<code>updateAndTrimProcessLSP</code>（1347 行）在更新后做裁剪，最终通过 <code>mInjector.setOomAdj(...)</code>（2325 行）下发。注意 <code>Injector.setOomAdj</code>（595 行）不是计算入口，它只是转调 <code>ProcessList.setOomAdj</code>（596 行）的下发回调，位于链条末端。同一文件里还有调度组提升：<code>processGroup = THREAD_GROUP_TOP_APP</code>（2372 行）。</p>
+<p>调度组常量在 <code>android/os/Process.java</code> 566–625 行，共 10 个：</p>
+<table><thead><tr><th>名称</th><th>值</th></tr></thead><tbody><tr><td><code>THREAD_GROUP_DEFAULT</code></td><td>-1</td></tr><tr><td><code>THREAD_GROUP_BACKGROUND</code></td><td>0</td></tr><tr><td><code>THREAD_GROUP_FOREGROUND</code></td><td>1</td></tr><tr><td><code>THREAD_GROUP_SYSTEM</code></td><td>2</td></tr><tr><td><code>THREAD_GROUP_AUDIO_APP</code></td><td>3</td></tr><tr><td><code>THREAD_GROUP_AUDIO_SYS</code></td><td>4</td></tr><tr><td><code>THREAD_GROUP_TOP_APP</code></td><td>5</td></tr><tr><td><code>THREAD_GROUP_RT_APP</code></td><td>6</td></tr><tr><td><code>THREAD_GROUP_RESTRICTED</code></td><td>7</td></tr><tr><td><code>THREAD_GROUP_FOREGROUND_WINDOW</code></td><td>8</td></tr></tbody></table>
+<p>调度组管的是内核 CPU 调度倾向，adj 管的是内存回收倾向，两个维度不同，别混为一谈。</p>
+<p>落值环节在 <code>ProcessList.setOomAdj</code>（ProcessList.java:1519）：组装 LMK_PROCPRIO 包，字段是 pid/uid/adj/PROC_TYPE_APP/forLmkdOnly（1529–1535 行），经 <code>writeLmkd</code>（ProcessList.java:1663）交给 <code>LmkdConnection</code>，走的是 LocalSocket——套接字名 <code>&quot;lmkd&quot;</code>、命名空间 RESERVED（LmkdConnection.java:273–274），建连方法 <code>openSocket</code>（LmkdConnection.java:267）。真正调内核写 <code>oom_score_adj</code> 的是 lmkd，不是 AMS 自己。若单次下发超过 250 ms，会打 <code>&quot;SLOW OOM ADJ&quot;</code> 警告（ProcessList.java:1537–1540）——这条日志就是 adj 慢的现场证据。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>一个 App 从后台被切到前台，走一遍：<code>performUpdateOomAdjLSP</code> 完成本次更新，<code>updateAndTrimProcessLSP</code>（1347 行）裁剪，结果经 <code>mInjector.setOomAdj(...)</code>（2325 行）下发。若该 App 成为顶层，同一文件 2372 行把它提到 <code>processGroup = THREAD_GROUP_TOP_APP</code>（值 5，见 <code>android/os/Process.java</code> 566–625）。adj 取值升到 <code>FOREGROUND_APP_ADJ = 0</code> 一档。<code>ProcessList.setOomAdj</code>（1519 行）把 pid/uid/adj 打成一个 LMK_PROCPRIO 包，<code>writeLmkd</code>（1663 行）经名为 <code>&quot;lmkd&quot;</code> 的 LocalSocket 送出，lmkd 落到 <code>oom_score_adj</code>。整条路径跑超 250 ms 就出 <code>&quot;SLOW OOM ADJ&quot;</code>。倒过来切回后台，值跌到 <code>CACHED_APP_MIN_ADJ = 900</code> 一档，被回收的位次就靠前了。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>AND-P1-101 讲进程诞生之后做了什么初始化，本篇只讲怎么造出来。本篇涉及的 Zygote 启动过程归 P8-301，本文不展开。lmkd 的具体回收策略归 AND-P5-301（内存管理：LMKD、PSI 与 zram/swap），本篇只讲到「消息写进 lmkd」为止。三篇拼起来才是完整的进程生命周期。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>fork 入口</td><td><code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td><code>forkAndSpecialize</code>、<code>forkSystemServer</code>、<code>nativeForkAndSpecialize</code>、<code>nativeForkSystemServer</code></td><td>两条 fork 路径</td></tr><tr><td>预载</td><td><code>frameworks/base/core/java/com/android/internal/os/ZygoteInit.java</code></td><td><code>preload</code>、<code>preloadClasses</code>、<code>PRELOADED_CLASSES</code>、<code>preloadResources</code></td><td>COW 共享的来源</td></tr><tr><td>adj 落值</td><td><code>frameworks/base/services/core/java/com/android/server/am/ProcessList.java</code></td><td><code>setOomAdj</code>、<code>writeLmkd</code></td><td>LMK_PROCPRIO 组包与送出</td></tr><tr><td>lmkd 建连</td><td><code>frameworks/base/services/core/java/com/android/server/am/LmkdConnection.java</code></td><td><code>openSocket</code></td><td>LocalSocket 建连（<code>&quot;lmkd&quot;</code>，RESERVED）</td></tr><tr><td>adj 计算</td><td><code>frameworks/base/services/core/java/com/android/server/am/psc/OomAdjuster.java</code></td><td><code>setOomAdj</code>、<code>updateAndTrimProcessLSP</code>、<code>mInjector.setOomAdj</code></td><td>更新与裁剪</td></tr><tr><td>adj 常量</td><td><code>frameworks/base/services/core/java/com/android/server/am/psc/Constants.java</code></td><td><code>SYSTEM_ADJ</code>～<code>CACHED_APP_MAX_ADJ</code></td><td>分段基准</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。命令均在源码树根执行。</p>
+<pre><code class="lang-bash">git -C frameworks/base rev-parse HEAD</code></pre>
+<p>期望输出 <code>94b4c163b7df</code> 开头的提交号，对上锚点。</p>
+<pre><code class="lang-bash">grep -n &quot;PRELOADED_CLASSES\|preloadClasses\|preloadResources&quot; \
+  frameworks/base/core/java/com/android/internal/os/ZygoteInit.java | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到 <code>preload</code>、<code>preloadClasses()</code>、<code>preloadResources()</code> 三处引用，类清单路径 <code>/system/etc/preloaded-classes</code> 出现在常量附近，对上事实 1。</p>
+<pre><code class="lang-bash">grep -n &quot;forkAndSpecialize\|forkSystemServer\|nativeForkAndSpecialize\|nativeForkSystemServer\|preFork\|postForkCommon&quot; \
+  frameworks/base/core/java/com/android/internal/os/Zygote.java | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望四个 fork 相关符号各出现一次，且 <code>preFork</code>/<code>postForkCommon</code> 成对出现，对上事实 2。</p>
+<pre><code class="lang-bash">grep -n &quot;_ADJ = &quot; frameworks/base/services/core/java/com/android/server/am/psc/Constants.java | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出一组常量——除主体各档外，还有 <code>INVALID_ADJ = -10000</code>、<code>UNKNOWN_ADJ = 1001</code> 两个哨兵值；主体从 <code>CACHED_APP_MAX_ADJ = 999</code> 递减排到 <code>SYSTEM_ADJ = -900</code>，按值递减，对上 §4.2 的常量表。</p>
+<pre><code class="lang-bash">grep -n &quot;LMK_PROCPRIO\|writeLmkd\|SLOW OOM ADJ&quot; \
+  frameworks/base/services/core/java/com/android/server/am/ProcessList.java | head -20</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到消息名、下发方法、慢日志三处，对上事实 5。</p>
+<pre><code class="lang-bash">grep -n &quot;openSocket\|\&quot;lmkd\&quot;\|RESERVED&quot; \
+  frameworks/base/services/core/java/com/android/server/am/LmkdConnection.java | head -10</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到建连方法 <code>openSocket</code>（267 行）与套接字名 <code>&quot;lmkd&quot;</code>（273–274 行，RESERVED 命名空间），对上事实 5 的落值段。</p>
+<pre><code class="lang-bash">grep -n &quot;THREAD_GROUP_&quot; frameworks/base/core/java/android/os/Process.java | head -10</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望列出 10 个调度组常量，值从 -1 到 8，对上事实 6。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>「每个 App 进程各自加载一遍常用类」</strong>——错。<code>ZygoteInit.preload</code>（128 行）在 fork 之前就把类和资源装好了，子进程靠 COW 共享父进程的物理页。只有子进程自己写过的页才会真的复制一份。</p>
+<p><strong>「adj 是 AMS 直接写进内核的」</strong>——错。AMS 算完 adj 后，<code>ProcessList.setOomAdj</code>（1519 行）只负责组包，经 <code>writeLmkd</code>（1663 行）走 LocalSocket 送到 lmkd，真正写 <code>oom_score_adj</code> 的是 lmkd。</p>
+<p><strong>「进程被创建的那一刻 adj 就定好了」</strong>——看起来对，其实是错的。fork 只决定进程存在，adj 是之后由 <code>OomAdjuster</code> 按前台/可见/服务/缓存等状态算出来的，还会随状态反复变；创建与定级是两条独立链路。</p>
+<p><strong>「adj 小就一定不会被杀」</strong>——错。负值只表示「优先级极高」，不构成豁免；具体回收策略由 lmkd 与内核共同决定，本篇不展开。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：预载类清单写在哪？<strong>答</strong>：常量 <code>PRELOADED_CLASSES</code> 在 <code>ZygoteInit.java</code> 112 行，运行时读的路径是 <code>/system/etc/preloaded-classes</code>。<strong>追问</strong>：能改吗？<strong>答</strong>：能，改清单即可，但清单变大会拉长 Zygote 启动时间，是拿启动换后续进程的加载速度。</p>
+<p><strong>问</strong>：<code>forkAndSpecialize</code> 和 <code>forkSystemServer</code> 为什么要分两个入口？<strong>答</strong>：两者要 specialize 的内容不同，system server 的 uid/gid 与 capability 处理和普通 App 不一样，所以各走一条 native 路径。<strong>追问</strong>：共同点是什么？<strong>答</strong>：两侧都成对调用 <code>ZygoteHooks.preFork()</code> 与 <code>postForkCommon()</code>，fork 前后的运行时状态处理是一致的。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>怀疑 adj 下发慢</td><td><code>grep -rn &quot;SLOW OOM ADJ&quot; frameworks/base/services/core/java/com/android/server/am/ProcessList.java</code></td><td>是否有该警告及阈值</td><td>若日志中真出现，查 lmkd 是否阻塞</td></tr><tr><td>想确认某进程当前 adj</td><td><code>adb shell dumpsys activity processes</code></td><td>各进程的 adj 数值</td><td>对照 <code>Constants.java</code> 常量判断档位</td></tr><tr><td>想确认调度组提升路径</td><td><code>grep -n &quot;THREAD_GROUP_TOP_APP&quot; frameworks/base/services/core/java/com/android/server/am/psc/OomAdjuster.java</code></td><td>提升赋值处</td><td>对比 <code>android/os/Process.java</code> 常量值 5</td></tr><tr><td>怀疑 fork 前后钩子漏调</td><td><code>grep -n &quot;preFork|postForkCommon&quot; frameworks/base/core/java/com/android/internal/os/Zygote.java</code></td><td>两侧是否成对</td><td>缺一侧则查该 fork 路径</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Zygote 启动过程本身归 P8-301；进程诞生后的初始化归 AND-P1-101；lmkd 的回收策略与水位归 AND-P5-301。</p>
+<p><strong>本篇前置依赖</strong>：AND-P2-101、AND-P2-301（与卷纲 depends 一致）。</p>
+<p><strong>本篇后继</strong>：AND-P8-301（Zygote 的完整启动，其 depends 含本篇）。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>adj 常量取值区间 <code>-900</code> 到 <code>999</code>，口径为 <code>Constants.java</code> 源码常量。</li><li>缓存段起点 <code>CACHED_APP_MIN_ADJ = 900</code>，另有 <code>CACHED_APP_LMK_FIRST_ADJ = 950</code> 作为缓存内首批可回收的分界，口径为源码常量。</li><li>adj 下发慢日志阈值 250 ms，口径为 <code>ProcessList.java</code> 1537–1540 行的判断条件。</li><li>调度组共 10 个，值域 -1 到 8，口径为 <code>android/os/Process.java</code> 566–625 行。</li><li>预载类清单具体条数本篇未统计，暂无实测，列为待补。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>早期版本（据公开 AOSP 历史）</td><td>adj 常量曾定义在 <code>ActivityManagerService</code> 内部类中</td><td>依赖该类内常量的外部代码在重构后需改引用；此条为历史沿革断言，未在本篇单树内核实</td></tr><tr><td>android17-release（本树实测）</td><td>adj 常量集中在 <code>services/core/java/com/android/server/am/psc/Constants.java</code>，计算逻辑在 <code>psc/OomAdjuster.java</code></td><td>常量与计算分离到 <code>psc</code> 包，本篇结论按此树核实</td></tr><tr><td>本树实测状态</td><td><code>ProcessList.setOomAdj</code> 走 LMK_PROCPRIO 包，经 LocalSocket <code>&quot;lmkd&quot;</code> 下发</td><td>adj 落值不再由 AMS 直写内核，统一由 lmkd 代写</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>zygote</code>、<code>low memory killer</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ZygoteHooks</code>、<code>OomAdjuster</code>、<code>LMK_PROCPRIO</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/com/android/internal/os/Zygote.java</code>、<code>frameworks/base/services/core/java/com/android/server/am/psc/OomAdjuster.java</code>、<code>frameworks/base/services/core/java/com/android/server/am/ProcessList.java</code>。</li><li>承接篇：AND-P2-101、P8-301。</li></ul>
+</article>
+<footer>android-100 · AND-P2-401 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内存管理：LMKD、PSI 与 zram/swap</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>内存管理：LMKD、PSI 与 zram/swap</h1>
+<div class="kv"><span>ID：AND-P5-301</span><span>卷：P5</span><span>章：5.3</span><span>难度：4</span><span>核验：2026-10-18</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：system/memory/lmkd/lmkd.cpp ；system/memory/lmkd/include/lmkd.h ；system/memory/lmkd/libpsi/psi.cpp ；system/memory/lmkd/lmkd.rc ；system/memory/lmkd/README.md ；system/memory/lmkd/flags.aconfig</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>进程被杀的「凶手」在 Linux 4.12 之后不再是一个内核驱动。内核 lowmemorykiller 驱动已被移除，改由用户态守护进程低内存杀手守护进程（LMKD，二进制名 <code>lmkd</code>）承担监控与杀进程。lmkd 把 PSI 三档监视器挂在 epoll 上等唤醒——但叫醒之后杀不杀，判据是内存水位、swap 余量与抖动程度的组合，PSI 档位本身只在设备严重停顿（CRITICAL）时直接导出一档原因；挑牺牲者则按系统服务下发的 oomadj 值。你能观测的入口只有三条：<code>/proc</code> 面的取数路径、lmkd 的 seqpacket 控制套接字、以及内核模块兜底路径是否被启用。驱动内部实现不在本篇核验范围。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P5-G01</code>，先建立内核层与 Android 用户态的切分视角，再谈内存压力面。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>system/memory/lmkd/README.md</code></li><li><code>system/memory/lmkd/include/lmkd.h</code></li><li><code>system/memory/lmkd/lmkd.cpp</code></li><li><code>system/memory/lmkd/libpsi/psi.cpp</code></li><li><code>system/memory/lmkd/lmkd.rc</code></li><li><code>system/memory/lmkd/flags.aconfig</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（验证方式为静态源码分析）。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>线上收到一条「后台应用被杀」的反馈，日志里没有任何 OOM 字样，<code>dmesg</code> 也干净。开发者去看 <code>/proc/meminfo</code>，空闲内存还剩不少，于是判断「不是内存问题」。这个判断在 4.12 之后就不成立了：杀进程的决定发生在用户态——PSI 事件负责把 lmkd 叫醒，水位与 swap 余量才决定它是否真的动手。要定位到底是谁杀的，必须知道 lmkd 读哪几个文件、按什么阈值、由谁告诉它该杀哪个进程。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念串起整条链。<strong>触发面</strong>是 PSI 三档监视器——lmkd 把它挂在 epoll 上等唤醒；<strong>测量面</strong>是 <code>/proc/zoneinfo</code>、<code>/proc/meminfo</code>、<code>/proc/vmstat</code> 与 <code>/proc/pressure/memory</code>；<strong>决策面</strong>是 lmkd 内的水位档位表加上 swap 与抖动判据；<strong>输入面</strong>是系统服务通过控制套接字发来的进程优先级；<strong>输出面</strong>是 lmkd 直接对进程发信号。</p>
+<p>触发面与决策面是两件事，最容易混：PSI 只回答「什么时候来看一眼」，杀不杀由后面的判据决定。<code>mp_event_common()</code>（lmkd.cpp:2795 起）被 PSI 事件唤走后，先取 <code>wmark</code>、<code>swap_is_low</code>、<code>thrashing</code> 三个量，再沿一条 if-else 链定 <code>kill_reason</code>：杀完一轮仍越 min 水位走 <code>PRESSURE_AFTER_KILL</code>（分支 :3025，赋值 :3032）；CRITICAL 档叠加 <code>wmark &lt;= WMARK_HIGH</code> 走 <code>NOT_RESPONDING</code>（:3035，赋值 :3041）；低 swap 加抖动走 <code>LOW_SWAP_AND_THRASHING</code>（:3044）；swap 与水位双低走 <code>LOW_MEM_AND_SWAP</code>（:3055）；最后才是兜底的水位分支 <code>LOW_MEM</code>（:3119，赋值 :3120）。整条链里 PSI 档位只出现在前两个分支，其余分支看的是水位与 swap。</p>
+<p>图 1：lmkd 的输入、决策与输出面</p>
+<pre><code>frameworks (system_server)
+        |  seqpacket socket /dev/socket/lmkd
+        v
+   +---------+      /proc/zoneinfo /proc/meminfo /proc/vmstat
+   |  lmkd   | &lt;--- PSI (/proc/pressure/memory)
+   +---------+
+        |
+        v  kill(pid, SIGKILL)
+   目标进程</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>控制套接字由 init 按 <code>lmkd.rc</code> 声明创建：<code>socket lmkd seqpacket+passcred 0660 system system</code>，服务本体是 <code>service lmkd /system/bin/lmkd</code>，带 <code>critical</code> 与 <code>task_profiles ServiceCapacityLow</code>。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>命令协议。</strong><code>enum lmk_cmd</code> 共 12 个命令，全部承载在一条 seqpacket 连接上。前四个是最常用的生命周期命令：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>LMK_TARGET=0</code></td><td>下发内存水位档位表</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_PROCPRIO</code></td><td>上报单个进程的 oomadj 变化</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_PROCREMOVE</code></td><td>进程消失，从簿记中移除</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_PROCPURGE</code></td><td>清空全部已登记进程</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_GETKILLCNT</code></td><td>查询累计杀进程次数</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_SUBSCRIBE</code></td><td>订阅异步事件</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_PROCKILL</code></td><td>lmkd 向订阅客户端推送的进程被杀通知（异步事件，不是请求 lmkd 杀进程的命令）</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_UPDATE_PROPS</code></td><td>刷新属性配置</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_STAT_KILL_OCCURRED</code></td><td>杀进程统计事件（供 statsd 上报）</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_START_MONITORING</code></td><td>开始 PSI 监控（此前被跳过时）</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_BOOT_COMPLETED</code></td><td>启动完成通知</td><td><code>include/lmkd.h</code></td></tr><tr><td><code>LMK_PROCS_PRIO</code></td><td>批量上报进程优先级</td><td><code>include/lmkd.h</code></td></tr></tbody></table>
+<p><code>LMK_PROCPRIO</code> 的包体是 <code>struct lmk_procprio</code>，字段为 pid、uid、oomadj、<code>enum proc_type ptype</code>、<code>bool for_lmkd_only</code>。<code>enum proc_type</code> 取 <code>PROC_TYPE_APP</code> 或 <code>PROC_TYPE_SERVICE</code>，两端夹 <code>PROC_TYPE_FIRST</code> 与 <code>PROC_TYPE_COUNT</code>。批量命令 <code>LMK_PROCS_PRIO</code> 受 <code>MAX_PROCS_PRIO_RECORD_COUNT 3</code> 约束，单条记录 <code>LMK_PROCPRIO_FIELD_COUNT 5</code> 个字段。</p>
+<p><strong>包体上限。</strong><code>CTRL_PACKET_MAX_SIZE</code> 取 <code>MAX_LMK_TARGET_SIZE</code> 与 <code>MAX_CTRL_PACKET_SIZE</code> 的较大者；档位表本身受 <code>MAX_TARGETS 6</code> 限制，最多六档。这个 6 就是水位表能配出的最大档数，超出只能合并。</p>
+<p><strong>取数路径。</strong>lmkd 从三个 <code>/proc</code> 文件采集内存状态，常量定义在 <code>lmkd.cpp</code>：<code>ZONEINFO_PATH &quot;/proc/zoneinfo&quot;</code>（:75）、<code>MEMINFO_PATH &quot;/proc/meminfo&quot;</code>（:76）、<code>VMSTAT_PATH &quot;/proc/vmstat&quot;</code>（:77）。进程级字段名为 <code>PROC_STATUS_TGID_FIELD &quot;Tgid:&quot;</code>（:78）、<code>PROC_STATUS_RSS_FIELD &quot;VmRSS:&quot;</code>（:79）、<code>PROC_STATUS_ANON_RSS_FIELD &quot;RssAnon:&quot;</code>（:80）、<code>PROC_STATUS_SWAP_FIELD &quot;VmSwap:&quot;</code>（:81），另有 <code>NODE_STATS_MARKER &quot;  per-node stats&quot;</code>（:82）用于切分 zone 段落。</p>
+<p><strong>PSI 档位。</strong><code>psi_thresholds[VMPRESS_LEVEL_COUNT]</code>（:231-235）只有三行：<code>{PSI_SOME, 70}</code>、<code>{PSI_SOME, 100}</code>、<code>{PSI_FULL, 70}</code>，依次对应 <code>enum vmpressure_level</code>（:166-171）的 LOW／MEDIUM／CRITICAL。时间窗口默认 <code>DEFAULT_PSI_WINDOW_SIZE_MS 1000</code>（:122）；采样周期分快慢两档 <code>PSI_POLL_PERIOD_SHORT_MS 10</code>（:124）与 <code>PSI_POLL_PERIOD_LONG_MS 100</code>（:126）；失败上报限流 <code>FAIL_REPORT_RLIMIT_MS 1000</code>（:128）。</p>
+<p>压力档位与 ADJ 可杀分界是两张不同的表，容易混为一谈，画出来更清楚：</p>
+<p>图 2：PSI 三档阈值与 ADJ 可杀分界是两条独立的刻度</p>
+<pre><code>   /proc/pressure/memory 采样（窗口 1000 ms）
+            |
+            v
+   psi_thresholds[VMPRESS_LEVEL_COUNT]
+    [0] {PSI_SOME,  70}  -&gt; LOW
+    [1] {PSI_SOME, 100}  -&gt; MEDIUM
+    [2] {PSI_FULL,  70}  -&gt; CRITICAL
+            |
+            v
+   按当前档位在 ADJ 槽位里找候选
+   -1000 ......... 0 ....... 700 | 701 ......... 1000
+                       PREVIOUS_   DEF_LOWMEM_MIN_SCORE
+                       APP_ADJ      = PREVIOUS_APP_ADJ + 1
+                                    = 701
+   整个槽位空间 ADJTOSLOT_COUNT = 2001</code></pre>
+<p><strong>杀与不杀之间的默认值。</strong><code>DEF_LOW_SWAP 10</code>（:134）定义低 swap 可用阈值。抖动（thrashing）三档为 <code>DEF_THRASHING_LOWRAM 30</code>（:136）、<code>DEF_THRASHING 100</code>（:137）、<code>DEF_THRASHING_CRITICAL 300</code>（:139）。停顿（stall）三档为 <code>DEF_PARTIAL_STALL_LOWRAM 200</code>（:144）、<code>DEF_PARTIAL_STALL 70</code>（:145）、<code>DEF_COMPLETE_STALL 700</code>（:147）。<code>DEF_DIRECT_RECL_THRESH_MS 0</code>（:149）、<code>DEF_SWAP_COMP_RATIO 1</code>（:151）分别是直接回收阈值与 swap 压缩比。最低可杀分界 <code>DEF_LOWMEM_MIN_SCORE (PREVIOUS_APP_ADJ + 1)</code>（:155）算出来是 701，对应属性 <code>ro.lmk.lowmem_min_oom_score</code>（README:107，默认值注释为「Default = 701 (all cached apps excluding the last active one)」）。</p>
+<p><strong>ADJ 空间。</strong><code>OOM_SCORE_ADJ_MIN (-1000)</code>（:299）到 <code>OOM_SCORE_ADJ_MAX 1000</code>（:300），共 2001 个槽，即 <code>ADJTOSLOT_COUNT</code>（:552）＝ 2001。档位用到的锚点是 <code>PERCEPTIBLE_APP_ADJ 200</code>（:84）、<code>PREVIOUS_APP_ADJ 700</code>（:85）、<code>SYSTEM_ADJ (-900)</code>（:103）。<code>SYSTEM_ADJ</code> 在源码里的用途是识别 system_server：<code>is_system_server = (oom_adj_score == SYSTEM_ADJ &amp;&amp; ...)</code>（:1199），随后决定 memcg soft_limit 的写入方式（:1201）。<strong>源码里并没有一条「排除 SYSTEM_ADJ 档」的显式候选过滤规则</strong>——该档事实上永远不可杀，是因为任何一档可杀分界阈值（最低的也是 201）都远高于 -900，数值上就被排除了。</p>
+<p><strong>内核模块兜底。</strong>lmkd 仍保留内核 lowmemorykiller 模块的兼容路径：<code>INKERNEL_MINFREE_PATH &quot;/sys/module/lowmemorykiller/parameters/minfree&quot;</code>（:91）与 <code>INKERNEL_ADJ_PATH &quot;/sys/module/lowmemorykiller/parameters/adj&quot;</code>（:92）。<code>use_inkernel_interface</code> 初值为 true（:162）。README §Background 写明了历史：<code>Historically on Android systems memory monitoring and killing of non-essential processes was handled by a kernel lowmemorykiller driver. Since Linux Kernel 4.12 the lowmemorykiller driver has been removed and instead userspace lmkd daemon performs these tasks.</code> 兜底路径存在，不等于它会被打开；上述 <code>INKERNEL_*_PATH</code> 指向的 sysfs 节点在无该模块的内核上根本不存在。</p>
+<p><strong>启动与重配。</strong><code>lmkd.rc:1</code> 起定义服务；配置变更由属性触发：<code>on property:lmkd.reinit=1</code> 执行 <code>exec_background /system/bin/lmkd --reinit</code>，<code>on property:sys.boot_completed=1</code> 追加 <code>--boot_completed</code>，另一族 <code>persist.device_config.lmkd_native.*</code> 属性同样会触发 reinit。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某进程的 oomadj 上报为 700。它等于 <code>PREVIOUS_APP_ADJ 700</code>（:85），低于 <code>DEF_LOWMEM_MIN_SCORE</code>（:155）算出的 701，所以在默认策略下它不在候选里。这里要把一件事说准：<strong>701 是全档共用的一个单值，不是逐档递进的线</strong>。属性 <code>ro.lmk.lowmem_min_oom_score</code> 默认 701（README:107），读进 <code>static int lowmem_min_oom_score</code>（:230），只在兜底的水位分支被消费——<code>if (kill_reason == NONE &amp;&amp; wmark &lt; WMARK_HIGH &amp;&amp; lowmem_min_oom_score &lt;= OOM_SCORE_ADJ_MAX)</code>（:3119），紧接着 <code>min_score_adj = lowmem_min_oom_score</code>（:3123）。LOW、MEDIUM、CRITICAL 三档走的是同一条判据链，用的是同一个 701；档位高低改变的是沿链落到哪个 <code>kill_reason</code>，而不是换一条分界线。</p>
+<p>真正随档位变的是另两处。一是 <code>NOT_RESPONDING</code> 分支要求 <code>level == VMPRESS_LEVEL_CRITICAL</code> 且 <code>wmark &lt;= WMARK_HIGH</code>（:3035），此时设备已处于完全停顿，<code>critical_stall</code> 会把 <code>min_score_adj</code> 压到 0（:3144-3146），连可感知应用都纳入候选；二是 <code>LOW_SWAP_AND_THRASHING</code> 分支把 <code>min_score_adj</code> 设为 <code>PERCEPTIBLE_APP_ADJ + 1</code> 即 201（:3051），但附加条件是 <code>wmark &gt; WMARK_MIN &amp;&amp; thrashing &lt; thrashing_critical_pct</code>（:3050）——水位还没破 min 且抖动没到临界时才保护可感知应用。</p>
+<p>逐档分界（<code>ro.lmk.low</code>／<code>medium</code>／<code>critical</code>，默认 1001／800／0，README:37-47）属于另一套策略：只有 <code>ro.lmk.use_minfree_levels</code> 打开后才生效（属性读取在 lmkd.cpp:4112-4113，分流在 :3372 与 :3383，用 <code>level_oomadj[level]</code> 取逐档值）。该开关默认 false，本篇按默认的新策略叙述。若这个进程是 <code>PROC_TYPE_SERVICE</code>，它的优先级语义与 <code>PROC_TYPE_APP</code> 不同，仍走同一条 2001 槽映射。整个判定只用 2001 个槽位索引，不需要遍历全表。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p>Binder 内核驱动侧的内存语义归 <code>AND-P5-201</code>。进程 oomadj 的具体计算（谁把它设成 700）归 P2／P9 的进程管理篇。本卷另一篇覆盖内核内存回收子系统本体，本篇只碰它与 lmkd 的接口面。想弄清「杀掉之后进程怎么重建」的读者，应转向 ActivityManagerService 侧的调度篇。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>历史与设计说明</td><td><code>system/memory/lmkd/README.md</code></td><td>§Background 段</td><td>说明 4.12 后驱动移除、职责移交 lmkd</td></tr><tr><td>控制协议定义</td><td><code>system/memory/lmkd/include/lmkd.h</code></td><td><code>enum lmk_cmd</code>、<code>struct lmk_procprio</code>、<code>enum proc_type</code></td><td>12 个命令与包体布局</td></tr><tr><td>取数与决策主体</td><td><code>system/memory/lmkd/lmkd.cpp</code></td><td><code>ZONEINFO_PATH</code>、<code>psi_thresholds</code>、<code>DEF_*</code></td><td>全部阈值与 <code>/proc</code> 路径常量</td></tr><tr><td>PSI 读取</td><td><code>system/memory/lmkd/libpsi/psi.cpp</code></td><td>压力文件解析</td><td>PSI 采样实现</td></tr><tr><td>服务与属性钩子</td><td><code>system/memory/lmkd/lmkd.rc</code></td><td><code>service lmkd</code>、<code>on property:lmkd.reinit=1</code></td><td>init 侧启动与重配</td></tr><tr><td>特性开关</td><td><code>system/memory/lmkd/flags.aconfig</code></td><td>配置标志</td><td>编译期/运行期开关</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：system/memory/lmkd:c3601e823bd0</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">git -C system/memory/lmkd rev-parse HEAD</code></pre>
+<p>期望输出 <code>c3601e823bd0</code>，与锚点一致。</p>
+<pre><code class="lang-bash">grep -n &quot;LMK_TARGET\|LMK_PROCPRIO\|LMK_BOOT_COMPLETED&quot; system/memory/lmkd/include/lmkd.h</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>enum lmk_cmd</code> 中的命令名，确认 <code>LMK_TARGET=0</code> 及其余 11 个命令（共 12 项，含 <code>LMK_PROCPURGE</code>）。</p>
+<pre><code class="lang-bash">grep -n &quot;ZONEINFO_PATH\|MEMINFO_PATH\|VMSTAT_PATH&quot; system/memory/lmkd/lmkd.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:75</code>、<code>:76</code>、<code>:77</code> 三条路径常量。</p>
+<pre><code class="lang-bash">sed -n '231,235p' system/memory/lmkd/lmkd.cpp</code></pre>
+<p>期望看到 <code>{PSI_SOME, 70}</code>、<code>{PSI_SOME, 100}</code>、<code>{PSI_FULL, 70}</code> 三档阈值。</p>
+<pre><code class="lang-bash">grep -n &quot;DEF_LOWMEM_MIN_SCORE\|PREVIOUS_APP_ADJ&quot; system/memory/lmkd/lmkd.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:155</code> 与 <code>:85</code>，据此算出 701。</p>
+<pre><code class="lang-bash">grep -n &quot;INKERNEL_MINFREE_PATH\|use_inkernel_interface&quot; system/memory/lmkd/lmkd.cpp</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望命中 <code>:91</code> 与 <code>:162</code>，确认兜底路径存在且初值为 true。</p>
+<p>行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：空闲内存还剩很多就不可能被杀。</strong> 错。叫醒 lmkd 的是 PSI 压力，不是 <code>/proc/meminfo</code> 的剩余量——可回收页多但回收慢时，压力可以很高而剩余量看起来正常。但要把另一层说清：被叫醒之后杀不杀，判据仍是水位（<code>wmark</code>）、swap 余量与抖动，PSI 档位只在 CRITICAL 且 <code>wmark &lt;= WMARK_HIGH</code> 时直接导出一档（<code>NOT_RESPONDING</code>）。把「PSI 就是决策依据」当成结论，会漏掉真正那条全档共用的 701 分界，也会漏掉 <code>ro.lmk.use_minfree_levels</code> 打开后才会生效的逐档 1001／800／0。</p>
+<p><strong>误区二：`dmesg` 干净就说明不是内存问题。</strong> 错。杀进程发生在用户态，lmkd 直接发信号，不必然在内核日志留痕。要看 <code>LMK_GETKILLCNT</code> 与 <code>LMK_STAT_KILL_OCCURRED</code> 这条统计线。</p>
+<p><strong>误区三（看起来对其实是错的）：lmkd 现在的内核里仍有 lowmemorykiller 驱动在兜底。</strong> 错。README §Background 明确写了该驱动自 Linux 4.12 起被移除。<code>lmkd.cpp</code> 里的 <code>INKERNEL_MINFREE_PATH</code> 等常量只是历史兼容代码路径，<code>use_inkernel_interface</code> 初值 true 是变量初始化，不代表运行时会用到；目标内核上这些 sysfs 节点并不存在。</p>
+<p><strong>误区四：lmkd 自己算 oomadj。</strong> 错。lmkd 只接收 <code>LMK_PROCPRIO</code>／<code>LMK_PROCS_PRIO</code> 上报的数值，计算方在系统服务侧。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：为什么阈值表只有三档？<strong>答</strong>：<code>psi_thresholds</code>（:231-235）就是三行，对应 LOW／MEDIUM／CRITICAL 三个压力等级。水位表 <code>MAX_TARGETS 6</code> 是另一回事，那是 <code>LMK_TARGET</code> 下发的内存档位数。<strong>追问</strong>：那两个「档」数会不会互相限制？<strong>答</strong>：不会，一个约束 PSI 分级，一个约束水位表长度，各自独立。</p>
+<p><strong>问</strong>：为什么 <code>DEF_LOWMEM_MIN_SCORE</code> 要写成表达式而不是字面量？<strong>答</strong>：它是 <code>PREVIOUS_APP_ADJ + 1</code>（:155），即 701。这样 ADJ 锚点调整时自动跟随，避免两处硬编码不一致。</p>
+<p><strong>问</strong>：<code>LMK_PROCS_PRIO</code> 为什么限制 3 条记录？<strong>答</strong>：<code>MAX_PROCS_PRIO_RECORD_COUNT 3</code> 限制了单包批量发送的条数，包体总上限由 <code>CTRL_PACKET_MAX_SIZE</code> 兜住。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>后台应用被杀无日志</td><td><code>ls -d /proc/$(pidof lmkd) 2&gt;/dev/null</code></td><td>lmkd 是否在运行</td><td>不在则查 init 服务状态</td></tr><tr><td>怀疑杀进程计数异常</td><td><code>adb shell service call activity 1</code></td><td>系统服务侧统计</td><td>对照 <code>LMK_GETKILLCNT</code> 订阅结果</td></tr><tr><td>怀疑内核模块兜底被启用</td><td><code>adb shell ls /sys/module/lowmemorykiller/parameters/</code></td><td>目录是否存在</td><td>不存在则确认走用户态路径</td></tr><tr><td>压力判断与实测不符</td><td><code>adb shell cat /proc/pressure/memory</code></td><td>some/full 的 avg 百分比</td><td>对照 <code>psi_thresholds</code> 三档</td></tr><tr><td>配置改了不生效</td><td><code>adb shell getprop lmkd.reinit</code></td><td>属性值</td><td>置 1 触发 <code>--reinit</code> 重载</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：Binder 内核驱动侧内存语义（<code>AND-P5-201</code>）；内核内存回收子系统本体（本卷对应篇）；oomadj 计算（P2／P9 进程管理篇）；进程被杀后的重建调度（ActivityManagerService 侧篇）。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P5-G01</code>。</p>
+<p><strong>本篇后继</strong>：本卷讲内核内存回收子系统的篇，以及讲进程生命周期调度的篇。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li>ADJ 槽位共 2001 个，由 <code>OOM_SCORE_ADJ_MIN (-1000)</code> 与 <code>OOM_SCORE_ADJ_MAX 1000</code> 推出，<code>ADJTOSLOT_COUNT</code>（:552）直接给出，来源：源码常量。</li><li>水位表最多 6 档（<code>MAX_TARGETS 6</code>），来源：源码常量。</li><li>批量优先级单包最多 3 条记录（<code>MAX_PROCS_PRIO_RECORD_COUNT 3</code>），来源：源码常量。</li><li>低内存可杀分界 701（<code>DEF_LOWMEM_MIN_SCORE</code>，:155），来源：源码常量。</li><li>PSI 窗口 1000 ms、快慢采样 10/100 ms、失败限流 1000 ms，来源：源码常量。真实设备上的实际命中分布暂无实测，列为待补。</li></ul>
+<p>驱动实现不在本树核验范围：本树不含内核 C 源码，凡涉及内核内部回收行为，一律只能按「内核契约如此约定」或「用户态可观测现象如此」表述。</p>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td>Linux 4.12 起</td><td>内核 lowmemorykiller 驱动移除，职责移交用户态 lmkd（README §Background）</td><td>杀进程决策不再出现在内核日志主线</td></tr><tr><td><code>android17-release</code>（本树）</td><td>PSI 三档阈值、12 个 <code>lmk_cmd</code>、<code>use_inkernel_interface</code> 初值 true 的兼容路径仍在；默认走新策略（<code>use_minfree_levels</code> 默认 false）</td><td>以 <code>/proc/pressure/memory</code> 与 seqpacket 控制套接字作为主要观测面</td></tr><tr><td>早期写法（<code>LK_*</code> 命令名族）</td><td>本篇不断言具体改名提交，列为待补</td><td>读旧代码时命令名与当前 <code>LMK_*</code> 对不上属正常</td></tr><tr><td>旧策略（<code>ro.lmk.use_minfree_levels=true</code>）</td><td>逐档分界 <code>ro.lmk.low</code>／<code>medium</code>／<code>critical</code> 默认 1001／800／0（README:37-47），分流点在 lmkd.cpp:3372 与 :3383</td><td>打开后按档位取 <code>level_oomadj[level]</code>，与默认策略的单一 701 是两套口径</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>lmkd</code>；kernel.org 站内检索 <code>pressure stall information</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>lmkd</code>、<code>psi</code>、<code>LMK_PROCPRIO</code>。</li><li>本仓关键路径：<code>system/memory/lmkd/lmkd.cpp</code>、<code>system/memory/lmkd/include/lmkd.h</code>、<code>system/memory/lmkd/libpsi/psi.cpp</code>。</li><li>承接篇：<code>AND-P5-201</code>、<code>AND-P5-G01</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P5-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>签名与密钥体系：APK 签名 v2/v3/v4 与密钥轮转</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>签名与密钥体系：APK 签名 v2/v3/v4 与密钥轮转</h1>
+<div class="kv"><span>ID：AND-P9-301</span><span>卷：P9</span><span>章：9.3</span><span>难度：4</span><span>核验：2026-10-20</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/base/core/java/android/content/pm/PackageParser.java ；frameworks/base/core/java/android/content/pm/SigningDetails.java ；frameworks/base/core/java/android/util/apk/ApkSignatureVerifier.java ；frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV2Verifier.java ；frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java ；frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV4Verifier.java ；frameworks/base/core/java/android/util/apk/ApkSigningBlockUtils.java ；frameworks/base/core/java/android/util/jar/StrictJarVerifier.java ；frameworks/base/core/java/android/util/apk/VerityBuilder.java</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>APK 签名从 <code>v1</code> 到 <code>v4</code> 是四套并行机制，不是新替代旧：<code>v1</code> 是 JAR 签名，<code>v2</code> 起改走 APK Signing Block，<code>v3</code> 在其中加密钥轮转，<code>v4</code> 则不写入 APK 本体，落在 APK 旁的 <code>.idsig</code> 文件里（fs-verity 元数据的载体）。验证链路的一条入口在 <code>PackageParser</code> 内调 <code>ApkSignatureVerifier.verify</code>，结果收敛到 <code>SigningDetails</code>。密钥轮转靠 v3 块内的 Proof-of-rotation 记录加 <code>mergeLineageWith(...)</code> 把血统合并，旧解析器忽略轮转字段，因此换钥能平滑过渡。后量子混合签名以 <code>isPqcSigned()</code> 形式进入同一套判定。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1/§7｜路径 B 全读</p></blockquote>
+<p><strong>建议先读</strong>：<code>AND-P2-203</code>。安装主流程的阶段划分在那一篇，本篇只接签名验证这一步。</p>
+<p><strong>涉及源码</strong>：</p>
+<ul><li><code>frameworks/base/core/java/android/content/pm/PackageParser.java</code></li><li><code>frameworks/base/core/java/android/content/pm/SigningDetails.java</code></li><li><code>frameworks/base/core/java/android/util/apk/ApkSignatureVerifier.java</code></li><li><code>frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV2Verifier.java</code></li><li><code>frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java</code></li><li><code>frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV4Verifier.java</code></li><li><code>frameworks/base/core/java/android/util/apk/ApkSigningBlockUtils.java</code></li><li><code>frameworks/base/core/java/android/util/jar/StrictJarVerifier.java</code></li><li><code>frameworks/base/core/java/android/util/apk/VerityBuilder.java</code></li></ul>
+<p><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机。</p>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>同一台设备上，一年前装的应用今天要做密钥轮转发布。新 APK 用新私钥签，旧版本用旧私钥签，系统怎么认得出这是同一个应用、而不是另一个冒名者？反过来，如果新 APK 同时带了 <code>v2</code> 和 <code>v3</code> 两种签名，旧系统读到哪一个？再看更常见的一幕：把一个 APK 解开、改一个字节、重新打包，为什么大多数情况下安装直接失败，而某些老格式的包却还能装进去？这三个问题指向同一件事：不同签名方案保护的范围不同，验证顺序与失败形态也不同。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>四个概念构成一条链：APK Signing Block（<code>v2</code> 起的签名容器）→ 各方案专属 block id（定位具体方案的数据块）→ Proof-of-rotation 结构（<code>v3</code> 起承载换钥链）→ <code>SigningDetails</code>（框架侧统一收敛的签名详情，含签名方案枚举与血统）。</p>
+<p>图 1：签名数据的四层关系</p>
+<pre><code>APK 文件
+├─ 原始条目        ← v1 用 JAR 清单逐个摘要
+├─ APK Signing Block ← v2/v3/v3.1/v3.2 的 block id 在此
+│   ├─ 0x7109871a  v2
+│   └─ 0xf05368c0  v3（内含轮转记录）
+└─ APK 本体之外     ← v4 落在 APK 旁的 .idsig（fs-verity 元数据载体）</code></pre>
+<p><code>v1</code> 保护的对象是 JAR 条目集合，<code>v2</code> 起保护的是整个 APK 的字节摘要，所以 <code>v2</code> 之后任何字节改动都会被拦住。<code>v4</code> 的验证对象是安装后的文件树，因此它天然允许在安装时补写。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><code>v2</code>/<code>v3</code>/<code>v3.1</code>/<code>v3.2</code> 的定位常量是一族同前缀符号，集中列出：</p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>APK_SIGNATURE_SCHEME_V2_BLOCK_ID</code> = <code>0x7109871a</code></td><td>v2 签名数据块 ID</td><td><code>ApkSignatureSchemeV2Verifier.java:75</code></td></tr><tr><td><code>APK_SIGNATURE_SCHEME_V3_BLOCK_ID</code> = <code>0xf05368c0</code></td><td>v3 签名数据块 ID</td><td><code>ApkSignatureSchemeV3Verifier.java:78-80</code></td></tr><tr><td><code>APK_SIGNATURE_SCHEME_V31_BLOCK_ID</code> = <code>0x1b93ad61</code></td><td>v3.1 增量块 ID</td><td><code>ApkSignatureSchemeV3Verifier.java:78-80</code></td></tr><tr><td><code>APK_SIGNATURE_SCHEME_V32_BLOCK_ID</code> = <code>0x70e1c89f</code></td><td>v3.2 增量块 ID</td><td><code>ApkSignatureSchemeV3Verifier.java:78-80</code></td></tr><tr><td><code>APK_SIG_BLOCK_MAGIC_HI</code> = <code>0x3234206b636f6c42L</code></td><td>签名块魔数高位，ASCII &quot;APK Sig Block 42&quot; 的后半</td><td><code>ApkSigningBlockUtils.java:726-727</code></td></tr><tr><td><code>APK_SIG_BLOCK_MAGIC_LO</code> = <code>0x20676953204b5041L</code></td><td>签名块魔数低位</td><td><code>ApkSigningBlockUtils.java:726-727</code></td></tr></tbody></table>
+<p>签名方案枚举 <code>SIGNING_BLOCK_V2</code>/<code>SIGNING_BLOCK_V3</code>/<code>SIGNING_BLOCK_V4</code> 定义在 <code>SigningDetails.java:59-61</code>，是 <code>SigningDetails</code> 对外表达&quot;这个包按什么方案验过&quot;的字段。</p>
+<p>验证链路的形状是：<code>PackageParser</code> 在 <code>:1425</code> 调 <code>ApkSignatureVerifier.verify(input, apkPath, minSignatureScheme)</code>（全仓共 6 个调用点，另见 <code>ParsingPackageUtils.java:3476</code>、<code>PackageSessionVerifier.java:127</code>、<code>PackageInstallerSession.java:5359</code> 等，<code>PackageParser</code> 是遗留解析路径之一）；<code>skipVerify</code> 分支（<code>:1420-1424</code>）改走 <code>unsafeGetCertsWithoutVerification</code>，绕过验证但仍给出证书——这是给系统内部重扫已装包用的口子。</p>
+<p><code>v1</code> 与 <code>v4</code> 的落点不同。<code>v1</code> 由 <code>StrictJarVerifier.java</code>（559 行）按 JAR 签名规则逐个条目校验。<code>v4</code> 的签名不进 APK 本体，而是落在 APK 文件<strong>旁边</strong>的独立 <code>.idsig</code> 文件里——<code>V4Signature.EXT</code> 就是 <code>&quot;.idsig&quot;</code>（<code>frameworks/base/core/java/android/os/incremental/V4Signature.java:39</code>）。取签名在 <code>ApkSignatureSchemeV4Verifier.extractSignature</code>（:76）：先问 IncFS（:85 <code>IncrementalManager.unsafeGetFileSignature</code>，命中则不再做一致性检查），拿不到再读 <code>apk.getAbsolutePath() + V4Signature.EXT</code>（:97），最后用 <code>VerityUtils.getFsverityDigest</code>（:115）核对「签名里记的摘要」与「实际文件的摘要」是否一致。</p>
+<p>别把 <code>VerityBuilder.java</code> 当成 v4 的生成方：它的调用点共 4 处——<code>ApkSignatureSchemeV2Verifier.java:416</code>、<code>ApkSignatureSchemeV3Verifier.java:1064</code>、<code>ApkSigningBlockUtils.java:380</code>（apk-verity 树）加 <code>ApkChecksums.java:587</code>（fs-verity root hash），没有一处服务 v4。真正让 v4 区别于前三者的，是「签名与 APK 本体分离、靠 IncFS 或 fs-verity 的摘要自证」。</p>
+<p>密钥轮转的全部信息在 v3 块的 Proof-of-rotation 结构里。<code>ApkSignatureSchemeV3Verifier.java</code> 的 <code>verifyProofOfRotationStruct</code>（import 在 <code>:31</code>）负责解析；<code>VerifiedProofOfRotation por</code>（<code>:631</code>）是解析产物。同一个 signer 的附加属性里出现第二条 Proof-of-rotation（PoR）就抛 <code>SecurityException</code>（<code>:648</code> 判 <code>por != null</code>、<code>:650-652</code> 记 metric、<code>:654</code> 抛出）。上限是「<strong>每个 signer 至多一条</strong>」，不是「一个包一条」——<code>:898</code> 明写 v3.2 支持 exactly two signers，双签名的包里可以各带一条。</p>
+<p><code>rotationMinSdkVersion</code> 不是「从哪个 SDK 起必须按轮转后的新钥验」的下限，而是一道<strong>防剥离</strong>比对。它写在 v3.0 块的附加属性里：<code>ROTATION_MIN_SDK_VERSION_ATTR_ID = 0x559f8b02</code>（定义 :622），在 <code>verifyAdditionalAttributes</code> 的 :699 case 中由 :706 <code>attr.getInt()</code> 读出。比对用的另一半是 v3.1 signer 块自身的 <code>minSdkVersion</code>——:358-363 把它存进 <code>mOptionalRotationMinSdkVersion</code>，而且只在该 signer 未被本平台选中（区间不覆盖当前 <code>SDK_INT</code>）时才存。两边在 :713-718 做相等性比对，不等就抛 <code>SecurityException</code>；若根本没有 v3.1 块，:708-711 直接报 <code>Expected a v3.1 signing block targeting SDK version X, but a v3.1 block was not found</code>。设计意图很清楚：不让「只认 v3.0 基本字段」的旧解析器靠<strong>看不见 v3.1 块</strong>来绕过轮转约束。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设某应用从钥 A 换到钥 B。</p>
+<p>签名工具产出带 <code>v3</code> 块的新 APK，块内含一条 Proof-of-rotation 记录，链上依次是 A 和 B，<code>rotationMinSdkVersion</code> 指向支持轮转的那个 SDK。在只认 <code>v3</code> 基本字段的旧系统上，<code>mOptionalRotationMinSdkVersion</code> 不被解析，验证按块内旧证书路径走，应用照装。在 <code>android17-release</code> 上，<code>verifyProofOfRotationStruct</code> 解析出 <code>VerifiedProofOfRotation por</code>，<code>mOptionalRotationMinSdkVersion</code> 生效，系统知道&quot;这个包的后继钥是 B&quot;。</p>
+<p>装完后，<code>SigningDetails</code> 通过 <code>mergeLineageWith(...)</code> 把祖先签名证书链并入当前签名详情。此后 PackageManagerService（PMS）比对升级时会拿血统判断同一应用，而不是只比单个证书——但「算不算同一应用」和「换钥后能继承什么」是两件事，后者由 PoR 上的能力位决定：<code>SigningDetails.java:108-127</code> 的 <code>CertCapabilities</code> 列出 <code>INSTALLED_DATA</code>(1)、<code>SHARED_USER_ID</code>(2)、<code>PERMISSION</code>(4)、<code>ROLLBACK</code>(8)、<code>AUTH</code>(16) 五档，查询侧 <code>hasCertificateInternal</code>（:933）在 :944 用 <code>flags &amp; mPastSigningCertificates[i].getFlags()</code> 逐位比对；血统只在旧包<strong>单签名</strong>时才成立（<code>hasAncestor</code> :588 要求 <code>oldDetails.mSignatures.length == 1</code>，:938 注明 only single-signed apps can have pastSigningCertificates）。若某个 signer 的附加属性里出现第二条 PoR 记录，<code>SecurityException</code>（:648 判定、:654 抛出）终止验证。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<p><code>AND-P2-203</code> 讲 PMS 安装主流程，本篇只切签名验证这一段；<code>PackageParser</code> 内 <code>:1425</code> 的那次调用，是遗留解析路径进入安装流程的验证调用点。<code>AND-P9-302</code> 讲 APEX 的签名形态，那是另一套容器格式，与 APK Signing Block 只共享验证思路而不共享代码路径。Source stamp 用 <code>SourceStampVerifier.java</code> 复用 <code>v2</code>/<code>v3</code> 的 block id，形态相邻但语义独立。</p>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>验证入口调用点</td><td><code>frameworks/base/core/java/android/content/pm/PackageParser.java</code></td><td><code>ApkSignatureVerifier.verify(...)</code>（:1425）、<code>unsafeGetCertsWithoutVerification</code>（:1420-1424）</td><td>9346 行，PackageParser.java 内只此一处（全仓另有 5 个调用点）</td></tr><tr><td>方案分派</td><td><code>frameworks/base/core/java/android/util/apk/ApkSignatureVerifier.java</code></td><td>按 <code>minSignatureScheme</code> 选验证器</td><td>官方入口，家族调度</td></tr><tr><td>签名详情模型</td><td><code>frameworks/base/core/java/android/content/pm/SigningDetails.java</code></td><td><code>SIGNING_BLOCK_V2</code>/<code>V3</code>/<code>V4</code>（:59-61）、<code>isV32Hybrid()</code>、<code>isPqcSigned()</code>、<code>mergeLineageWith(...)</code></td><td>1279 行，含血统合并</td></tr><tr><td>v2 验证</td><td><code>frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV2Verifier.java</code></td><td><code>APK_SIGNATURE_SCHEME_V2_BLOCK_ID</code>（:75）</td><td>block id 定位</td></tr><tr><td>v3 验证与轮转</td><td><code>frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java</code></td><td><code>verifyProofOfRotationStruct</code>、<code>mOptionalRotationMinSdkVersion</code>（:201）、<code>VerifiedProofOfRotation por</code>（:631）、<code>:654</code></td><td>轮转链解析主战场</td></tr><tr><td>签名块读写</td><td><code>frameworks/base/core/java/android/util/apk/ApkSigningBlockUtils.java</code></td><td>两个魔数常量（:726-727）</td><td>块定位与结构</td></tr><tr><td>v4 签名读取</td><td><code>frameworks/base/core/java/android/util/apk/ApkSignatureSchemeV4Verifier.java</code></td><td><code>extractSignature</code>(:76)、<code>V4Signature.EXT</code>(=<code>.idsig</code>)、<code>getFsverityDigest</code>(:115)</td><td><strong>签名在 APK 旁的 `.idsig`，不在 APK 内</strong>；与 v2/v3 的 verity 树无关</td></tr><tr><td>v2/v3 的 verity 树</td><td><code>frameworks/base/core/java/android/util/apk/VerityBuilder.java</code></td><td><code>generateApkVerity</code>（V2:416、V3:1064）、<code>generateApkVerityTree</code>（<code>ApkSigningBlockUtils:380</code>）</td><td>服务 v2/v3，不服务 v4</td></tr><tr><td>v1 兜底</td><td><code>frameworks/base/core/java/android/util/jar/StrictJarVerifier.java</code></td><td>JAR 逐条目校验</td><td>559 行</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/base:94b4c163b7df</p></blockquote>
+<p>验证方式：静态源码分析。</p>
+<pre><code class="lang-bash">cd frameworks/base
+wc -l core/java/android/content/pm/PackageParser.java
+# 期望 9346</code></pre>
+<pre><code class="lang-bash">grep -n &quot;ApkSignatureVerifier.verify&quot; core/java/android/content/pm/PackageParser.java
+# 期望命中 :1425</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;SIGNING_BLOCK_V&quot; core/java/android/content/pm/SigningDetails.java
+# 期望在 :59-61 命中 V2/V3/V4 三个枚举</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;APK_SIG_BLOCK_MAGIC&quot; core/java/android/util/apk/ApkSigningBlockUtils.java
+# 期望 :726-727 两个魔数常量</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;BLOCK_ID = 0x&quot; core/java/android/util/apk/ApkSignatureSchemeV2Verifier.java \
+  core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java
+# 期望 V2 :75 一个、V3 :78-80 三个</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<pre><code class="lang-bash">grep -n &quot;verifyProofOfRotationStruct\|mOptionalRotationMinSdkVersion\|SecurityException&quot; \
+  core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java
+# 期望 import :31、:201 声明、:358-363 保存、:631 por、:654 抛异常
+
+# 轮转防剥离：v3.0 块附加属性 ↔ v3.1 signer 块 minSdkVersion 的比对
+grep -n &quot;ROTATION_MIN_SDK_VERSION_ATTR_ID\|but a v3.1 block was not found\|was targeting&quot; \
+  core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java
+# 期望 :622 常量、:699 case、:708-711 缺块报错、:713-718 不等报错
+
+# v4：签名不在 APK 内，而在 APK 旁的 .idsig
+grep -n &quot;extractSignature\|unsafeGetFileSignature\|V4Signature.EXT\|getFsverityDigest&quot; \
+  core/java/android/util/apk/ApkSignatureSchemeV4Verifier.java
+grep -rn &quot;String EXT&quot; core/java/android/os/incremental/V4Signature.java
+# 期望前者 :76/:85/:97/:115，后者得 EXT = &quot;.idsig&quot;
+
+# 换钥能继承什么由能力位决定
+grep -n &quot;CertCapabilities\|hasCertificateInternal\|hasPastSigningCertificates\|hasAncestor&quot; \
+  core/java/android/content/pm/SigningDetails.java | head
+# 期望 :108-127 能力位、:588 hasAncestor、:933/:944 按位比对</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>行号是&quot;怎么找&quot;的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一</strong>：<code>v2</code> 存在后 <code>v1</code> 就没用了。错。两者验证对象不同，老包与需要 JAR 语义的场景仍走 <code>StrictJarVerifier</code>；<code>v1</code> 到 <code>v4</code> 是并行机制。</p>
+<p><strong>误区二</strong>：<code>v4</code> 签名打在 APK 文件里。错。<code>v4</code> 落在 APK 旁独立的 <code>.idsig</code> 文件（<code>V4Signature.EXT = &quot;.idsig&quot;</code>），由 <code>ApkSignatureSchemeV4Verifier.extractSignature</code> 读取，并与 IncFS／fs-verity 的摘要做一致性检查；<code>VerityBuilder.java</code> 生成的是 v2/v3 的 verity 树，与 v4 无关。</p>
+<p><strong>误区三（看起来对其实是错的）</strong>：轮转后旧证书就作废了，且换钥后一律能继承原应用的数据与权限。前半错、后半也错。<code>mergeLineageWith(...)</code> 确实把祖先证书链并进 <code>SigningDetails</code>，旧证书作为血统成员保留；但继承什么由 <code>CertCapabilities</code>（<code>SigningDetails.java:108-127</code>）的五个能力位决定，查询侧按位比对（:944），能继承数据、共享 UID、签名级权限、回滚、鉴权是五件分开的事。另外血统只在旧包<strong>单签名</strong>时才成立（:588、:938）。</p>
+<p><strong>误区四</strong>：一个 APK 可以带多条轮转记录以便回退。错，且要分清口径：上限是<strong>每个 signer 的附加属性里至多一条 PoR</strong>（:650 判定、:654 抛出），不是「一个包一条」——v3.2 允许 exactly two signers（:898），双签名的包里可以各有一条。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：<code>rotationMinSdkVersion</code> 到底谁在读？<strong>答</strong>：两处、两个用途，别混。它作为 v3.0 块附加属性被读（<code>ROTATION_MIN_SDK_VERSION_ATTR_ID = 0x559f8b02</code>，:699 case、:706 取值）；比对对象是 v3.1 signer 块的 <code>minSdkVersion</code>（:358-363 存进 <code>mOptionalRotationMinSdkVersion</code>、:201 声明处），:713-718 做相等性比对，:708-711 在缺 v3.1 块时直接报错。<strong>追问</strong>：这机制防的是什么？<strong>答</strong>：防剥离——不让只认 v3.0 基本字段的旧解析器靠「看不见 v3.1 块」绕过轮转约束，而不是用来声明「从哪个 SDK 起换新钥」。</p>
+<p><strong>问</strong>：<code>skipVerify</code> 是不是等于不验签？<strong>答</strong>：它走 <code>unsafeGetCertsWithoutVerification</code>，确实不执行签名验证，但只用于已装包的内部重扫（<code>:1420-1424</code>）。<strong>追问</strong>：普通安装会走这条吗？<strong>答</strong>：不会，普通安装走 <code>:1425</code> 的 <code>ApkSignatureVerifier.verify</code>。</p>
+<p><strong>问</strong>：<code>isPqcSigned()</code> 与 <code>isV32Hybrid()</code> 什么关系？<strong>答</strong>：两者都在 <code>SigningDetails.java</code>，用于识别后量子混合签名形态；<code>v3.2</code> 的增量块 id <code>0x70e1c89f</code> 是其载体。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>安装报签名不一致</td><td><code>grep -n &quot;mergeLineageWith&quot; core/java/android/content/pm/SigningDetails.java</code></td><td>血统合并是否被调用</td><td>查新包 <code>v3</code> 块是否含 <code>por</code></td></tr><tr><td>换钥后旧系统装不上</td><td><code>grep -n &quot;mOptionalRotationMinSdkVersion&quot; core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java</code></td><td>字段解析分支</td><td>核 <code>rotationMinSdkVersion</code> 是否被旧解析器忽略</td></tr><tr><td>签名字节校验失败</td><td><code>grep -n &quot;APK_SIG_BLOCK_MAGIC&quot; core/java/android/util/apk/ApkSigningBlockUtils.java</code></td><td>魔数位置</td><td>确认签名块未被重打包工具破坏</td></tr><tr><td>多记录异常</td><td><code>grep -n &quot;SecurityException&quot; core/java/android/util/apk/ApkSignatureSchemeV3Verifier.java</code></td><td><code>:654</code> 抛点</td><td>检查 <code>v3</code> 块是否被塞入第二条轮转记录</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<p><strong>本篇不覆盖</strong>：PMS 安装主流程归 <code>AND-P2-203</code>；APEX 签名形态归 <code>AND-P9-302</code>；签名服务端工具链只作路径索引，不讲实现。</p>
+<p><strong>本篇前置依赖</strong>：<code>AND-P2-203</code>。</p>
+<p><strong>本篇后继</strong>：<code>AND-P9-302</code>。</p>
+<p><strong>数量级与边界值</strong>：</p>
+<ul><li><code>PackageParser.java</code> 9346 行（源码行数，<code>wc -l</code> 实测）。</li><li><code>SigningDetails.java</code> 1279 行（源码行数，<code>wc -l</code> 实测）。</li><li><code>StrictJarVerifier.java</code> 559 行（源码行数，<code>wc -l</code> 实测）。</li><li>block id 为 32 位常量，<code>v2</code> 至 <code>v3.2</code> 共 4 个（源码常量）。</li><li>PoR 记录上限为<strong>每个 signer 至多 1 条</strong>，多则抛 <code>SecurityException</code>（:648 判定、:654 抛出）；v3.2 支持 exactly two signers（:898），故「一个包一条」的说法在双签名下不成立。</li></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>v3</code> 初版</td><td>引入 Proof-of-rotation 结构</td><td>支持换钥；初版是否解析 <code>rotationMinSdkVersion</code> 无历史树实证（本树仅 android17-release 可核），列为待补</td></tr><tr><td><code>v3.1</code></td><td>signer 块的 <code>minSdkVersion</code> 被保存（:358-363），与 v3.0 块附加属性里的 <code>rotationMinSdkVersion</code>（:622/:699/:706）在 :713-718 比对</td><td>防 v3.1 块被剥离，而非「按 SDK 切换生效钥」</td></tr><tr><td><code>v3.2</code></td><td>增量块 <code>APK_SIGNATURE_SCHEME_V32_BLOCK_ID</code> = <code>0x70e1c89f</code>，<code>isV32Hybrid()</code>/<code>isPqcSigned()</code></td><td>承载后量子混合签名</td></tr><tr><td><code>android17-release</code>（本树实测）</td><td><code>V2</code>/<code>V3</code>/<code>V31</code>/<code>V32</code> 四个 block id 并存，<code>SigningDetails</code> 三枚举齐全</td><td>四方案并行验证，血统合并可用</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>apk signature scheme v2</code>、<code>apk signature scheme v3</code>、<code>apk signature scheme v4</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>ApkSignatureSchemeV3Verifier</code>、<code>Proof-of-rotation</code>。</li><li>本仓关键路径：<code>frameworks/base/core/java/android/util/apk/</code>、<code>frameworks/base/core/java/android/content/pm/SigningDetails.java</code>、<code>frameworks/base/core/java/android/util/jar/StrictJarVerifier.java</code>。</li><li>承接篇：<code>AND-P2-203</code>、<code>AND-P9-302</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P9-301 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>

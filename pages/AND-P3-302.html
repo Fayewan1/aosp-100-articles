@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Native 侧 Binder：libbinder 与 Bn/Bp 的对应关系</title>
+<style>
+:root { --fg:#24292f; --muted:#57606a; --line:#d0d7de; --accent:#0969da; --bg:#ffffff; --code-bg:#f6f8fa; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px; line-height:1.75; }
+.wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+header.meta { border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; }
+header.meta h1 { font-size:26px; line-height:1.4; margin:0 0 8px; }
+.kv { color:var(--muted); font-size:13px; }
+.kv span { margin-right:14px; white-space:nowrap; }
+nav.toc { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 16px; margin:0 0 28px; font-size:14px; }
+nav.toc ul { margin:4px 0 0; padding-left:20px; }
+nav.toc a { color:var(--accent); text-decoration:none; }
+h2 { font-size:21px; margin:34px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+h3 { font-size:18px; margin:26px 0 10px; }
+h4,h5,h6 { font-size:16px; margin:20px 0 8px; }
+p { margin:0 0 14px; }
+pre { background:var(--code-bg); border:1px solid var(--line); border-radius:6px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+pre code { font-family:inherit; background:none; padding:0; }
+code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font-size:0.92em;
+  font-family:Menlo,Consolas,"Liberation Mono",monospace; }
+table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; display:block; overflow-x:auto; }
+th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); }
+blockquote { margin:14px 0; padding:6px 14px; border-left:3px solid var(--line); color:var(--muted); }
+blockquote p { margin:6px 0; }
+hr { border:none; border-top:1px solid var(--line); margin:26px 0; }
+a { color:var(--accent); }
+ul,ol { padding-left:26px; margin:0 0 14px; }
+li { margin:4px 0; }
+.paths { font-size:13px; color:var(--muted); }
+footer { margin-top:48px; padding-top:14px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="meta">
+<h1>Native 侧 Binder：libbinder 与 Bn/Bp 的对应关系</h1>
+<div class="kv"><span>ID：AND-P3-302</span><span>卷：P3</span><span>章：3.3</span><span>难度：4</span><span>核验：2026-10-17</span><span>锚点：android17-release</span></div>
+<p class="paths">AOSP 路径：frameworks/native/libs/binder/ProcessState.cpp ；frameworks/native/libs/binder/IPCThreadState.cpp ；frameworks/native/libs/binder/include/binder/IBinder.h ；frameworks/native/libs/binder/include/binder/IInterface.h ；frameworks/native/libs/binder/IServiceManager.cpp ；frameworks/native/libs/binder/Parcel.cpp ；frameworks/base/core/jni/android_util_Binder.cpp ；frameworks/native/cmds/servicemanager/ServiceManager.cpp</p>
+</header>
+<nav class="toc"><strong>目录</strong><ul><li style="margin-left:-14px"><a href="#h1-1-tl-dr">1. TL;DR</a></li><li style="margin-left:-14px"><a href="#h2-2-阅读前置">2. 阅读前置</a></li><li style="margin-left:-14px"><a href="#h3-3-问题背景">3. 问题背景</a></li><li style="margin-left:-14px"><a href="#h4-4-核心机制">4. 核心机制</a></li><li style="margin-left:0px"><a href="#h5-4-1-概念与关系">4.1 概念与关系</a></li><li style="margin-left:0px"><a href="#h6-4-2-关键内容">4.2 关键内容</a></li><li style="margin-left:0px"><a href="#h7-4-3-一个具体例子">4.3 一个具体例子</a></li><li style="margin-left:0px"><a href="#h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</a></li><li style="margin-left:-14px"><a href="#h9-5-源码路径全景">5. 源码路径全景</a></li><li style="margin-left:-14px"><a href="#h10-6-可验证实验">6. 可验证实验</a></li><li style="margin-left:-14px"><a href="#h11-7-常见问题与误区">7. 常见问题与误区</a></li><li style="margin-left:0px"><a href="#h12-7-1-误区">7.1 误区</a></li><li style="margin-left:0px"><a href="#h13-7-2-高频提问">7.2 高频提问</a></li><li style="margin-left:0px"><a href="#h14-7-3-排障清单">7.3 排障清单</a></li><li style="margin-left:-14px"><a href="#h15-8-边界与延伸">8. 边界与延伸</a></li><li style="margin-left:-14px"><a href="#h16-9-版本差异">9. 版本差异</a></li><li style="margin-left:-14px"><a href="#h17-10-延伸阅读">10. 延伸阅读</a></li></ul></nav>
+<article>
+<h1 id="h1-1-tl-dr">1. TL;DR</h1>
+<p>Native 侧的 Binder 由 <code>libbinder</code> 提供，核心是一对「本地实现 / 远程代理」：服务端继承 <code>BBinder</code>，客户端持 <code>BpBinder</code>。抽象接口由 <code>IInterface</code> 派生，<code>DECLARE_META_INTERFACE</code> 生成的 <code>asInterface</code> 决定返回本地实现还是代理。AIDL 生成代码在 Native 侧把这层对应固化为 <code>BnInterface</code>/<code>BpInterface</code> 模板。Java 的 <code>Binder</code>/<code>BinderProxy</code> 通过 <code>android_util_Binder.cpp</code> 的注册落到同一个 <code>ProcessState</code>/<code>IPCThreadState</code>，所以 Java 服务与 Native 服务共享同一套线程池与 mmap 区。跨进程传递时，强引用对象在 Parcel 中落为 <code>flat_binder_object</code>，按 <code>BINDER_TYPE_BINDER</code> 与 <code>BINDER_TYPE_HANDLE</code> 区分本地对象与远程句柄。</p>
+<h1 id="h2-2-阅读前置">2. 阅读前置</h1>
+<blockquote><p>速览：路径 A 只读 §1、§7｜路径 B 全读</p></blockquote>
+<ul><li><strong>建议先读</strong>：<code>AND-P2-101</code>。框架侧的事务语义与调用链在那一篇，本篇只讲 Native 类族与对应关系，不重讲往返过程。</li><li><strong>涉及源码</strong>：</li><ul class="nested"><li><code>frameworks/native/libs/binder/ProcessState.cpp</code></li><li><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></li><li><code>frameworks/native/libs/binder/include/binder/IBinder.h</code></li><li><code>frameworks/native/libs/binder/include/binder/IInterface.h</code></li><li><code>frameworks/native/libs/binder/IServiceManager.cpp</code></li><li><code>frameworks/native/libs/binder/Parcel.cpp</code></li><li><code>frameworks/base/core/jni/android_util_Binder.cpp</code></li><li><code>frameworks/native/cmds/servicemanager/ServiceManager.cpp</code></li></ul><li><strong>环境要求</strong>：一份 AOSP 源码树（任意近版本均可，本篇结论按 <code>android17-release</code> 核实）；能跑 <code>git log</code>/<code>grep</code>。不需要编译，不需要真机（验证方式为静态源码分析）。</li></ul>
+<h1 id="h3-3-问题背景">3. 问题背景</h1>
+<p>写一个 Native daemon，注册成系统服务，Java 侧 <code>ServiceManager.getService()</code> 能拿到代理并调通；但想反过来在 Java 里实现一个 <code>Binder</code> 子类、让 Native 客户端调，就会卡住：不知道该让 Native 侧持有什么类型，也不知道 <code>asInterface</code> 什么时候返回本地对象、什么时候返回代理。更常见的困惑是：AIDL 生成的 <code>.cpp</code> 里出现 <code>BnFoo</code>、<code>BpFoo</code>，而手写代码里只有 <code>BBinder</code>、<code>BpBinder</code>，这两组名字是什么关系，是否能互相替代。本篇把这些名字放回 <code>libbinder</code> 的类层次里逐一对应。</p>
+<h1 id="h4-4-核心机制">4. 核心机制</h1>
+<h2 id="h5-4-1-概念与关系">4.1 概念与关系</h2>
+<p>五个概念构成两条继承线与一个粘合点：</p>
+<ul><li><code>IBinder</code>：事务能力的最小抽象，只关心 <code>transact</code> 一类操作。</li><li><code>BBinder</code>：<code>IBinder</code> 的本地实现基类，服务端对象从这里派生。</li><li><code>BpBinder</code>：<code>IBinder</code> 的远程代理，持有一个 handle，把调用转成对驱动的写入。</li><li><code>IInterface</code>：业务接口抽象，提供 <code>asBinder()</code> 与 <code>onAsBinder()</code>（<code>IInterface.h:28-37</code>）；本地/代理的判定入口 <code>queryLocalInterface</code> 是 <code>IBinder</code> 上的虚函数，<code>BnInterface</code> 在 <code>:72</code> 重写它。</li><li><code>BnInterface</code>/<code>BpInterface</code>：模板，把 <code>IInterface</code> 的某个具体接口与 <code>BBinder</code>/<code>BpBinder</code> 粘在一起。</li></ul>
+<p>图 1：Native 侧类族的两条继承线与粘合点</p>
+<pre><code>        IInterface            IBinder
+            |                    |
+     IFoo (业务接口)        +-----+------+
+            |              |            |
+   +--------+--------+   BBinder     BpBinder
+   |                 |     |            |
+ BnInterface&lt;IFoo&gt; BpInterface&lt;IFoo&gt;  (本地实现)  (远程代理)
+   |                 |
+ BnFoo             BpFoo     &lt;- AIDL 生成</code></pre>
+<p>关键在 <code>asInterface</code>。判定入口 <code>queryLocalInterface</code> 是 <code>IBinder</code> 上的虚函数，服务端模板 <code>BnInterface</code> 在 <code>frameworks/native/libs/binder/include/binder/IInterface.h:72</code> 重写它；<code>DECLARE_META_INTERFACE</code>（同文件 <code>:94</code>）为每个接口生成 <code>asInterface</code> 声明；<code>asInterface</code> 的实现（<code>:128-137</code>）先调 <code>queryLocalInterface(descriptor)</code>，命中就返回本进程内的实现对象，否则回落构造 <code>BpInterface</code> 代理。这一条分支就是「同进程直调、跨进程走代理」在 Native 侧的全部开关。</p>
+<h2 id="h6-4-2-关键内容">4.2 关键内容</h2>
+<p><strong>进程级上下文只有一份。</strong> <code>ProcessState</code> 管 mmap 与线程池，<code>IPCThreadState</code> 管每线程的收发缓冲。<code>BINDER_VM_SIZE = (1 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2</code>（<code>frameworks/native/libs/binder/ProcessState.cpp:48</code>），线程池上限 <code>DEFAULT_MAX_BINDER_THREADS = 15</code>（同文件 <code>:49</code>）。<code>initWithDriver</code>（<code>:111</code>）里执行 <code>mmap(nullptr, BINDER_VM_SIZE, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, ...)</code>（<code>:625</code>）。线程进入循环的入口是 <code>IPCThreadState::joinThreadPool</code>（<code>frameworks/native/libs/binder/IPCThreadState.cpp:841</code>）。</p>
+<p><strong>同族常量集中看。</strong></p>
+<table><thead><tr><th>名称</th><th>含义</th><th>出处</th></tr></thead><tbody><tr><td><code>BINDER_VM_SIZE</code></td><td>每进程 Binder mmap 区大小，1MB 减两页</td><td><code>ProcessState.cpp:48</code></td></tr><tr><td><code>DEFAULT_MAX_BINDER_THREADS</code></td><td>线程池默认上限 15</td><td><code>ProcessState.cpp:49</code></td></tr><tr><td><code>BINDER_TYPE_BINDER</code></td><td>Parcel 中本地 Binder 对象的类型标记</td><td>读侧 <code>acquire_object</code> case：<code>Parcel.cpp:160</code>；写侧 <code>finishFlattenBinder</code> local 分支：<code>:328</code>（另 <code>:333</code> 兜底）</td></tr><tr><td><code>BINDER_TYPE_HANDLE</code></td><td>Parcel 中远程句柄的类型标记</td><td>读侧 <code>acquire_object</code> case：<code>Parcel.cpp:166</code>；写侧 <code>finishFlattenBinder</code> proxy 分支：<code>:303</code></td></tr></tbody></table>
+<p><strong>强引用对象的线上形状。</strong> Parcel 写入 Binder 对象时落为 <code>flat_binder_object</code>，本地对象标 <code>BINDER_TYPE_BINDER</code>，远程代理标 <code>BINDER_TYPE_HANDLE</code>。写侧两分支在 <code>frameworks/native/libs/binder/Parcel.cpp</code> 的 <code>finishFlattenBinder</code>：proxy 走 <code>:303</code> 的 <code>BINDER_TYPE_HANDLE</code>，local 走 <code>:328</code> 的 <code>BINDER_TYPE_BINDER</code>（另 <code>:333</code> 有一处兜底）；读侧对应 <code>acquire_object</code> 的两个 case（<code>:160</code>/<code>:166</code>）。这也是「同一个接口在不同进程里表现为不同类型」的物理原因：接收方看到 handle 就只能造代理。</p>
+<p><strong>服务注册表。</strong> <code>IServiceManager</code> 的三个入口 <code>getService</code>/<code>checkService</code>/<code>addService</code>（<code>frameworks/native/libs/binder/IServiceManager.cpp:97-99</code>），客户端拿单例走 <code>defaultServiceManager</code>（同文件 <code>:333</code>）。服务端那一侧是 <code>ServiceManager</code>（<code>frameworks/native/cmds/servicemanager/ServiceManager.cpp</code>）与 <code>main</code>（<code>main.cpp</code>），访问控制放在 <code>access.cpp</code>。</p>
+<p><strong>Java 与 Native 的互转点。</strong> <code>ibinderForJavaObject</code>（<code>frameworks/base/core/jni/android_util_Binder.cpp:1051</code>）把 Java 对象转成 Native 的 <code>IBinder</code>；反方向的调用路径是 <code>android_os_BinderProxy_transact</code>（同文件 <code>:1644</code>），它在 <code>:1881</code> 处经 <code>transactNative</code> 注册进 JNI 表。注册这件事本身就是证据：Java 的 <code>Binder</code>/<code>BinderProxy</code> 最终都落到同一 <code>ProcessState</code>/<code>IPCThreadState</code>，没有第二套 Native 栈。</p>
+<p>图 2：Java 对象与 Native 对象的对应</p>
+<pre><code>Java Binder      --ibinderForJavaObject--&gt;  BBinder 派生
+Java BinderProxy --transactNative-------&gt;  BpBinder -&gt; transact
+                          |
+                  同一 ProcessState / IPCThreadState</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p><strong>AIDL 生成代码的父类。</strong> 服务端 <code>BnFoo</code> 继承 <code>BnInterface&lt;IFoo&gt;</code>，客户端 <code>BpFoo</code> 继承 <code>BpInterface&lt;IFoo&gt;</code>；<code>BnInterface</code> 模板落到 <code>BBinder</code>，<code>BpInterface</code> 则继承 <code>BpRefBase</code>（<code>IInterface.h:82-84</code>），由其 <code>mRemote</code>（<code>Binder.h:231-248</code>）持有 <code>BpBinder</code>——是组合，不是继承。手写 HAL/daemon 时若不跑 AIDL，就直接继承 <code>BBinder</code> 并自己实现 <code>onTransact</code>，语义等价，只是少了 <code>asInterface</code> 的样板。</p>
+<h2 id="h7-4-3-一个具体例子">4.3 一个具体例子</h2>
+<p>假设 Native 侧实现 <code>IFoo</code>，注册为系统服务。</p>
+<p>服务端：<code>BnFoo</code> 对象由 <code>addService</code> 提交，<code>defaultServiceManager</code>（<code>IServiceManager.cpp:333</code>）返回 <code>IServiceManager</code> 代理，调用落到 servicemanager 进程。注册过程中该对象被写成 <code>BINDER_TYPE_BINDER</code>。</p>
+<p>客户端 A（同进程内拿引用）：<code>asInterface</code> 走 <code>queryLocalInterface(descriptor)</code>（判定入口，<code>BnInterface</code> 在 <code>IInterface.h:72</code> 重写），命中本地对象，直接函数调用，不进驱动。</p>
+<p>客户端 B（另一进程）：<code>getService</code>（<code>IServiceManager.cpp:97-99</code>）返回的 <code>IBinder</code> 是 <code>BpBinder</code>，<code>asInterface</code> 的 <code>queryLocalInterface</code> 落空，按 <code>:128-137</code> 回落 <code>BpInterface</code>，得到 <code>BpFoo</code>。它发起调用时，参数里的 Binder 对象在 Parcel 里记为 <code>BINDER_TYPE_HANDLE</code>。</p>
+<p>服务进程要能收到这次调用，必须已有线程在 <code>joinThreadPool</code>（<code>IPCThreadState.cpp:841</code>）里循环；没有线程进池，调用会挂在驱动侧等不到处理者。这一层的入队与唤醒属驱动侧，本篇不断言细节。</p>
+<h2 id="h8-4-4-与相邻篇的关系">4.4 与相邻篇的关系</h2>
+<ul><li><code>AND-P2-101</code>/<code>AND-P2-102</code>：框架侧的事务往返语义与失败形状，本篇不重复；本篇只给 Native 类族的对应关系。</li><li><code>AND-P5-201</code>：驱动侧的入队与唤醒，本篇在提到「等不到处理者」处止步。</li><li><code>AND-P4</code> 系列：HAL 如何经 Native Binder 被调用，属于 HAL 侧话题。</li><li>与 Java 侧的直接对照，本篇只到 JNI 注册点，不展开 <code>Binder</code> 类的 Java 实现。</li></ul>
+<h1 id="h9-5-源码路径全景">5. 源码路径全景</h1>
+<blockquote><p>本节供源码核验与 L1/L2 对账；路径 A 读者可跳过。</p></blockquote>
+<table><thead><tr><th>用途</th><th>文件路径</th><th>关键符号/内容</th><th>说明</th></tr></thead><tbody><tr><td>进程级上下文</td><td><code>frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>BINDER_VM_SIZE</code>、<code>DEFAULT_MAX_BINDER_THREADS</code>、<code>initWithDriver</code></td><td>mmap 区与线程上限的唯一出处</td></tr><tr><td>线程池入口</td><td><code>frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td><code>joinThreadPool</code></td><td>服务端能收事务的前提</td></tr><tr><td>事务抽象</td><td><code>frameworks/native/libs/binder/include/binder/IBinder.h</code></td><td><code>IBinder</code> 及 <code>BBinder</code> 声明</td><td>本地实现基类所在头文件</td></tr><tr><td>接口判定</td><td><code>frameworks/native/libs/binder/include/binder/IInterface.h</code></td><td><code>queryLocalInterface</code>（<code>BnInterface:72</code> 重写）、<code>DECLARE_META_INTERFACE</code>、<code>asInterface</code></td><td>本地/代理分支点</td></tr><tr><td>服务注册表</td><td><code>frameworks/native/libs/binder/IServiceManager.cpp</code></td><td><code>getService</code>/<code>checkService</code>/<code>addService</code>、<code>defaultServiceManager</code></td><td>客户端取服务的入口</td></tr><tr><td>线上形状</td><td><code>frameworks/native/libs/binder/Parcel.cpp</code></td><td><code>BINDER_TYPE_BINDER</code>/<code>BINDER_TYPE_HANDLE</code></td><td><code>flat_binder_object</code> 的类型标记</td></tr><tr><td>Java↔native</td><td><code>frameworks/base/core/jni/android_util_Binder.cpp</code></td><td><code>ibinderForJavaObject</code>、<code>android_os_BinderProxy_transact</code>、<code>transactNative</code></td><td>两套对象互转与注册</td></tr><tr><td>servicemanager</td><td><code>frameworks/native/cmds/servicemanager/ServiceManager.cpp</code></td><td><code>ServiceManager</code></td><td>注册表的服务端实现</td></tr></tbody></table>
+<h1 id="h10-6-可验证实验">6. 可验证实验</h1>
+<blockquote><p>锚点：frameworks/native:ae266dcb70</p></blockquote>
+<p>验证方式：静态源码分析。行号是「怎么找」的示范，非跨版本承诺；漂移时按符号 grep 重锚。</p>
+<pre><code class="lang-bash">cd frameworks/native/libs/binder
+sed -n '46,52p' ProcessState.cpp</code></pre>
+<p>期望看到 <code>BINDER_VM_SIZE</code> 与 <code>DEFAULT_MAX_BINDER_THREADS</code> 两行相邻定义，对应进程级上下文事实。</p>
+<pre><code class="lang-bash">cd frameworks/native/libs/binder
+grep -n 'mmap(nullptr, BINDER_VM_SIZE' ProcessState.cpp</code></pre>
+<p>期望输出落在 <code>initWithDriver</code> 内的那一处，确认 mmap 长度就是 <code>BINDER_VM_SIZE</code>。</p>
+<pre><code class="lang-bash">cd frameworks/native/libs/binder
+grep -n 'joinThreadPool' IPCThreadState.cpp | head</code></pre>
+<p>期望能看到 <code>IPCThreadState::joinThreadPool</code> 的定义行，即线程池入口。</p>
+<pre><code class="lang-bash">cd frameworks/native/libs/binder
+sed -n '90,96p;126,132p' include/binder/IInterface.h</code></pre>
+<p>期望同时看到 <code>DECLARE_META_INTERFACE</code> 宏与 <code>asInterface</code> 内先 <code>queryLocalInterface</code> 后回落代理的实现。</p>
+<pre><code class="lang-bash">cd frameworks/native/libs/binder
+grep -n 'getService\|checkService\|addService\|defaultServiceManager' IServiceManager.cpp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望三个入口与 <code>defaultServiceManager</code> 同时命中，对应注册表交互事实。</p>
+<pre><code class="lang-bash">cd frameworks/native/libs/binder
+grep -n 'BINDER_TYPE_BINDER\|BINDER_TYPE_HANDLE' Parcel.cpp</code></pre>
+<p>期望看到两处类型标记分别在写本地对象与写远程句柄的分支上。</p>
+<pre><code class="lang-bash">cd frameworks/base/core/jni
+grep -n 'ibinderForJavaObject\|android_os_BinderProxy_transact\|transactNative' android_util_Binder.cpp | head</code></pre>
+<p class="paths">（长代码块，建议到公众号/头条侧按截图策略处理）</p>
+<p>期望看到互转函数、<code>transact</code> 实现与注册行三处命中，对应共享同一进程级 Binder 的论断。</p>
+<h1 id="h11-7-常见问题与误区">7. 常见问题与误区</h1>
+<h2 id="h12-7-1-误区">7.1 误区</h2>
+<p><strong>误区一：`BnFoo` 和 `BBinder` 是两种东西。</strong> 其实是同一条继承线。<code>BnFoo</code> 继承 <code>BnInterface&lt;IFoo&gt;</code>，模板再落到 <code>BBinder</code>；手写代码直接继承 <code>BBinder</code> 与用 <code>BnFoo</code> 的差别只在是否复用 <code>asInterface</code> 样板。</p>
+<p><strong>误区二：`asInterface` 总是返回代理。</strong> 不一定。它先调 <code>queryLocalInterface(descriptor)</code>（<code>BnInterface</code> 在 <code>IInterface.h:72</code> 重写的判定入口），同进程内命中就返回本地对象，调用不经过驱动。只有落空才按 <code>:128-137</code> 回落 <code>BpInterface</code>。这一点的反面正是常见误解：很多人以为「拿到 <code>IFoo</code> 就一定是跨进程」。</p>
+<p><strong>误区三：Java 侧有一份独立的 Native Binder 栈。</strong> 没有。<code>ibinderForJavaObject</code>（<code>android_util_Binder.cpp:1051</code>）与 <code>android_os_BinderProxy_transact</code>（<code>:1644</code>，在 <code>:1881</code> 经 <code>transactNative</code> 注册）都汇入同一 <code>ProcessState</code>/<code>IPCThreadState</code>。进程的 mmap 区与线程池不会因为语言不同变两份。</p>
+<p><strong>误区四：注册了服务就等于能收到调用。</strong> 还要有线程进入 <code>joinThreadPool</code>（<code>IPCThreadState.cpp:841</code>）。线程池上限为 <code>DEFAULT_MAX_BINDER_THREADS = 15</code>（<code>ProcessState.cpp:49</code>），并发高了会排队而不是无限扩线程。</p>
+<h2 id="h13-7-2-高频提问">7.2 高频提问</h2>
+<p><strong>问</strong>：Native 客户端拿到 <code>IBinder</code> 之后，怎么变成具体接口类型？ <strong>答</strong>：调该接口的 <code>asInterface</code>。它先试 <code>queryLocalInterface(descriptor)</code>，命中返回本地实现，否则构造 <code>BpInterface</code> 代理。 <strong>追问</strong>：那我手写接口需要自己写这个方法吗？ <strong>答</strong>：用 <code>DECLARE_META_INTERFACE</code>（<code>IInterface.h:94</code>）声明、按 <code>:128-137</code> 的形状实现即可；跑 AIDL 则由生成代码提供。</p>
+<p><strong>问</strong>：Java 里实现的 <code>Binder</code> 子类，Native 能直接当 <code>BBinder</code> 用吗？ <strong>答</strong>：通过 <code>ibinderForJavaObject</code>（<code>android_util_Binder.cpp:1051</code>）转换得到 Native 的 <code>IBinder</code>，之后按正常 <code>BBinder</code> 语义参与事务。 <strong>追问</strong>：反方向呢？ <strong>答</strong>：Java 侧调用代理走 <code>android_os_BinderProxy_transact</code>（<code>:1644</code>），与 Native 代理最终落到同一套收发路径。</p>
+<p><strong>问</strong>：<code>addService</code> 之后别的进程看到的是什么类型？ <strong>答</strong>：看到 <code>BpBinder</code>，因为跨进程传递时对象被记为 <code>BINDER_TYPE_HANDLE</code>（读侧 case <code>Parcel.cpp:166</code>，写侧 proxy 分支 <code>:303</code>）。 <strong>追问</strong>：同进程内传呢？ <strong>答</strong>：记为 <code>BINDER_TYPE_BINDER</code>（读侧 case <code>:160</code>，写侧 local 分支 <code>:328</code>），<code>asInterface</code> 能命中本地对象。</p>
+<h2 id="h14-7-3-排障清单">7.3 排障清单</h2>
+<table><thead><tr><th>现象</th><th>一条可执行命令</th><th>看什么</th><th>下一步</th></tr></thead><tbody><tr><td>服务已注册，客户端调用无响应</td><td><code>grep -rn 'joinThreadPool' frameworks/native/libs/binder/IPCThreadState.cpp</code></td><td>确认入口符号名与位置</td><td>检查服务进程是否真调了该入口进池</td></tr><tr><td>同进程调用也走代理，性能异常</td><td><code>sed -n '126,138p' frameworks/native/libs/binder/include/binder/IInterface.h</code></td><td><code>queryLocalInterface</code> 是否命中</td><td>检查该接口是否实现了本地查询</td></tr><tr><td>Java 与 Native 对象互转失败</td><td><code>grep -n 'ibinderForJavaObject' frameworks/base/core/jni/android_util_Binder.cpp</code></td><td>转换函数位置与调用点</td><td>核对传入对象是否为 <code>Binder</code> 或 <code>BinderProxy</code></td></tr><tr><td>高并发下事务排队</td><td><code>sed -n '46,52p' frameworks/native/libs/binder/ProcessState.cpp</code></td><td><code>DEFAULT_MAX_BINDER_THREADS</code> 的值</td><td>评估线程池规模是否够用</td></tr><tr><td>服务找不到</td><td><code>grep -n 'defaultServiceManager' frameworks/native/libs/binder/IServiceManager.cpp</code></td><td>单例获取与三个查询入口</td><td>核对服务名与注册时机</td></tr></tbody></table>
+<h1 id="h15-8-边界与延伸">8. 边界与延伸</h1>
+<ul><li><strong>本篇不覆盖</strong>：事务往返与失败形状见 <code>AND-P2-101</code>/<code>AND-P2-102</code>；驱动侧入队与唤醒见 <code>AND-P5-201</code>；HAL 如何经 Native Binder 被调用见 <code>AND-P4</code> 系列。</li><li><strong>本篇前置依赖</strong>：<code>AND-P2-101</code>。</li><li><strong>本篇后继</strong>：<code>AND-P4</code> 系列（HAL 侧调用）、<code>AND-P5-201</code>（驱动侧细节）。</li><li><strong>数量级与边界值</strong>：</li><ul class="nested"><li>每进程 Binder mmap 区为 1MB 减两页，口径为源码常量 <code>BINDER_VM_SIZE</code>（<code>ProcessState.cpp:48</code>）。</li><li>线程池默认上限 15，口径为源码常量 <code>DEFAULT_MAX_BINDER_THREADS</code>（<code>ProcessState.cpp:49</code>）。</li><li>单次事务的数据上限取决于驱动与 mmap 区划分，本篇不断言，列为待补。</li><li><code>flat_binder_object</code> 的字段布局属驱动协议头文件范畴，本篇不列，列为待补。</li></ul></ul>
+<h1 id="h16-9-版本差异">9. 版本差异</h1>
+<table><thead><tr><th>版本</th><th>变化</th><th>影响</th></tr></thead><tbody><tr><td><code>android17-release</code>（本树实测）</td><td><code>BINDER_VM_SIZE</code> 与 <code>DEFAULT_MAX_BINDER_THREADS</code> 两常量位于 <code>ProcessState.cpp:48</code>/<code>:49</code>；<code>joinThreadPool</code> 在 <code>IPCThreadState.cpp:841</code></td><td>本篇所有行号与数值以此为准</td></tr><tr><td>其他近版本</td><td>常量名与关系不变，行号可能漂移</td><td>按符号 grep 重锚即可，结论不依赖行号</td></tr></tbody></table>
+<h1 id="h17-10-延伸阅读">10. 延伸阅读</h1>
+<ul><li>官方文档：source.android.com 站内检索 <code>binder</code>、<code>HIDL</code>、<code>AIDL</code>。</li><li>Gerrit：android-review.googlesource.com 搜 <code>IInterface asInterface</code>、<code>ProcessState BINDER_VM_SIZE</code>。</li><li>本仓关键路径：<code>frameworks/native/libs/binder/include/binder/IInterface.h</code>、<code>frameworks/native/libs/binder/ProcessState.cpp</code>、<code>frameworks/base/core/jni/android_util_Binder.cpp</code>。</li><li>承接篇：<code>AND-P2-101</code>、<code>AND-P5-201</code>。</li></ul>
+</article>
+<footer>android-100 · AND-P3-302 · 由 _tools/publish.py 自动生成（源 MD 为唯一事实源）</footer>
+</div>
+</body>
+</html>
